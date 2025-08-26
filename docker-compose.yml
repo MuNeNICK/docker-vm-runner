@@ -18,7 +18,7 @@ services:
       # Mount only the distro config file to avoid masking the built-in /config
       - ./distros.yaml:/config/distros.yaml:ro
     
-    # VM configuration via environment variables
+    # VM configuration via environment variables (NAT mode)
     environment:
       - DISTRO=${DISTRO:-ubuntu-2404}        # Distribution to use
       - VM_MEMORY=${VM_MEMORY:-4096}         # Memory in MB
@@ -27,15 +27,18 @@ services:
       - VM_DISPLAY=${VM_DISPLAY:-none}       # Display type (none for headless)
       - VM_ARCH=${VM_ARCH:-x86_64}           # Architecture
       - QEMU_CPU=${QEMU_CPU:-host}           # CPU model
-      - VM_PASSWORD=${VM_PASSWORD:-password}   # Console password for default user (cloud-init)
+      - VM_PASSWORD=${VM_PASSWORD:-ubuntu}   # Console password for default user (cloud-init)
+      - VM_SSH_PUBKEY=${VM_SSH_PUBKEY:-}     # Optional SSH public key for cloud-init
       - EXTRA_ARGS=${EXTRA_ARGS:-}           # Additional QEMU arguments
     
     # Keep stdin open and allocate TTY for console access
     stdin_open: true
     tty: true
     
-    # Network configuration
+    # Network configuration (Docker bridge + host port 2222)
     network_mode: bridge
+    ports:
+      - "2222:2222"
     
     # Restart policy
     restart: unless-stopped

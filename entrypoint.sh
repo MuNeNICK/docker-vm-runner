@@ -140,7 +140,12 @@ users:
     passwd: '${PASS_HASH}'
 chpasswd:
   expire: False
+ssh_pwauth: true
 EOF
+    if [ -n "${VM_SSH_PUBKEY}" ]; then
+        echo "ssh_authorized_keys:" >> "${SEED_DIR}/user-data"
+        echo "  - ${VM_SSH_PUBKEY}" >> "${SEED_DIR}/user-data"
+    fi
     cat >"${SEED_DIR}/meta-data" <<EOF
 instance-id: iid-${DISTRO}
 local-hostname: ${DISTRO}
@@ -154,7 +159,8 @@ EOF
         QEMU_ARGS+=("-cdrom" "$SEED_ISO")
     fi
     
-    # Network
+    # Network (NAT with SSH forward :2222)
+    log_info "Network mode: user (NAT with SSH forward :2222)"
     QEMU_ARGS+=("-netdev" "user,id=net0,hostfwd=tcp::2222-:22")
     QEMU_ARGS+=("-device" "virtio-net,netdev=net0")
     

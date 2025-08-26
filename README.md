@@ -48,6 +48,10 @@ DISTRO=fedora-41 VM_MEMORY=2048 VM_CPUS=4 docker compose run --rm qemu
 - `VM_ARCH`: Default `x86_64` — QEMU system architecture.
 - `QEMU_CPU`: Default `host` — CPU model.
 - `VM_PASSWORD`: Default `ubuntu` — console password set via cloud-init.
+- `NET_MODE`: Default `user` — `user` (NAT with hostfwd :2222) or `bridge` (tap on host bridge).
+- `BRIDGE`: Default `br0` — host bridge name when `NET_MODE=bridge`.
+- `TAP_NAME`: Default `qemu-tap0` — tap interface name when `NET_MODE=bridge`.
+- `VM_SSH_PUBKEY`: Optional — SSH public key injected via cloud-init.
 - `EXTRA_ARGS`: Additional QEMU CLI flags.
 
 Cloud-init is always enabled with a minimal NoCloud seed to set the default
@@ -76,8 +80,13 @@ Note: `docker-compose.yml` mounts only `distros.yaml` into
   fall back to TCG (slower) if KVM is unavailable.
 - Unknown distribution: ensure `DISTRO` matches a key in `distros.yaml` and
   that the file is mounted into the container at `/config/distros.yaml`.
- - If input is not accepted, start with `docker compose run --rm qemu`, or
-   use `docker compose up -d` and then `docker attach docker-qemu-vm`.
+ - If input is not accepted, ensure the container has `stdin_open: true` and `tty: true` (compose already sets these), then re-run `docker attach docker-qemu-vm`.
+
+## Networking
+
+- Default (NAT):
+  - Start: `docker compose up -d`
+  - SSH: `ssh -p 2222 <user>@localhost`
 
 ## Requirements
 
