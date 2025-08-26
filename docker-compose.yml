@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  qemu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docker-qemu-vm
+    
+    # Required for KVM acceleration
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+    
+    # Mount images directory
+    volumes:
+      - ./images:/images
+      # Mount only the distro config file to avoid masking the built-in /config
+      - ./distros.yaml:/config/distros.yaml:ro
+    
+    # VM configuration via environment variables
+    environment:
+      - DISTRO=${DISTRO:-ubuntu-2404}        # Distribution to use
+      - VM_MEMORY=${VM_MEMORY:-4096}         # Memory in MB
+      - VM_CPUS=${VM_CPUS:-2}                # Number of CPUs
+      - VM_DISK_SIZE=${VM_DISK_SIZE:-20G}    # Disk size for resizing
+      - VM_DISPLAY=${VM_DISPLAY:-none}       # Display type (none for headless)
+      - VM_ARCH=${VM_ARCH:-x86_64}           # Architecture
+      - QEMU_CPU=${QEMU_CPU:-host}           # CPU model
+      - VM_PASSWORD=${VM_PASSWORD:-password}   # Console password for default user (cloud-init)
+      - EXTRA_ARGS=${EXTRA_ARGS:-}           # Additional QEMU arguments
+    
+    # Keep stdin open and allocate TTY for console access
+    stdin_open: true
+    tty: true
+    
+    # Network configuration
+    network_mode: bridge
+    
+    # Restart policy
+    restart: unless-stopped

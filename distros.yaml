@@ -1,0 +1,96 @@
+# Docker-QEMU Distribution Configuration
+# Each distribution contains URL, default user, and optional settings
+
+distributions:
+  # Ubuntu
+  ubuntu-2404:
+    name: "Ubuntu 24.04 LTS (Noble)"
+    url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    user: ubuntu
+    format: qcow2
+    
+  ubuntu-2204:
+    name: "Ubuntu 22.04 LTS (Jammy)"
+    url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+    user: ubuntu
+    format: qcow2
+    
+  ubuntu-2004:
+    name: "Ubuntu 20.04 LTS (Focal)"
+    url: "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
+    user: ubuntu
+    format: qcow2
+
+  # Debian
+  debian-12:
+    name: "Debian 12 (Bookworm)"
+    url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+    user: debian
+    format: qcow2
+    
+  debian-11:
+    name: "Debian 11 (Bullseye)"
+    url: "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
+    user: debian
+    format: qcow2
+
+  # CentOS Stream
+  centos-stream-9:
+    name: "CentOS Stream 9"
+    url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+    user: centos
+    format: qcow2
+
+  # Fedora
+  fedora-41:
+    name: "Fedora 41"
+    url: "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2"
+    user: fedora
+    format: qcow2
+
+  # openSUSE
+  opensuse-leap-155:
+    name: "openSUSE Leap 15.5"
+    url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
+    user: opensuse
+    format: qcow2
+
+  # Rocky Linux
+  rocky-linux-9:
+    name: "Rocky Linux 9"
+    url: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
+    user: rocky
+    format: qcow2
+    
+  rocky-linux-8:
+    name: "Rocky Linux 8"
+    url: "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
+    user: rocky
+    format: qcow2
+
+  # AlmaLinux
+  almalinux-9:
+    name: "AlmaLinux 9"
+    url: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
+    user: almalinux
+    format: qcow2
+    
+  almalinux-8:
+    name: "AlmaLinux 8"
+    url: "https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
+    user: almalinux
+    format: qcow2
+
+  # Arch Linux
+  archlinux:
+    name: "Arch Linux"
+    url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2"
+    user: arch
+    format: qcow2
+
+# Default VM settings (can be overridden by environment variables)
+defaults:
+  memory: 4096      # MB
+  cpus: 2
+  disk_size: 20G
+  network: user     # user, bridge, or none

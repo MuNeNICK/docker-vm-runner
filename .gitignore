@@ -1,0 +1,21 @@
+# Downloaded VM images
+images/*.qcow2
+images/*.img
+images/*.iso
+images/*.vmdk
+images/*.vdi
+
+# Working images
+images/*-work.*
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+.DS_Store
+
+# Docker volumes
+volumes/
+
+# Environment files
+.env
