@@ -196,12 +196,11 @@ set -x
 if [[ $RUN_INTERACTIVE_DIRECT -eq 1 ]]; then
   exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME"
 else
-  # If a controlling TTY exists, reattach stdin to it to enable interaction
   if [[ -r /dev/tty ]]; then
-    echo "[info] No TTY on stdin; reattaching stdin from /dev/tty for interactive session." >&2
+    echo "[info] No TTY on stdin; reattaching stdio to /dev/tty for interactive session." >&2
     DOCKER_ARGS+=( -it )
-    # Reassign stdin from /dev/tty, then exec docker
-    exec </dev/tty
+    # Reattach stdin, stdout, stderr to the controlling terminal
+    exec </dev/tty >/dev/tty 2>&1
     exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME"
   else
     echo "[info] No TTY available; starting without -t (non-interactive)." >&2
