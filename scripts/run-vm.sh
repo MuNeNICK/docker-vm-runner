@@ -115,12 +115,12 @@ DOCKER_ARGS=(
   -p 2222:2222
 )
 
-# Allocate TTY only when the current stdin/stdout are TTYs
+# TTY handling
 if [[ -t 0 && -t 1 ]]; then
   DOCKER_ARGS+=( -it )
+  RUN_INTERACTIVE_DIRECT=1
 else
-  DOCKER_ARGS+=( -i )
-  echo "[info] No TTY detected; running without -t (non-interactive)." >&2
+  RUN_INTERACTIVE_DIRECT=0
 fi
 
 # Pass KVM device if available
@@ -163,4 +163,18 @@ if [[ $# -gt 0 ]]; then
 fi
 
 set -x
-exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME"
+if [[ $RUN_INTERACTIVE_DIRECT -eq 1 ]]; then
+  exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME"
+else
+  # Try to allocate a pseudo-TTY when running via a pipe (curl | bash)
+  if command -v script >/dev/null 2>&1; then
+    echo "[info] No TTY detected; using 'script' to allocate a pseudo-TTY for interactive session." >&2
+    # Build command safely and run through 'script'
+    DOCKER_CMD=(docker run "${DOCKER_ARGS[@]}" -it "$IMAGE_NAME")
+    CMD_STR=$(printf '%q ' "${DOCKER_CMD[@]}")
+    exec script -qec "$CMD_STR" /dev/null
+  else
+    echo "[info] No TTY detected and 'script' is unavailable; starting without -t (non-interactive)." >&2
+    exec docker run "${DOCKER_ARGS[@]}" -i "$IMAGE_NAME"
+  fi
+fi
