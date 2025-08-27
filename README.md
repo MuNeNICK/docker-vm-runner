@@ -6,7 +6,7 @@ launched automatically. Uses KVM when available.
 
 ## Quick Start
 
-Prefer plain docker commands for one-shot runs. The CI publishes an image to GHCR; the helper script pulls that image automatically based on the repo origin. Compose is for persistent usage.
+Prefer plain docker commands for one-shot runs. The CI publishes an image to GHCR; the helper script pulls `ghcr.io/munenick/docker-qemu:latest` by default. Compose is for persistent usage.
 
 ```bash
 # Run (one-shot, ephemeral; enable KVM if available). Uses GHCR image: ghcr.io/munenick/docker-qemu:latest
@@ -53,17 +53,22 @@ docker run --rm -it \
 
 ## Helper Script (optional)
 
-- Default run (ephemeral): `bash scripts/run-vm.sh` (auto-detects GHCR image via git remote; default `ghcr.io/munenick/docker-qemu:latest`)
+- Default run (ephemeral): `bash scripts/run-vm.sh` (uses `ghcr.io/munenick/docker-qemu:latest` by default)
 - Change distro/resources: `DISTRO=debian-12 VM_MEMORY=2048 VM_CPUS=4 bash scripts/run-vm.sh`
 - Persist images: `bash scripts/run-vm.sh --persist`
 - Use local config: `bash scripts/run-vm.sh --use-local-config`
-- Build locally if pull fails: `bash scripts/run-vm.sh --build-local` (tags the built image with the resolved name)
+- Build locally if pull fails: `bash scripts/run-vm.sh --build-local` (tags the built image with `IMAGE_NAME`)
 
 Run directly via curl (no clone):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash
 ```
+
+Preflight checks performed by the script:
+- Docker CLI present and Docker daemon reachable
+- KVM availability and basic permission hinting (`/dev/kvm` readable)
+- Clear errors with next-step guidance if checks fail
 
 Notes:
 - If `/dev/kvm` exists, KVM is enabled automatically; otherwise it falls back to TCG (slower).

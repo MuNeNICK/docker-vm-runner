@@ -6,7 +6,13 @@ set -euo pipefail
 # - Optional --persist mounts ./images for caching/persistence
 # - Optional --use-local-config mounts ./distros.yaml into /config/distros.yaml
 
-IMAGE_NAME=${IMAGE_NAME:-}
+IMAGE_NAME=${IMAGE_NAME:-ghcr.io/munenick/docker-qemu:latest}
+# Docker references must be lowercase; normalize defensively
+IMAGE_NAME_LC=$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+if [[ "$IMAGE_NAME" != "$IMAGE_NAME_LC" ]]; then
+  echo "[info] Normalizing IMAGE_NAME to lowercase: $IMAGE_NAME_LC"
+  IMAGE_NAME="$IMAGE_NAME_LC"
+fi
 CONTAINER_NAME=${CONTAINER_NAME:-docker-qemu-vm}
 PERSIST=0
 USE_LOCAL_CONFIG=0
@@ -27,7 +33,7 @@ Flags:
   --help              Show this help
 
 Examples:
-  # Pull from GHCR (auto) and run Ubuntu (one-shot, ephemeral)
+  # Pull from GHCR and run Ubuntu (one-shot, ephemeral)
   bash scripts/run-vm.sh
 
   # Run Debian with 2GB RAM, 4 vCPUs
@@ -55,27 +61,38 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Derive default image name
-derive_default_image() {
-  # If explicitly provided, use it
-  if [[ -n "${IMAGE_NAME}" ]]; then
-    echo "$IMAGE_NAME"; return
+# Preflight checks
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "[error] Required command not found: $1" >&2
+    exit 1
   fi
-  # Try to detect GitHub owner/repo from git remote
-  local origin
-  origin=$(git config --get remote.origin.url 2>/dev/null || true)
-  # Match HTTPS or SSH formats
-  if [[ "$origin" =~ github.com[:/]+([^/]+)/([^/.]+)(\.git)?$ ]]; then
-    local owner="${BASH_REMATCH[1]}"
-    local repo="${BASH_REMATCH[2]}"
-    echo "ghcr.io/${owner}/${repo}:latest"
-    return
-  fi
-  # Fallback to local tag
-  echo "ghcr.io/munenick/docker-qemu:latest"
 }
 
-IMAGE_NAME=$(derive_default_image)
+check_docker_daemon() {
+  if ! docker info >/dev/null 2>&1; then
+    echo "[error] Cannot talk to Docker daemon. Is Docker running and do you have permissions?" >&2
+    echo "        Try starting Docker, or add your user to the 'docker' group and re-login:" >&2
+    echo "        sudo usermod -aG docker $USER" >&2
+    exit 1
+  fi
+}
+
+check_kvm_access() {
+  if [[ -e /dev/kvm ]]; then
+    if [[ ! -r /dev/kvm ]]; then
+      echo "[warn] /dev/kvm exists but is not readable by $(whoami)." >&2
+      echo "       KVM acceleration may not work. Consider adding your user to the 'kvm' group:" >&2
+      echo "       sudo usermod -aG kvm $USER && newgrp kvm" >&2
+    fi
+  else
+    echo "[warn] /dev/kvm not found. VM will run without KVM (slower)." >&2
+  fi
+}
+
+require_cmd docker
+check_docker_daemon
+check_kvm_access
 
 echo "[info] Using image: $IMAGE_NAME"
 
