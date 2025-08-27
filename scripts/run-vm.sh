@@ -14,13 +14,15 @@ CUSTOM_IMAGE=""
 
 usage() {
   cat <<EOF
-Usage: bash scripts/run-vm.sh [--persist] [--use-local-config] [--] [extra docker args...]
+Usage: bash scripts/run-vm.sh [--cpus <n>] [--memory <MB|GB>] [--persist] [--use-local-config] [--] [extra docker args...]
 
 Environment (forwarded if set):
   DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_ARCH, QEMU_CPU,
   VM_PASSWORD, VM_SSH_PUBKEY, EXTRA_ARGS
 
-Flags:
+ Flags:
+  --cpus, -c <n>      Number of vCPUs (e.g., 4)
+  --memory, -m <sz>   Memory size (e.g., 2048, 2g, 512m)
   --persist           Mount ./images to /images for caching/persistence
   --use-local-config  Mount ./distros.yaml into /config/distros.yaml (read-only)
   --help              Show this help
@@ -30,7 +32,7 @@ Examples:
   bash scripts/run-vm.sh
 
   # Run Debian with 2GB RAM, 4 vCPUs
-  DISTRO=debian-12 VM_MEMORY=2048 VM_CPUS=4 bash scripts/run-vm.sh
+  DISTRO=debian-12 bash scripts/run-vm.sh --memory 2g --cpus 4
 
   # Persist images across runs and use local distros.yaml
   bash scripts/run-vm.sh --persist --use-local-config
@@ -39,6 +41,34 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --cpus|-c)
+      VM_CPUS=${2-}
+      if [[ -z "${VM_CPUS:-}" ]]; then echo "[error] --cpus requires a number" >&2; exit 1; fi
+      shift 2 ;;
+    --memory|-m)
+      MEM_IN=${2-}
+      if [[ -z "${MEM_IN:-}" ]]; then echo "[error] --memory requires a value (e.g., 2048, 2g)" >&2; exit 1; fi
+      # Normalize to MB
+      case "${MEM_IN,,}" in
+        *g|*gb)
+          NUM=${MEM_IN//[!0-9.]/}
+          # Support integer or decimal GB → MB
+          if [[ "$NUM" == *.* ]]; then
+            VM_MEMORY=$(awk -v n="$NUM" 'BEGIN{printf "%d", n*1024}')
+          else
+            VM_MEMORY=$(( NUM * 1024 ))
+          fi
+          ;;
+        *m|*mb)
+          NUM=${MEM_IN//[!0-9]/}
+          VM_MEMORY=$NUM
+          ;;
+        *)
+          # Assume MB when unit omitted
+          VM_MEMORY=$MEM_IN
+          ;;
+      esac
+      shift 2 ;;
     --persist)
       PERSIST=1; shift ;;
     --use-local-config)
@@ -166,15 +196,15 @@ set -x
 if [[ $RUN_INTERACTIVE_DIRECT -eq 1 ]]; then
   exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME"
 else
-  # Try to allocate a pseudo-TTY when running via a pipe (curl | bash)
-  if command -v script >/dev/null 2>&1; then
-    echo "[info] No TTY detected; using 'script' to allocate a pseudo-TTY for interactive session." >&2
-    # Build command safely and run through 'script'
-    DOCKER_CMD=(docker run "${DOCKER_ARGS[@]}" -it "$IMAGE_NAME")
-    CMD_STR=$(printf '%q ' "${DOCKER_CMD[@]}")
-    exec script -qec "$CMD_STR" /dev/null
+  # If a controlling TTY exists, reattach stdin to it to enable interaction
+  if [[ -r /dev/tty ]]; then
+    echo "[info] No TTY on stdin; reattaching stdin from /dev/tty for interactive session." >&2
+    DOCKER_ARGS+=( -it )
+    # Reassign stdin from /dev/tty, then exec docker
+    exec </dev/tty
+    exec docker run "${DOCKER_ARGS[@]}" "$IMAGE_NAME"
   else
-    echo "[info] No TTY detected and 'script' is unavailable; starting without -t (non-interactive)." >&2
+    echo "[info] No TTY available; starting without -t (non-interactive)." >&2
     exec docker run "${DOCKER_ARGS[@]}" -i "$IMAGE_NAME"
   fi
 fi

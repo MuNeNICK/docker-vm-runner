@@ -54,7 +54,7 @@ docker run --rm -it \
 ## Helper Script (optional)
 
 - Default run (ephemeral): `bash scripts/run-vm.sh` (uses `ghcr.io/munenick/docker-qemu:latest` by default)
-- Change distro/resources: `DISTRO=debian-12 VM_MEMORY=2048 VM_CPUS=4 bash scripts/run-vm.sh`
+- Change distro/resources (CLI引数対応): `DISTRO=debian-12 bash scripts/run-vm.sh --memory 2g --cpus 4`
 - Persist images: `bash scripts/run-vm.sh --persist`
 - Use local config: `bash scripts/run-vm.sh --use-local-config`
   
@@ -63,6 +63,12 @@ Run directly via curl (no clone):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash
+
+One-liner with CPU/Memory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash -s -- --memory 2g --cpus 4
+```
 ```
 
 Preflight checks performed by the script:
