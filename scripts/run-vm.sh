@@ -110,11 +110,18 @@ ensure_image
 
 DOCKER_ARGS=(
   --rm
-  -it
   --name "$CONTAINER_NAME"
   --privileged
   -p 2222:2222
 )
+
+# Allocate TTY only when the current stdin/stdout are TTYs
+if [[ -t 0 && -t 1 ]]; then
+  DOCKER_ARGS+=( -it )
+else
+  DOCKER_ARGS+=( -i )
+  echo "[info] No TTY detected; running without -t (non-interactive)." >&2
+fi
 
 # Pass KVM device if available
 if [[ -e /dev/kvm ]]; then
