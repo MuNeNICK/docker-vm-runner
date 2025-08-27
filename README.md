@@ -6,36 +6,36 @@ launched automatically. Uses KVM when available.
 
 ## Quick Start
 
-Prefer plain docker commands for one-shot runs. The CI publishes an image to GHCR; the helper script pulls `ghcr.io/munenick/docker-qemu:latest` by default. Compose is for persistent usage.
+Prefer plain docker commands for one-shot runs. The CI publishes an image to GHCR; the helper script pulls `ghcr.io/munenick/docker-qemu:latest` by default. Compose is for persistent usage. Design principle: 1 VM = 1 container.
 
 ```bash
 # Run (one-shot, ephemeral; enable KVM if available). Uses GHCR image: ghcr.io/munenick/docker-qemu:latest
 docker run --rm -it \
-  --name docker-qemu-vm \
-  --privileged -p 2222:2222 \
+  --name vm1 \
+  -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
   ghcr.io/munenick/docker-qemu:latest
 
 # Run a different distro with custom resources
 docker run --rm -it \
-  --name docker-qemu-vm \
-  --privileged -p 2222:2222 \
+  --name vm1 \
+  -p 2201:2201 \
   --device /dev/kvm:/dev/kvm \
-  -e DISTRO=debian-12 -e VM_MEMORY=2048 -e VM_CPUS=4 \
+  -e DISTRO=debian-12 -e VM_MEMORY=2048 -e VM_CPUS=4 -e VM_SSH_PORT=2201 \
   ghcr.io/munenick/docker-qemu:latest
 
 # Persist images across runs (cache under ./images)
 docker run --rm -it \
-  --name docker-qemu-vm \
-  --privileged -p 2222:2222 \
+  --name vm1 \
+  -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
   -v "$PWD/images:/images" \
   ghcr.io/munenick/docker-qemu:latest
 
 # Use local distros.yaml instead of the baked-in one
 docker run --rm -it \
-  --name docker-qemu-vm \
-  --privileged -p 2222:2222 \
+  --name vm1 \
+  -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
   -v "$PWD/distros.yaml:/config/distros.yaml:ro" \
   ghcr.io/munenick/docker-qemu:latest
@@ -44,12 +44,12 @@ docker run --rm -it \
 ## Usage
 
 - Interactive console in the same terminal. To quit QEMU: press Ctrl+A then X.
-- Alternative start + attach (docker): add `-d` to `docker run` -> `docker attach docker-qemu-vm`
-- Show logs (docker): `docker logs -f docker-qemu-vm`
-- Debug inside the container (docker): `docker exec -it docker-qemu-vm /bin/bash`
-- Alternative start + attach (compose): `docker compose up -d` -> `docker attach docker-qemu-vm`
-- Show logs (compose): `docker compose logs`
-- Debug inside the container (compose): `docker compose exec qemu /bin/bash`
+- Alternative start + attach (docker): add `-d` to `docker run` -> `docker attach vm1`
+- Show logs (docker): `docker logs -f vm1`
+- Debug inside the container (docker): `docker exec -it vm1 /bin/bash`
+- Alternative start + attach (compose): `docker compose up -d` -> `docker attach $(docker compose ps -q vm1)`
+ - Show logs (compose): `docker compose logs vm1`
+ - Debug inside the container (compose): `docker compose exec vm1 /bin/bash`
 
 ## Helper Script
 
@@ -89,6 +89,8 @@ Notes:
 - `VM_ARCH`: Default `x86_64` - QEMU system architecture.
 - `QEMU_CPU`: Default `host` - CPU model.
 - `VM_PASSWORD`: Default `password` - console password set via cloud-init.
+- `VM_SSH_PORT`: Default `2222` - container TCP port forwarded to guest `:22` (QEMU user-mode NAT). Useful when running multiple VMs concurrently.
+- `VM_NAME`: Optional - per-VM name used to create working artifacts (`<name>-work.qcow2`, `<name>-seed.iso`). Defaults to container hostname or `DISTRO`.
 - `NET_MODE`: Default `user` - currently only `user` (NAT with hostfwd :2222) is supported inside the container.
 - `VM_SSH_PUBKEY`: Optional - SSH public key injected via cloud-init.
 - `EXTRA_ARGS`: Additional QEMU CLI flags.
@@ -120,13 +122,13 @@ Note: `docker-compose.yml` mounts only `distros.yaml` into
   fall back to TCG (slower) if KVM is unavailable.
 - Unknown distribution: ensure `DISTRO` matches a key in `distros.yaml` and
   that the file is mounted into the container at `/config/distros.yaml`.
- - If input is not accepted, ensure the container has `stdin_open: true` and `tty: true` (compose already sets these), then re-run `docker attach docker-qemu-vm`.
+ - If input is not accepted, ensure the container has `stdin_open: true` and `tty: true` (compose already sets these), then re-run `docker attach vm1` (for plain docker) or `docker attach $(docker compose ps -q vm1)` (for compose).
 
 ## Networking
 
 - Default (NAT):
   - Start: `docker compose up -d`
-  - SSH: `ssh -p 2222 <user>@localhost`
+  - SSH: `ssh -p $VM_SSH_PORT <user>@localhost` (default 2222)
 
 ## Requirements
 
@@ -136,12 +138,12 @@ Note: `docker-compose.yml` mounts only `distros.yaml` into
 
 ## Compose (persistent)
 
-For long-running or managed lifecycle use cases, use Compose which pulls the published image, mounts `./images`, and sets restart policy.
+For long-running or managed lifecycle use cases, use Compose which pulls the published image, mounts `./images`, and sets restart policy. To run multiple VMs, run multiple containers (1 VM = 1 container) and assign different `VM_SSH_PORT` and `VM_NAME` values.
 
 ```bash
 docker compose up -d
 # Attach interactive console later
-docker attach docker-qemu-vm
+docker attach vm1
 ```
 
 To pre-pull or update the image:

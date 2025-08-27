@@ -141,8 +141,6 @@ ensure_image
 DOCKER_ARGS=(
   --rm
   --name "$CONTAINER_NAME"
-  --privileged
-  -p 2222:2222
 )
 
 # TTY handling
@@ -186,6 +184,10 @@ forward_env() {
 for v in DISTRO VM_MEMORY VM_CPUS VM_DISK_SIZE VM_DISPLAY VM_ARCH QEMU_CPU VM_PASSWORD VM_SSH_PUBKEY EXTRA_ARGS; do
   forward_env "$v"
 done
+
+# SSH port mapping (container and host use the same port)
+SSH_PORT=${VM_SSH_PORT:-2222}
+DOCKER_ARGS+=( -p ${SSH_PORT}:${SSH_PORT} )
 
 # Allow extra docker args after --
 if [[ $# -gt 0 ]]; then

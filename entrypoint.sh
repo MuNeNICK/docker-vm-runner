@@ -45,6 +45,10 @@ main() {
     QEMU_CPU=${QEMU_CPU:-host}
     EXTRA_ARGS=${EXTRA_ARGS:-}
     VM_PASSWORD=${VM_PASSWORD:-password}
+    # SSH port forwarded on the container's user-mode network
+    VM_SSH_PORT=${VM_SSH_PORT:-2222}
+    # VM name for work artifacts (seed/work image). Defaults to container hostname if set, else distro name
+    VM_NAME=${VM_NAME:-${HOSTNAME:-$DISTRO}}
     
     log_info "Docker-QEMU Starting..."
     log_info "Distribution: $DISTRO"
@@ -71,7 +75,8 @@ with open('/config/distros.yaml', 'r') as f:
     
     # Image file path
     IMAGE_FILE="/images/${DISTRO}.${IMAGE_FORMAT}"
-    WORK_IMAGE="/images/${DISTRO}-work.${IMAGE_FORMAT}"
+    # Use VM_NAME for per-VM working artifacts to avoid collisions across containers
+    WORK_IMAGE="/images/${VM_NAME}-work.${IMAGE_FORMAT}"
     
     # Check if image exists or download
     if [ -f "$IMAGE_FILE" ]; then
@@ -121,7 +126,7 @@ with open('/config/distros.yaml', 'r') as f:
         "-smp" "$VM_CPUS"
     )
     
-    SEED_ISO="/images/${DISTRO}-seed.iso"
+    SEED_ISO="/images/${VM_NAME}-seed.iso"
     SEED_DIR=$(mktemp -d)
     PASS_HASH=$(python3 - <<'PY'
 import crypt, os
@@ -160,8 +165,8 @@ EOF
     fi
     
     # Network (NAT with SSH forward :2222)
-    log_info "Network mode: user (NAT with SSH forward :2222)"
-    QEMU_ARGS+=("-netdev" "user,id=net0,hostfwd=tcp::2222-:22")
+    log_info "Network mode: user (NAT with SSH forward :${VM_SSH_PORT})"
+    QEMU_ARGS+=("-netdev" "user,id=net0,hostfwd=tcp::${VM_SSH_PORT}-:22")
     QEMU_ARGS+=("-device" "virtio-net,netdev=net0")
     
     # Display and console configuration

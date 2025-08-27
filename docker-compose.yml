@@ -1,42 +1,94 @@
 version: '3.8'
 
+x-vm-base: &vm_base
+  image: ghcr.io/munenick/docker-qemu:latest
+  # KVM acceleration device
+  devices:
+    - /dev/kvm:/dev/kvm
+
+  # Shared caches/config
+  volumes:
+    - ./images:/images
+    - ./distros.yaml:/config/distros.yaml:ro
+
+  # Base VM config (override per service as needed)
+  environment:
+    - DISTRO=${DISTRO:-ubuntu-2404}
+    - VM_MEMORY=${VM_MEMORY:-4096}
+    - VM_CPUS=${VM_CPUS:-2}
+    - VM_DISK_SIZE=${VM_DISK_SIZE:-20G}
+    - VM_DISPLAY=${VM_DISPLAY:-none}
+    - VM_ARCH=${VM_ARCH:-x86_64}
+    - QEMU_CPU=${QEMU_CPU:-host}
+    - VM_PASSWORD=${VM_PASSWORD:-password}
+    - VM_SSH_PUBKEY=${VM_SSH_PUBKEY:-}
+    # VM_SSH_PORT / VM_NAME are set per VM
+    - EXTRA_ARGS=${EXTRA_ARGS:-}
+
+  # Interactive console
+  stdin_open: true
+  tty: true
+
+  # Bridge with host port mapping
+  network_mode: bridge
+
+  # Restart policy
+  restart: unless-stopped
+
 services:
-  qemu:
-    image: ghcr.io/munenick/docker-qemu:latest
-    container_name: docker-qemu-vm
-    
-    # Required for KVM acceleration
-    privileged: true
-    devices:
-      - /dev/kvm:/dev/kvm
-    
-    # Mount images directory
-    volumes:
-      - ./images:/images
-      # Mount only the distro config file to avoid masking the built-in /config
-      - ./distros.yaml:/config/distros.yaml:ro
-    
-    # VM configuration via environment variables (NAT mode)
+  # VM1 (enabled by default)
+  vm1:
+    <<: *vm_base
     environment:
-      - DISTRO=${DISTRO:-ubuntu-2404}        # Distribution to use
-      - VM_MEMORY=${VM_MEMORY:-4096}         # Memory in MB
-      - VM_CPUS=${VM_CPUS:-2}                # Number of CPUs
-      - VM_DISK_SIZE=${VM_DISK_SIZE:-20G}    # Disk size for resizing
-      - VM_DISPLAY=${VM_DISPLAY:-none}       # Display type (none for headless)
-      - VM_ARCH=${VM_ARCH:-x86_64}           # Architecture
-      - QEMU_CPU=${QEMU_CPU:-host}           # CPU model
-      - VM_PASSWORD=${VM_PASSWORD:-password}     # Console password for default user (cloud-init)
-      - VM_SSH_PUBKEY=${VM_SSH_PUBKEY:-}     # Optional SSH public key for cloud-init
-      - EXTRA_ARGS=${EXTRA_ARGS:-}           # Additional QEMU arguments
-    
-    # Keep stdin open and allocate TTY for console access
-    stdin_open: true
-    tty: true
-    
-    # Network configuration (Docker bridge + host port 2222)
-    network_mode: bridge
+      - DISTRO=${VM1_DISTRO:-ubuntu-2404}
+      - VM_MEMORY=${VM1_MEMORY:-4096}
+      - VM_CPUS=${VM1_CPUS:-2}
+      - VM_DISK_SIZE=${VM1_DISK_SIZE:-20G}
+      - VM_DISPLAY=${VM1_DISPLAY:-none}
+      - VM_ARCH=${VM1_ARCH:-x86_64}
+      - QEMU_CPU=${VM1_QEMU_CPU:-host}
+      - VM_PASSWORD=${VM1_PASSWORD:-password}
+      - VM_SSH_PUBKEY=${VM1_SSH_PUBKEY:-}
+      - VM_SSH_PORT=${VM1_SSH_PORT:-2222}
+      - VM_NAME=${VM1_NAME:-vm1}
+      - EXTRA_ARGS=${VM1_EXTRA_ARGS:-}
     ports:
-      - "2222:2222"
-    
-    # Restart policy
-    restart: unless-stopped
+      - "${VM1_SSH_PORT:-2222}:${VM1_SSH_PORT:-2222}"
+
+  # VM2 (example; uncomment to enable)
+  # vm2:
+  #   <<: *vm_base
+  #   environment:
+  #     - DISTRO=${VM2_DISTRO:-debian-12}
+  #     - VM_MEMORY=${VM2_MEMORY:-4096}
+  #     - VM_CPUS=${VM2_CPUS:-2}
+  #     - VM_DISK_SIZE=${VM2_DISK_SIZE:-20G}
+  #     - VM_DISPLAY=${VM2_DISPLAY:-none}
+  #     - VM_ARCH=${VM2_ARCH:-x86_64}
+  #     - QEMU_CPU=${VM2_QEMU_CPU:-host}
+  #     - VM_PASSWORD=${VM2_PASSWORD:-password}
+  #     - VM_SSH_PUBKEY=${VM2_SSH_PUBKEY:-}
+  #     - VM_SSH_PORT=${VM2_SSH_PORT:-2202}
+  #     - VM_NAME=${VM2_NAME:-vm2}
+  #     - EXTRA_ARGS=${VM2_EXTRA_ARGS:-}
+  #   ports:
+  #     - "${VM2_SSH_PORT:-2202}:${VM2_SSH_PORT:-2202}"
+
+  # VM3 (example; uncomment to enable)
+  # vm3:
+  #   <<: *vm_base
+  #   environment:
+  #     - DISTRO=${VM3_DISTRO:-centos-stream-9}
+  #     - VM_MEMORY=${VM3_MEMORY:-4096}
+  #     - VM_CPUS=${VM3_CPUS:-2}
+  #     - VM_DISK_SIZE=${VM3_DISK_SIZE:-20G}
+  #     - VM_DISPLAY=${VM3_DISPLAY:-none}
+  #     - VM_ARCH=${VM3_ARCH:-x86_64}
+  #     - QEMU_CPU=${VM3_QEMU_CPU:-host}
+  #     - VM_PASSWORD=${VM3_PASSWORD:-password}
+  #     - VM_SSH_PUBKEY=${VM3_SSH_PUBKEY:-}
+  #     - VM_SSH_PORT=${VM3_SSH_PORT:-2203}
+  #     - VM_NAME=${VM3_NAME:-vm3}
+  #     - EXTRA_ARGS=${VM3_EXTRA_ARGS:-}
+  #   ports:
+  #     - "${VM3_SSH_PORT:-2203}:${VM3_SSH_PORT:-2203}"
