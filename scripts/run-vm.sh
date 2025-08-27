@@ -52,7 +52,7 @@ while [[ $# -gt 0 ]]; do
       case "${MEM_IN,,}" in
         *g|*gb)
           NUM=${MEM_IN//[!0-9.]/}
-          # Support integer or decimal GB → MB
+          # Support integer or decimal GB -> MB
           if [[ "$NUM" == *.* ]]; then
             VM_MEMORY=$(awk -v n="$NUM" 'BEGIN{printf "%d", n*1024}')
           else

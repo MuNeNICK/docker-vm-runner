@@ -44,32 +44,19 @@ docker run --rm -it \
 ## Usage
 
 - Interactive console in the same terminal. To quit QEMU: press Ctrl+A then X.
-- Alternative start + attach (docker): add `-d` to `docker run` → `docker attach docker-qemu-vm`
+- Alternative start + attach (docker): add `-d` to `docker run` -> `docker attach docker-qemu-vm`
 - Show logs (docker): `docker logs -f docker-qemu-vm`
 - Debug inside the container (docker): `docker exec -it docker-qemu-vm /bin/bash`
-- Alternative start + attach (compose): `docker compose up -d` → `docker attach docker-qemu-vm`
+- Alternative start + attach (compose): `docker compose up -d` -> `docker attach docker-qemu-vm`
 - Show logs (compose): `docker compose logs`
 - Debug inside the container (compose): `docker compose exec qemu /bin/bash`
 
-## Helper Script (optional)
+## Helper Script
 
-- Default run (ephemeral): `bash scripts/run-vm.sh` (uses `ghcr.io/munenick/docker-qemu:latest` by default)
-- Change distro/resources (CLI引数対応): `DISTRO=debian-12 bash scripts/run-vm.sh --memory 2g --cpus 4`
-- Persist images: `bash scripts/run-vm.sh --persist`
-- Use local config: `bash scripts/run-vm.sh --use-local-config`
-  
-
-Run directly via curl (no clone):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash
-
-One-liner with CPU/Memory:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash -s -- --memory 2g --cpus 4
-```
-```
+- Run via curl (default image):
+  - `curl -fsSL https://raw.github.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash`
+- Run with CPU/Memory:
+  - `curl -fsSL https://raw.github.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash -s -- --memory 2g --cpus 4`
 
 Preflight checks performed by the script:
 - Docker CLI present and Docker daemon reachable
@@ -94,16 +81,16 @@ Notes:
 
 ## Configuration
 
-- `DISTRO`: Default `ubuntu-2404` — distribution key from `distros.yaml`.
-- `VM_MEMORY`: Default `4096` — memory in MB.
-- `VM_CPUS`: Default `2` — number of vCPUs.
-- `VM_DISK_SIZE`: Default `20G` — resize target for the work image.
-- `VM_DISPLAY`: Default `none` — headless mode.
-- `VM_ARCH`: Default `x86_64` — QEMU system architecture.
-- `QEMU_CPU`: Default `host` — CPU model.
-- `VM_PASSWORD`: Default `password` — console password set via cloud-init.
-- `NET_MODE`: Default `user` — currently only `user` (NAT with hostfwd :2222) is supported inside the container.
-- `VM_SSH_PUBKEY`: Optional — SSH public key injected via cloud-init.
+- `DISTRO`: Default `ubuntu-2404` - distribution key from `distros.yaml`.
+- `VM_MEMORY`: Default `4096` - memory in MB.
+- `VM_CPUS`: Default `2` - number of vCPUs.
+- `VM_DISK_SIZE`: Default `20G` - resize target for the work image.
+- `VM_DISPLAY`: Default `none` - headless mode.
+- `VM_ARCH`: Default `x86_64` - QEMU system architecture.
+- `QEMU_CPU`: Default `host` - CPU model.
+- `VM_PASSWORD`: Default `password` - console password set via cloud-init.
+- `NET_MODE`: Default `user` - currently only `user` (NAT with hostfwd :2222) is supported inside the container.
+- `VM_SSH_PUBKEY`: Optional - SSH public key injected via cloud-init.
 - `EXTRA_ARGS`: Additional QEMU CLI flags.
 
 Cloud-init is always enabled with a minimal NoCloud seed to set the default
@@ -115,13 +102,13 @@ user's password for the chosen distribution. Log in on the console using:
 
 ```
 docker-qemu/
-├── Dockerfile          # QEMU container image
-├── docker-compose.yml  # Compose configuration
-├── distros.yaml        # Distribution map (mounted into the container)
-├── entrypoint.sh       # Startup script
-├── scripts/run-vm.sh   # One-shot runner for plain docker
-├── images/             # Cached VM images
-└── README.md
+  Dockerfile           # QEMU container image
+  docker-compose.yml   # Compose configuration
+  distros.yaml         # Distribution map (mounted into the container)
+  entrypoint.sh        # Startup script
+  scripts/run-vm.sh    # One-shot runner for plain docker
+  images/              # Cached VM images
+  README.md
 ```
 
 Note: `docker-compose.yml` mounts only `distros.yaml` into
