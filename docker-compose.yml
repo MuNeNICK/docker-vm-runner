@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   qemu:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/munenick/docker-qemu:latest
     container_name: docker-qemu-vm
     
     # Required for KVM acceleration

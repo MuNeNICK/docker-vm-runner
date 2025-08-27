@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Simple one-shot runner for docker (no compose)
-# - Defaults to ephemeral use (no volume mounts)
+# Simple one-shot runner for Docker
+# - Defaults to ephemeral use
 # - Optional --persist mounts ./images for caching/persistence
 # - Optional --use-local-config mounts ./distros.yaml into /config/distros.yaml
 
-IMAGE_NAME=${IMAGE_NAME:-ghcr.io/munenick/docker-qemu:latest}
-# Docker references must be lowercase; normalize defensively
-IMAGE_NAME_LC=$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-if [[ "$IMAGE_NAME" != "$IMAGE_NAME_LC" ]]; then
-  echo "[info] Normalizing IMAGE_NAME to lowercase: $IMAGE_NAME_LC"
-  IMAGE_NAME="$IMAGE_NAME_LC"
-fi
+IMAGE_NAME="ghcr.io/munenick/docker-qemu:latest"
 CONTAINER_NAME=${CONTAINER_NAME:-docker-qemu-vm}
 PERSIST=0
 USE_LOCAL_CONFIG=0
-BUILD_LOCAL=0
+CUSTOM_IMAGE=""
 
 usage() {
   cat <<EOF
-Usage: bash scripts/run-vm.sh [--persist] [--use-local-config] [--build-local] [--] [extra docker args...]
+Usage: bash scripts/run-vm.sh [--persist] [--use-local-config] [--] [extra docker args...]
 
 Environment (forwarded if set):
   DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_ARCH, QEMU_CPU,
@@ -29,7 +23,6 @@ Environment (forwarded if set):
 Flags:
   --persist           Mount ./images to /images for caching/persistence
   --use-local-config  Mount ./distros.yaml into /config/distros.yaml (read-only)
-  --build-local       Build the image locally if pull fails or image missing
   --help              Show this help
 
 Examples:
@@ -50,8 +43,6 @@ while [[ $# -gt 0 ]]; do
       PERSIST=1; shift ;;
     --use-local-config)
       USE_LOCAL_CONFIG=1; shift ;;
-    --build-local)
-      BUILD_LOCAL=1; shift ;;
     --help|-h)
       usage; exit 0 ;;
     --)
@@ -60,6 +51,10 @@ while [[ $# -gt 0 ]]; do
       break ;;
   esac
 done
+
+# Docker references must be lowercase; normalize defensively
+IMAGE_NAME_LC=$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+IMAGE_NAME="$IMAGE_NAME_LC"
 
 # Preflight checks
 require_cmd() {
@@ -96,7 +91,7 @@ check_kvm_access
 
 echo "[info] Using image: $IMAGE_NAME"
 
-# Ensure image available: prefer pulling from registry; optional local build
+# Ensure image available: pull from registry only
 ensure_image() {
   if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     return
@@ -105,15 +100,10 @@ ensure_image() {
   if docker pull "$IMAGE_NAME"; then
     return
   fi
-  echo "[warn] Failed to pull $IMAGE_NAME"
-  if [[ $BUILD_LOCAL -eq 1 ]]; then
-    echo "[info] Building locally as fallback: $IMAGE_NAME"
-    docker build -t "$IMAGE_NAME" .
-  else
-    echo "[error] Image unavailable and local build not requested."
-    echo "        Pass --build-local to build from the local Dockerfile, or set IMAGE_NAME to an available image."
-    exit 1
-  fi
+  echo "[error] Failed to pull $IMAGE_NAME"
+  echo "        Check network connectivity or authenticate to GHCR:"
+  echo "        echo \$GITHUB_TOKEN | docker login ghcr.io -u munenick --password-stdin" 
+  exit 1
 }
 
 ensure_image
@@ -148,7 +138,7 @@ if [[ $USE_LOCAL_CONFIG -eq 1 ]]; then
   fi
 fi
 
-# Forward known env vars only if set (entrypoint has defaults)
+# Forward known env vars only if set
 forward_env() {
   local var="$1"
   if [[ -n "${!var-}" ]]; then

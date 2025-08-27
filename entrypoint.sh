@@ -164,7 +164,7 @@ EOF
     QEMU_ARGS+=("-netdev" "user,id=net0,hostfwd=tcp::2222-:22")
     QEMU_ARGS+=("-device" "virtio-net,netdev=net0")
     
-    # Display + console configuration (classic behavior)
+    # Display and console configuration
     if [ "$VM_DISPLAY" = "none" ]; then
         QEMU_ARGS+=("-nographic")
         QEMU_ARGS+=("-serial" "mon:stdio")
@@ -185,12 +185,11 @@ EOF
     log_info "  Disk: $VM_DISK_SIZE"
     log_info "Press Ctrl+A X to exit QEMU"
     log_info ""
-    # In classic mode, Ctrl+C is handled by QEMU console (raw)
     log_info "=========================================="
     
     # Replace shell with QEMU (PID 1), so Ctrl+C goes to QEMU
     exec $QEMU_CMD "${QEMU_ARGS[@]}"
 }
 
-# Run main function (QEMU becomes PID 1 via exec)
+# Run main function
 main "$@"

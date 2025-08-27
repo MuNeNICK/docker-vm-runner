@@ -57,7 +57,7 @@ docker run --rm -it \
 - Change distro/resources: `DISTRO=debian-12 VM_MEMORY=2048 VM_CPUS=4 bash scripts/run-vm.sh`
 - Persist images: `bash scripts/run-vm.sh --persist`
 - Use local config: `bash scripts/run-vm.sh --use-local-config`
-- Build locally if pull fails: `bash scripts/run-vm.sh --build-local` (tags the built image with `IMAGE_NAME`)
+  
 
 Run directly via curl (no clone):
 
@@ -143,13 +143,18 @@ Note: `docker-compose.yml` mounts only `distros.yaml` into
 
 ## Compose (persistent)
 
-For long-running or managed lifecycle use cases, use Compose which mounts `./images` and sets restart policy.
+For long-running or managed lifecycle use cases, use Compose which pulls the published image, mounts `./images`, and sets restart policy.
 
 ```bash
-docker compose build
 docker compose up -d
 # Attach interactive console later
 docker attach docker-qemu-vm
+```
+
+To pre-pull or update the image:
+
+```bash
+docker compose pull
 ```
 
 ## CI/CD
