@@ -6,26 +6,69 @@ launched automatically. Uses KVM when available.
 
 ## Quick Start
 
+Prefer plain docker commands for one-shot runs. The CI publishes an image to GHCR; the helper script pulls that image automatically based on the repo origin. Compose is for persistent usage.
+
 ```bash
-# Build the image
-docker compose build
+# Run (one-shot, ephemeral; enable KVM if available). Uses GHCR image: ghcr.io/munenick/docker-qemu:latest
+docker run --rm -it \
+  --name docker-qemu-vm \
+  --privileged -p 2222:2222 \
+  --device /dev/kvm:/dev/kvm \
+  ghcr.io/munenick/docker-qemu:latest
 
-# Start (default: Ubuntu 24.04)
-docker compose run --rm qemu
+# Run a different distro with custom resources
+docker run --rm -it \
+  --name docker-qemu-vm \
+  --privileged -p 2222:2222 \
+  --device /dev/kvm:/dev/kvm \
+  -e DISTRO=debian-12 -e VM_MEMORY=2048 -e VM_CPUS=4 \
+  ghcr.io/munenick/docker-qemu:latest
 
-# Start a different distro
-DISTRO=debian-12 docker compose run --rm qemu
+# Persist images across runs (cache under ./images)
+docker run --rm -it \
+  --name docker-qemu-vm \
+  --privileged -p 2222:2222 \
+  --device /dev/kvm:/dev/kvm \
+  -v "$PWD/images:/images" \
+  ghcr.io/munenick/docker-qemu:latest
 
-# Customize resources
-DISTRO=fedora-41 VM_MEMORY=2048 VM_CPUS=4 docker compose run --rm qemu
+# Use local distros.yaml instead of the baked-in one
+docker run --rm -it \
+  --name docker-qemu-vm \
+  --privileged -p 2222:2222 \
+  --device /dev/kvm:/dev/kvm \
+  -v "$PWD/distros.yaml:/config/distros.yaml:ro" \
+  ghcr.io/munenick/docker-qemu:latest
 ```
 
 ## Usage
 
 - Interactive console in the same terminal. To quit QEMU: press Ctrl+A then X.
-- Alternative start + attach: `docker compose up -d` → `docker attach docker-qemu-vm`
-- Show logs: `docker compose logs`
-- Debug inside the container: `docker compose exec qemu /bin/bash`
+- Alternative start + attach (docker): add `-d` to `docker run` → `docker attach docker-qemu-vm`
+- Show logs (docker): `docker logs -f docker-qemu-vm`
+- Debug inside the container (docker): `docker exec -it docker-qemu-vm /bin/bash`
+- Alternative start + attach (compose): `docker compose up -d` → `docker attach docker-qemu-vm`
+- Show logs (compose): `docker compose logs`
+- Debug inside the container (compose): `docker compose exec qemu /bin/bash`
+
+## Helper Script (optional)
+
+- Default run (ephemeral): `bash scripts/run-vm.sh` (auto-detects GHCR image via git remote; default `ghcr.io/munenick/docker-qemu:latest`)
+- Change distro/resources: `DISTRO=debian-12 VM_MEMORY=2048 VM_CPUS=4 bash scripts/run-vm.sh`
+- Persist images: `bash scripts/run-vm.sh --persist`
+- Use local config: `bash scripts/run-vm.sh --use-local-config`
+- Build locally if pull fails: `bash scripts/run-vm.sh --build-local` (tags the built image with the resolved name)
+
+Run directly via curl (no clone):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash
+```
+
+Notes:
+- If `/dev/kvm` exists, KVM is enabled automatically; otherwise it falls back to TCG (slower).
+- The one-shot flow is ephemeral by default (no volumes). Use `--persist` to cache images in `./images`.
+- If the GHCR image is private, run `echo $GITHUB_TOKEN | docker login ghcr.io -u munenick --password-stdin` or set the image public in GitHub Packages.
 
 ## Supported Distributions (keys)
 
@@ -65,6 +108,7 @@ docker-qemu/
 ├── docker-compose.yml  # Compose configuration
 ├── distros.yaml        # Distribution map (mounted into the container)
 ├── entrypoint.sh       # Startup script
+├── scripts/run-vm.sh   # One-shot runner for plain docker
 ├── images/             # Cached VM images
 └── README.md
 ```
@@ -89,8 +133,24 @@ Note: `docker-compose.yml` mounts only `distros.yaml` into
 ## Requirements
 
 - Docker
-- Docker Compose
 - KVM-capable host (optional, for acceleration)
+- Docker Compose (only for persistent usage)
+
+## Compose (persistent)
+
+For long-running or managed lifecycle use cases, use Compose which mounts `./images` and sets restart policy.
+
+```bash
+docker compose build
+docker compose up -d
+# Attach interactive console later
+docker attach docker-qemu-vm
+```
+
+## CI/CD
+
+- GitHub Actions builds and publishes `ghcr.io/munenick/docker-qemu:latest` on pushes to the default branch and publishes tagged variants on tags.
+- Pull on clients via the helper script or use `IMAGE_NAME=ghcr.io/munenick/docker-qemu:latest` to override.
 
 ## License
 

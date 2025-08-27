@@ -44,7 +44,7 @@ main() {
     VM_ARCH=${VM_ARCH:-x86_64}
     QEMU_CPU=${QEMU_CPU:-host}
     EXTRA_ARGS=${EXTRA_ARGS:-}
-    VM_PASSWORD=${VM_PASSWORD:-ubuntu}
+    VM_PASSWORD=${VM_PASSWORD:-password}
     
     log_info "Docker-QEMU Starting..."
     log_info "Distribution: $DISTRO"
