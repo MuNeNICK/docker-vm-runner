@@ -130,7 +130,7 @@ with open('/config/distros.yaml', 'r') as f:
     SEED_DIR=$(mktemp -d)
     PASS_HASH=$(python3 - <<'PY'
 import crypt, os
-pw = os.environ.get('VM_PASSWORD', 'ubuntu')
+pw = os.environ.get('VM_PASSWORD', 'password')
 salt = "$6$" + os.urandom(8).hex()
 print(crypt.crypt(pw, salt))
 PY
