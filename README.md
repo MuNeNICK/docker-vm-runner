@@ -47,10 +47,8 @@ DISTRO=fedora-41 VM_MEMORY=2048 VM_CPUS=4 docker compose run --rm qemu
 - `VM_DISPLAY`: Default `none` — headless mode.
 - `VM_ARCH`: Default `x86_64` — QEMU system architecture.
 - `QEMU_CPU`: Default `host` — CPU model.
-- `VM_PASSWORD`: Default `ubuntu` — console password set via cloud-init.
-- `NET_MODE`: Default `user` — `user` (NAT with hostfwd :2222) or `bridge` (tap on host bridge).
-- `BRIDGE`: Default `br0` — host bridge name when `NET_MODE=bridge`.
-- `TAP_NAME`: Default `qemu-tap0` — tap interface name when `NET_MODE=bridge`.
+- `VM_PASSWORD`: Default `password` — console password set via cloud-init.
+- `NET_MODE`: Default `user` — currently only `user` (NAT with hostfwd :2222) is supported inside the container.
 - `VM_SSH_PUBKEY`: Optional — SSH public key injected via cloud-init.
 - `EXTRA_ARGS`: Additional QEMU CLI flags.
 

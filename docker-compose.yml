@@ -27,7 +27,7 @@ services:
       - VM_DISPLAY=${VM_DISPLAY:-none}       # Display type (none for headless)
       - VM_ARCH=${VM_ARCH:-x86_64}           # Architecture
       - QEMU_CPU=${QEMU_CPU:-host}           # CPU model
-      - VM_PASSWORD=${VM_PASSWORD:-ubuntu}   # Console password for default user (cloud-init)
+      - VM_PASSWORD=${VM_PASSWORD:-password}     # Console password for default user (cloud-init)
       - VM_SSH_PUBKEY=${VM_SSH_PUBKEY:-}     # Optional SSH public key for cloud-init
       - EXTRA_ARGS=${EXTRA_ARGS:-}           # Additional QEMU arguments
     
