@@ -11,20 +11,24 @@ CONTAINER_NAME=${CONTAINER_NAME:-docker-qemu-vm}
 PERSIST=0
 USE_LOCAL_CONFIG=0
 CUSTOM_IMAGE=""
+NO_CONSOLE=0
+REDFISH_PORT=${REDFISH_PORT:-8443}
 
 usage() {
   cat <<EOF
-Usage: bash scripts/run-vm.sh [--cpus <n>] [--memory <MB|GB>] [--persist] [--use-local-config] [--] [extra docker args...]
+Usage: bash scripts/run-vm.sh [--cpus <n>] [--memory <MB|GB>] [--persist] [--use-local-config] [--no-console] [--] [extra docker args...]
 
 Environment (forwarded if set):
   DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_ARCH, QEMU_CPU,
-  VM_PASSWORD, VM_SSH_PUBKEY, EXTRA_ARGS
+  VM_PASSWORD, VM_SSH_PUBKEY, EXTRA_ARGS, REDFISH_USERNAME, REDFISH_PASSWORD,
+  REDFISH_PORT
 
  Flags:
   --cpus, -c <n>      Number of vCPUs (e.g., 4)
   --memory, -m <sz>   Memory size (e.g., 2048, 2g, 512m)
   --persist           Mount ./images to /images for caching/persistence
   --use-local-config  Mount ./distros.yaml into /config/distros.yaml (read-only)
+  --no-console        Do not attach the local terminal to the VM console
   --help              Show this help
 
 Examples:
@@ -73,6 +77,8 @@ while [[ $# -gt 0 ]]; do
       PERSIST=1; shift ;;
     --use-local-config)
       USE_LOCAL_CONFIG=1; shift ;;
+    --no-console)
+      NO_CONSOLE=1; shift ;;
     --help|-h)
       usage; exit 0 ;;
     --)
@@ -161,7 +167,12 @@ fi
 # Persist images if requested
 if [[ $PERSIST -eq 1 ]]; then
   mkdir -p images
+  mkdir -p images/base
+  mkdir -p images/vms
+  mkdir -p images/state
   DOCKER_ARGS+=( -v "$(pwd)/images:/images" )
+  DOCKER_ARGS+=( -e VM_PERSIST=1 )
+  DOCKER_ARGS+=( -v "$(pwd)/images/state:/var/lib/docker-qemu" )
 fi
 
 # Mount local config if requested
@@ -184,10 +195,19 @@ forward_env() {
 for v in DISTRO VM_MEMORY VM_CPUS VM_DISK_SIZE VM_DISPLAY VM_ARCH QEMU_CPU VM_PASSWORD VM_SSH_PUBKEY EXTRA_ARGS; do
   forward_env "$v"
 done
+for v in REDFISH_USERNAME REDFISH_PASSWORD REDFISH_PORT; do
+  forward_env "$v"
+done
+if [[ $NO_CONSOLE -eq 1 ]]; then
+  DOCKER_ARGS+=( -e VM_NO_CONSOLE=1 )
+fi
 
 # SSH port mapping (container and host use the same port)
 SSH_PORT=${VM_SSH_PORT:-2222}
 DOCKER_ARGS+=( -p ${SSH_PORT}:${SSH_PORT} )
+
+# Redfish port mapping
+DOCKER_ARGS+=( -p ${REDFISH_PORT}:${REDFISH_PORT} )
 
 # Allow extra docker args after --
 if [[ $# -gt 0 ]]; then
