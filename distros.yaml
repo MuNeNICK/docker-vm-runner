@@ -1,4 +1,4 @@
-# Docker-QEMU Distribution Configuration
+# Docker-VM-Runner Distribution Configuration
 # Each distribution contains URL, default user, and optional settings
 
 distributions:

@@ -1,6 +1,6 @@
 # Quick Start
 
-Run lightweight QEMU VMs from the published container image (`ghcr.io/munenick/docker-qemu:latest`). Each container hosts a single VM orchestrated by libvirt and sushy for Redfish management.
+Run lightweight QEMU VMs from the published container image (`ghcr.io/munenick/docker-vm-runner:latest`). Each container hosts a single VM orchestrated by libvirt and sushy for Redfish management.
 
 ## One-Shot, Ephemeral VM
 
@@ -10,7 +10,7 @@ docker run --rm -it \
   --hostname vm1 \
   -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
-  ghcr.io/munenick/docker-qemu:latest
+  ghcr.io/munenick/docker-vm-runner:latest
 ```
 
 - SSH: `ssh -p 2222 <user>@localhost` (user defaults to the image’s `login_user`).
@@ -27,7 +27,7 @@ docker run --rm -it \
   -e MEMORY=2048 \
   -e CPUS=4 \
   -e SSH_PORT=2201 \
-  ghcr.io/munenick/docker-qemu:latest
+  ghcr.io/munenick/docker-vm-runner:latest
 
 ```
 
@@ -43,9 +43,9 @@ docker run --rm -it \
   -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
   -v "$PWD/images:/images" \
-  -v "$PWD/images/state:/var/lib/docker-qemu" \
+  -v "$PWD/images/state:/var/lib/docker-vm-runner" \
   -e PERSIST=1 \
-  ghcr.io/munenick/docker-qemu:latest
+  ghcr.io/munenick/docker-vm-runner:latest
 
 ```
 
@@ -54,7 +54,7 @@ Container storage layout:
 - `/images/base/<distro>.qcow2` — cached cloud images per distro.
 - `/images/vms/<name>/disk.qcow2` — working disk (retained when `PERSIST=1`).
 - `/images/vms/<name>/seed.iso` — regenerated cloud-init seed (only when cloud-init is enabled).
-- `/var/lib/docker-qemu` — management state (Redfish certificates, etc.).
+- `/var/lib/docker-vm-runner` — management state (Redfish certificates, etc.).
 
 ## Console & Logs
 
@@ -73,6 +73,6 @@ docker run --rm -it \
   --device /dev/kvm:/dev/kvm \
   -p 2222:2222 \
   -v "$PWD/distros.yaml:/config/distros.yaml:ro" \
-  ghcr.io/munenick/docker-qemu:latest
+  ghcr.io/munenick/docker-vm-runner:latest
 
 ```

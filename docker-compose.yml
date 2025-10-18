@@ -2,13 +2,13 @@ version: "3.9"
 
 services:
   vm1:
-    image: ${DOCKER_QEMU_IMAGE:-ghcr.io/munenick/docker-qemu:latest}
+    image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
     container_name: ${VM1_NAME:-vm1}
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
       - ./images:/images
-      - ./images/state:/var/lib/docker-qemu
+      - ./images/state:/var/lib/docker-vm-runner
       - ./distros.yaml:/config/distros.yaml:ro
     environment:
       DISTRO: ${VM1_DISTRO:-ubuntu-2404}
@@ -26,7 +26,7 @@ services:
       BOOT_ISO: ${VM1_BOOT_ISO:-}
       BOOT_ORDER: ${VM1_BOOT_ORDER:-hd}
       CLOUD_INIT: ${VM1_CLOUD_INIT:-1}
-      GUEST_PASSWORD: ${VM1_PASSWORD:-password}
+      GUEST_PASSWORD: ${VM1_GUEST_PASSWORD:-password}
       SSH_PORT: ${VM1_SSH_PORT:-2222}
       SSH_PUBKEY: ${VM1_SSH_PUBKEY:-}
       PERSIST: ${VM1_PERSIST:-1}

@@ -28,7 +28,7 @@ RUN pip3 install --no-cache-dir sushy-tools
 
 # Replace libvirt qemu.conf with container-friendly settings
 RUN cat <<'EOF' >/etc/libvirt/qemu.conf
-# docker-qemu libvirt configuration for rootful containers
+# docker-vm-runner libvirt configuration for rootful containers
 user = "root"
 group = "root"
 dynamic_ownership = 0
@@ -45,13 +45,13 @@ EOF
 
 # Create directories for images and configuration
 RUN mkdir -p /images /config
-RUN mkdir -p /opt/docker-qemu
+RUN mkdir -p /opt/docker-vm-runner
 
 # Copy configuration, manager, and entrypoint
 COPY distros.yaml /config/distros.yaml
-COPY app/manager.py /opt/docker-qemu/manager.py
+COPY app/manager.py /opt/docker-vm-runner/manager.py
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh /opt/docker-qemu/manager.py
+RUN chmod +x /entrypoint.sh /opt/docker-vm-runner/manager.py
 
 # Set working directory
 WORKDIR /

@@ -1,6 +1,6 @@
 # Redfish Guide
 
-Docker-QEMU can expose a Redfish-compatible BMC interface via `sushy-emulator`, allowing remote power and boot management of the guest VM. This guide covers enabling the service and performing common operations.
+Docker-VM-Runner can expose a Redfish-compatible BMC interface via `sushy-emulator`, allowing remote power and boot management of the guest VM. This guide covers enabling the service and performing common operations.
 
 ## Enable Redfish
 
@@ -12,11 +12,11 @@ Docker-QEMU can expose a Redfish-compatible BMC interface via `sushy-emulator`, 
      -p 2222:2222 \
      -p 8443:8443 \
      -e REDFISH_ENABLE=1 \
-     ghcr.io/munenick/docker-qemu:latest
+     ghcr.io/munenick/docker-vm-runner:latest
    ```
-2. Optional: persist certificates by bind-mounting `/var/lib/docker-qemu`:
+2. Optional: persist certificates by bind-mounting `/var/lib/docker-vm-runner`:
    ```bash
-   -v "$(pwd)/images/state:/var/lib/docker-qemu"
+   -v "$(pwd)/images/state:/var/lib/docker-vm-runner"
    ```
 3. Optional: override credentials using `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
 
@@ -28,7 +28,7 @@ Set `REDFISH_ENABLE=0` (default) or omit the variable entirely. The service and 
 
 - Base URL: `https://<host>:${REDFISH_PORT:-8443}`
 - Default credentials: `admin` / `password`
-- Trust: self-signed certificate stored under `/var/lib/docker-qemu/certs` (persist it if needed).
+- Trust: self-signed certificate stored under `/var/lib/docker-vm-runner/certs` (persist it if needed).
 
 Example: list systems
 ```bash

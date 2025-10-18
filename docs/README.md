@@ -1,6 +1,6 @@
 # Documentation
 
-This directory collects task-specific guides and reference material for Docker-QEMU.
+This directory collects task-specific guides and reference material for Docker-VM-Runner.
 
 - [Quick Start](quick-start.md) — core `docker run` invocations, persistence, and console usage.
 - [GUI & Installation Media](gui-and-media.md) — enabling noVNC and booting from local ISO/blank disks.

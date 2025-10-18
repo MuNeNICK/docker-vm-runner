@@ -1,4 +1,4 @@
-# Docker-QEMU
+# Docker-VM-Runner
 
 Run lightweight QEMU/KVM virtual machines within Docker. Each container hosts a libvirt-managed VM with optional Redfish control and noVNC console support. Images are pulled automatically from upstream cloud sources or can be supplied locally.
 
@@ -10,11 +10,11 @@ docker run --rm -it \
   --hostname vm1 \
   -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
-  ghcr.io/munenick/docker-qemu:latest
+  ghcr.io/munenick/docker-vm-runner:latest
 ```
 
 - SSH: `ssh -p 2222 <user>@localhost` (user depends on the distro).
-- Redfish (optional): set `REDFISH_ENABLE=1 -p 8443:8443`, then visit `https://localhost:8443` (`admin` / `password`).
+- Optional Redfish API: add `-e REDFISH_ENABLE=1 -p 8443:8443` and visit `https://localhost:8443` (`admin` / `password`).
 
 For persistence, GUI, ISO installs, and compose workflows see the [documentation](docs/README.md) — start with [Quick Start](docs/quick-start.md) for additional `docker run` variants.
 
@@ -36,7 +36,7 @@ For persistence, GUI, ISO installs, and compose workflows see the [documentation
 ## Project Layout
 
 ```
-docker-qemu/
+docker-vm-runner/
   Dockerfile           # QEMU container image
   docker-compose.yml   # Compose configuration
   distros.yaml         # Distribution map (mounted into the container)

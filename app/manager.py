@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Docker-QEMU manager rewritten around libvirt + sushy.
+Docker-VM-Runner manager rewritten around libvirt + sushy.
 Maintains the existing UX (single `docker run` attaches directly to the guest
 console) while provisioning the VM via libvirt and exposing Redfish control
 through sushy-emulator.
@@ -37,7 +37,7 @@ DEFAULT_CONFIG_PATH = Path("/config/distros.yaml")
 IMAGES_DIR = Path("/images")
 BASE_IMAGES_DIR = IMAGES_DIR / "base"
 VM_IMAGES_DIR = IMAGES_DIR / "vms"
-STATE_DIR = Path("/var/lib/docker-qemu")
+STATE_DIR = Path("/var/lib/docker-vm-runner")
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
 
@@ -239,7 +239,7 @@ class ServiceManager:
                 "-out",
                 str(crt),
                 "-subj",
-                "/CN=docker-qemu/O=docker-qemu",
+                "/CN=docker-vm-runner/O=docker-vm-runner",
             ]
         )
 
@@ -304,7 +304,7 @@ class ServiceManager:
         # Ensure landing on / renders the viewer automatically instead of a directory listing.
         index_path = web_root / "index.html"
         if (web_root / "vnc.html").exists():
-            redirect_marker = "<!-- docker-qemu novnc redirect -->"
+            redirect_marker = "<!-- docker-vm-runner novnc redirect -->"
             try:
                 existing = index_path.read_text(encoding="utf-8")
             except FileNotFoundError:
@@ -916,7 +916,7 @@ def run_console(vm_name: str) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Docker-QEMU libvirt manager")
+    parser = argparse.ArgumentParser(description="Docker-VM-Runner libvirt manager")
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
     args = parser.parse_args(argv)
 
