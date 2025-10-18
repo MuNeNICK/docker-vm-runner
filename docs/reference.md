@@ -4,14 +4,16 @@
 
 These map to entries in `distros.yaml` (bind-mount your own file to `/config/distros.yaml` to customize).
 
-- `ubuntu-2404`, `ubuntu-2204`, `ubuntu-2004`
-- `debian-12`, `debian-11`
+- `ubuntu-2404`, `ubuntu-2404-arm64`, `ubuntu-2204`, `ubuntu-2204-arm64`, `ubuntu-2004`
+- `debian-12`, `debian-12-arm64`, `debian-11`
 - `centos-stream-9`
-- `fedora-41`
+- `fedora-41`, `fedora-41-arm64`
 - `opensuse-leap-155`
-- `rocky-linux-9`, `rocky-linux-8`
-- `almalinux-9`, `almalinux-8`
+- `rocky-linux-9`, `rocky-linux-9-arm64`, `rocky-linux-8`
+- `almalinux-9`, `almalinux-9-arm64`, `almalinux-8`
 - `archlinux`
+
+Each entry can declare an `arch` field to set the default architecture for that image. If omitted it defaults to `x86_64`.
 
 ## Environment Variables
 
@@ -28,7 +30,7 @@ These map to entries in `distros.yaml` (bind-mount your own file to `/config/dis
 | `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM (`/images/base/...`). |
 | `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). |
 | `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
-| `ARCH` | `x86_64` | Fixed to `x86_64`; other architectures are not supported in this release. |
+| `ARCH` | `x86_64` | Guest architecture. Accepts `x86_64` (alias `amd64`) or `aarch64` (alias `arm64`). Defaults to the distribution's declared `arch` or `x86_64`. |
 | `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
 | `EXTRA_ARGS` | *(blank)* | Additional QEMU CLI arguments (space-delimited). |
 

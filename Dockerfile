@@ -30,6 +30,8 @@ RUN apt-get update \
         python3-libvirt \
         python3-venv \
         qemu-system-x86 \
+        qemu-system-arm \
+        qemu-efi-aarch64 \
         qemu-utils \
         tini \
         wget \

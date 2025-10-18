@@ -23,7 +23,6 @@ import sys
 import tempfile
 import textwrap
 import time
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -52,6 +51,30 @@ STATE_DIR = Path("/var/lib/docker-vm-runner")
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
 MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
+
+SUPPORTED_ARCHES = {
+    "x86_64": {
+        "machine": "pc",
+        "features": ("acpi", "apic", "pae"),
+        "tcg_fallback": "qemu64",
+    },
+    "aarch64": {
+        "machine": "virt",
+        "features": ("acpi",),
+        "tcg_fallback": "cortex-a72",
+        "firmware": {
+            "loader": Path("/usr/share/AAVMF/AAVMF_CODE.fd"),
+            "vars_template": Path("/usr/share/AAVMF/AAVMF_VARS.fd"),
+        },
+    },
+}
+
+ARCH_ALIASES = {
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "arm64": "aarch64",
+    "aarch64": "aarch64",
+}
 
 
 class ManagerError(RuntimeError):
@@ -607,6 +630,9 @@ class VMManager:
         self.domain: Optional[libvirt.virDomain] = None
         self._kvm_available = kvm_available()
         self._effective_cpu_model = self.cfg.cpu_model
+        self._arch_profile = SUPPORTED_ARCHES[self.cfg.arch]
+        self._firmware_loader_path: Optional[Path] = None
+        self._firmware_vars_path: Optional[Path] = None
         ensure_directory(IMAGES_DIR)
         ensure_directory(BASE_IMAGES_DIR)
         ensure_directory(VM_IMAGES_DIR)
@@ -647,16 +673,22 @@ class VMManager:
             )
             cpu_lower = self.cfg.cpu_model.lower()
             if cpu_lower in {"host", "host-passthrough"}:
-                self._effective_cpu_model = "qemu64"
+                fallback = self._arch_profile.get("tcg_fallback")
+                if not fallback:
+                    raise ManagerError(
+                        f"CPU_MODEL={self.cfg.cpu_model} requires KVM for architecture {self.cfg.arch}."
+                    )
+                self._effective_cpu_model = fallback
                 log(
                     "WARN",
-                    "CPU_MODEL=host is not compatible with TCG. Using qemu64 instead.",
+                    f"CPU_MODEL=host is not compatible with TCG on {self.cfg.arch}. Using {fallback} instead.",
                 )
         if not self.cfg.blank_work_disk:
             self._ensure_base_image()
         self._prepare_work_image()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
+        self._prepare_firmware()
         self._generate_cloud_init()
         self._define_domain()
 
@@ -729,6 +761,33 @@ class VMManager:
                     run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
         else:
             log("INFO", f"Persistent disk retained at {self.work_image}")
+
+    def _prepare_firmware(self) -> None:
+        firmware_cfg = self._arch_profile.get("firmware")
+        if not firmware_cfg:
+            return
+
+        loader_path = Path(firmware_cfg["loader"])
+        vars_template_path = Path(firmware_cfg["vars_template"])
+
+        if not loader_path.exists():
+            raise ManagerError(
+                f"Firmware loader not found at {loader_path} for arch {self.cfg.arch}. Install qemu-efi-aarch64."
+            )
+        if not vars_template_path.exists():
+            raise ManagerError(
+                f"Firmware variable template not found at {vars_template_path} for arch {self.cfg.arch}. "
+                "Install qemu-efi-aarch64."
+            )
+
+        firmware_dir = STATE_DIR / "firmware"
+        ensure_directory(firmware_dir)
+        vars_destination = firmware_dir / f"{self.cfg.vm_name}-vars.fd"
+        if not vars_destination.exists():
+            shutil.copy2(vars_template_path, vars_destination)
+
+        self._firmware_loader_path = loader_path
+        self._firmware_vars_path = vars_destination
 
     def _generate_cloud_init(self) -> None:
         if not self.cfg.cloud_init_enabled:
@@ -804,6 +863,7 @@ class VMManager:
         domain_type = "kvm" if self._kvm_available else "qemu"
         effective_model = self._effective_cpu_model
         host_cpu = self._kvm_available and effective_model.lower() in ("host", "host-passthrough")
+        machine_type = self._arch_profile["machine"]
 
         if host_cpu:
             cpu_xml = "<cpu mode='host-passthrough'/>"
@@ -828,6 +888,22 @@ class VMManager:
             )
 
         boot_order_priority = {dev: idx + 1 for idx, dev in enumerate(self.cfg.boot_order)}
+
+        features = self._arch_profile.get("features", ())
+        features_inner = "\n".join(f"            <{feature}/>" for feature in features)
+        features_block = f"          <features>\n{features_inner}\n          </features>"
+
+        loader_xml = ""
+        if self._arch_profile.get("firmware"):
+            if self._firmware_loader_path is None or self._firmware_vars_path is None:
+                raise ManagerError("Firmware assets not prepared for this architecture.")
+            loader_xml = textwrap.dedent(
+                f"""
+                <loader readonly='yes' secure='no' type='pflash'>{self._firmware_loader_path}</loader>
+                <nvram>{self._firmware_vars_path}</nvram>
+                """
+            ).strip()
+            loader_xml = textwrap.indent(loader_xml, "            ")
 
         network_order = boot_order_priority.get("network")
         network_xml, resolved_mac = render_network_xml(
@@ -882,27 +958,28 @@ class VMManager:
             ).strip()
             boot_iso_xml = textwrap.indent(boot_iso_xml, "            ")
 
-        boot_xml = ""
-
         memory_unit = "MiB"
         disk_boot_attr = ""
         order = boot_order_priority.get("hd")
         if order is not None:
             disk_boot_attr = f"\n              <boot order='{order}'/>"
+
+        os_lines = [
+            f"            <type arch='{self.cfg.arch}' machine='{machine_type}'>hvm</type>",
+        ]
+        if loader_xml:
+            os_lines.append(loader_xml)
+        os_block = "\n".join(os_lines)
+
         xml = f"""
         <domain type='{domain_type}' {qemu_ns}>
           <name>{self.cfg.vm_name}</name>
           <memory unit='{memory_unit}'>{self.cfg.memory_mb}</memory>
           <vcpu placement='static'>{self.cfg.cpus}</vcpu>
           <os>
-            <type arch='{self.cfg.arch}' machine='pc'>hvm</type>
-            {boot_xml}
+{os_block}
           </os>
-          <features>
-            <acpi/>
-            <apic/>
-            <pae/>
-          </features>
+{features_block}
           {cpu_xml}
           <devices>
             <disk type='file' device='disk'>
@@ -1074,10 +1151,39 @@ def parse_env() -> VMConfig:
         boot_order = ["hd"]
 
     cloud_init_enabled = get_env_bool("CLOUD_INIT", True)
-    arch = (get_env("ARCH", "x86_64") or "x86_64").strip()
-    if arch.lower() != "x86_64":
-        raise ManagerError("ARCH must be x86_64 in this release.")
-    arch = "x86_64"
+
+    distro_arch_raw = distro_info.get("arch")
+    arch_env = get_env("ARCH")
+    if arch_env is not None:
+        arch_candidate = arch_env.strip()
+    elif distro_arch_raw:
+        arch_candidate = str(distro_arch_raw).strip()
+    else:
+        arch_candidate = "x86_64"
+    if not arch_candidate:
+        arch_candidate = "x86_64"
+
+    arch_key = ARCH_ALIASES.get(arch_candidate.lower())
+    if arch_key is None:
+        supported = ", ".join(sorted(SUPPORTED_ARCHES.keys()))
+        raise ManagerError(f"Unsupported ARCH '{arch_candidate}'. Supported: {supported}")
+    if arch_key not in SUPPORTED_ARCHES:
+        supported = ", ".join(sorted(SUPPORTED_ARCHES.keys()))
+        raise ManagerError(f"Unsupported ARCH '{arch_candidate}'. Supported: {supported}")
+
+    if distro_arch_raw:
+        distro_arch_key = ARCH_ALIASES.get(str(distro_arch_raw).strip().lower())
+        if distro_arch_key is None or distro_arch_key not in SUPPORTED_ARCHES:
+            raise ManagerError(
+                f"Distribution '{distro}' declares unsupported arch '{distro_arch_raw}'."
+            )
+        if arch_env is not None and distro_arch_key != arch_key:
+            raise ManagerError(
+                f"ARCH='{arch_candidate}' does not match distribution '{distro}' arch '{distro_arch_raw}'."
+            )
+        arch = distro_arch_key
+    else:
+        arch = arch_key
     cpu_model = get_env("CPU_MODEL", "host")
     extra_args = get_env("EXTRA_ARGS", "")
 

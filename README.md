@@ -19,6 +19,7 @@ docker run --rm -it \
 
 - SSH: `ssh -p 2222 <user>@localhost` (user depends on the distro).
 - Optional Redfish API: add `-e REDFISH_ENABLE=1 -p 8443:8443` and visit `https://localhost:8443` (`admin` / `password`).
+- Multi-arch images: published tags target both `linux/amd64` and `linux/arm64`; with host KVM available the guest runs on its native architecture.
 
 For persistence, GUI, ISO installs, and compose workflows see the [documentation](docs/README.md) — start with [Quick Start](docs/quick-start.md) for additional `docker run` variants.
 
