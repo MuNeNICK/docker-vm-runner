@@ -123,7 +123,7 @@ Notes:
 - `VM_DISK_SIZE`: Default `20G` - resize target for the work image.
 - `VM_DISPLAY`: Default `none` - headless mode.
 - `VM_ARCH`: Default `x86_64` - QEMU system architecture.
-- `QEMU_CPU`: Default `host` - CPU model.
+- `VM_CPU_MODEL`: Default `host` - CPU model.
 - `VM_PASSWORD`: Default `password` - console password set via cloud-init.
 - `VM_SSH_PORT`: Default `2222` - container TCP port forwarded to guest `:22` (QEMU user-mode NAT). Useful when running multiple VMs concurrently.
 - `VM_NAME`: Optional - per-VM name used to create working artifacts (`<name>-work.qcow2`, `<name>-seed.iso`). Defaults to container hostname or `DISTRO`.

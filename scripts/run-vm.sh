@@ -19,7 +19,7 @@ usage() {
 Usage: bash scripts/run-vm.sh [--cpus <n>] [--memory <MB|GB>] [--persist] [--use-local-config] [--no-console] [--] [extra docker args...]
 
 Environment (forwarded if set):
-  DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_ARCH, QEMU_CPU,
+  DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_ARCH, VM_CPU_MODEL,
   VM_PASSWORD, VM_SSH_PUBKEY, EXTRA_ARGS, REDFISH_USERNAME, REDFISH_PASSWORD,
   REDFISH_PORT
 
@@ -192,7 +192,7 @@ forward_env() {
   fi
 }
 
-for v in DISTRO VM_MEMORY VM_CPUS VM_DISK_SIZE VM_DISPLAY VM_ARCH QEMU_CPU VM_PASSWORD VM_SSH_PUBKEY EXTRA_ARGS; do
+for v in DISTRO VM_MEMORY VM_CPUS VM_DISK_SIZE VM_DISPLAY VM_ARCH VM_CPU_MODEL VM_PASSWORD VM_SSH_PUBKEY EXTRA_ARGS; do
   forward_env "$v"
 done
 for v in REDFISH_USERNAME REDFISH_PASSWORD REDFISH_PORT; do

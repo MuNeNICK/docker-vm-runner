@@ -596,7 +596,7 @@ def parse_env() -> VMConfig:
     disk_size = os.environ.get("VM_DISK_SIZE", "20G")
     display = os.environ.get("VM_DISPLAY", "none")
     arch = os.environ.get("VM_ARCH", "x86_64")
-    cpu_model = os.environ.get("QEMU_CPU", "host")
+    cpu_model = os.environ.get("VM_CPU_MODEL", "host")
     extra_args = os.environ.get("EXTRA_ARGS", "")
     password = os.environ.get("VM_PASSWORD", "password")
     ssh_port = int(os.environ.get("VM_SSH_PORT", "2222"))

@@ -12,16 +12,16 @@ services:
       - ./distros.yaml:/config/distros.yaml:ro
     environment:
       DISTRO: ${VM1_DISTRO:-ubuntu-2404}
-      VM_MEMORY: ${VM1_MEMORY:-4096}
+      VM_NAME: ${VM1_NAME:-vm1}
+      VM_ARCH: ${VM1_ARCH:-x86_64}
+      VM_CPU_MODEL: ${VM1_CPU_MODEL:-host}
       VM_CPUS: ${VM1_CPUS:-2}
+      VM_MEMORY: ${VM1_MEMORY:-4096}
       VM_DISK_SIZE: ${VM1_DISK_SIZE:-20G}
       VM_DISPLAY: ${VM1_DISPLAY:-none}
-      VM_ARCH: ${VM1_ARCH:-x86_64}
-      QEMU_CPU: ${VM1_QEMU_CPU:-host}
       VM_PASSWORD: ${VM1_PASSWORD:-password}
-      VM_SSH_PUBKEY: ${VM1_SSH_PUBKEY:-}
       VM_SSH_PORT: ${VM1_SSH_PORT:-2222}
-      VM_NAME: ${VM1_NAME:-vm1}
+      VM_SSH_PUBKEY: ${VM1_SSH_PUBKEY:-}
       VM_PERSIST: ${VM1_PERSIST:-1}
       EXTRA_ARGS: ${VM1_EXTRA_ARGS:-}
       REDFISH_USERNAME: ${VM1_REDFISH_USERNAME:-admin}
