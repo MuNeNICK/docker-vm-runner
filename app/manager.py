@@ -89,6 +89,20 @@ def get_env_bool(name: str, default: bool = False) -> bool:
     return raw.lower() in TRUTHY
 
 
+def kvm_available() -> bool:
+    """Return True if /dev/kvm exists and can be opened."""
+    kvm_path = Path("/dev/kvm")
+    if not kvm_path.exists():
+        return False
+    try:
+        fd = os.open(kvm_path, os.O_RDONLY)
+    except OSError:
+        return False
+    else:
+        os.close(fd)
+        return True
+
+
 def has_controlling_tty() -> bool:
     """Return True if both stdin and stdout are attached to a TTY."""
     for stream in (sys.stdin, sys.stdout):
@@ -591,6 +605,8 @@ class VMManager:
         self.service_manager = service_manager
         self.conn: Optional[libvirt.virConnect] = None
         self.domain: Optional[libvirt.virDomain] = None
+        self._kvm_available = kvm_available()
+        self._effective_cpu_model = self.cfg.cpu_model
         ensure_directory(IMAGES_DIR)
         ensure_directory(BASE_IMAGES_DIR)
         ensure_directory(VM_IMAGES_DIR)
@@ -624,6 +640,18 @@ class VMManager:
             self.conn = None
 
     def prepare(self) -> None:
+        if not self._kvm_available:
+            log(
+                "WARN",
+                "KVM device not available; falling back to software emulation (TCG). Performance will be degraded.",
+            )
+            cpu_lower = self.cfg.cpu_model.lower()
+            if cpu_lower in {"host", "host-passthrough"}:
+                self._effective_cpu_model = "qemu64"
+                log(
+                    "WARN",
+                    "CPU_MODEL=host is not compatible with TCG. Using qemu64 instead.",
+                )
         if not self.cfg.blank_work_disk:
             self._ensure_base_image()
         self._prepare_work_image()
@@ -773,7 +801,9 @@ class VMManager:
 
     def _render_domain_xml(self) -> str:
         qemu_ns = "xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'"
-        host_cpu = self.cfg.cpu_model.lower() in ("host", "host-passthrough")
+        domain_type = "kvm" if self._kvm_available else "qemu"
+        effective_model = self._effective_cpu_model
+        host_cpu = self._kvm_available and effective_model.lower() in ("host", "host-passthrough")
 
         if host_cpu:
             cpu_xml = "<cpu mode='host-passthrough'/>"
@@ -781,7 +811,7 @@ class VMManager:
             cpu_xml = textwrap.dedent(
                 f"""
                 <cpu mode='custom' match='exact'>
-                  <model fallback='allow'>{self.cfg.cpu_model}</model>
+                  <model fallback='allow'>{effective_model}</model>
                 </cpu>
                 """
             ).strip()
@@ -858,7 +888,7 @@ class VMManager:
         if order is not None:
             disk_boot_attr = f"\n              <boot order='{order}'/>"
         xml = f"""
-        <domain type='kvm' {qemu_ns}>
+        <domain type='{domain_type}' {qemu_ns}>
           <name>{self.cfg.vm_name}</name>
           <memory unit='{memory_unit}'>{self.cfg.memory_mb}</memory>
           <vcpu placement='static'>{self.cfg.cpus}</vcpu>

@@ -3,7 +3,7 @@
 ## Common Issues
 
 - **KVM unavailable**  
-  Check `/dev/kvm` with `ls -la /dev/kvm`. If it is missing or unreadable, the VM falls back to TCG (slower). Ensure your user has access to the `kvm` group or run with appropriate privileges.
+  Check `/dev/kvm` with `ls -la /dev/kvm`. The container requires hardware virtualization; if the device is missing or unreadable, libvirt fails to start the guest. Ensure the module is loaded and your user has access to the `kvm` group (or run the container with sufficient privileges).
 
 - **Unknown distribution**  
   Verify `DISTRO` matches a key in `distros.yaml` and that the file is available inside the container at `/config/distros.yaml`.
