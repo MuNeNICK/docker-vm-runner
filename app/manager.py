@@ -9,10 +9,10 @@ through sushy-emulator.
 from __future__ import annotations
 
 import argparse
-import crypt
-import bcrypt
+import hashlib
 import os
 import random
+import re
 import shutil
 import signal
 import string
@@ -23,9 +23,22 @@ import textwrap
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-import yaml
+try:
+    import yaml  # type: ignore
+except ImportError:  # pragma: no cover
+    yaml = None
+
+try:
+    import crypt  # type: ignore
+except ImportError:  # pragma: no cover
+    crypt = None
+
+try:
+    import bcrypt  # type: ignore
+except ImportError:  # pragma: no cover
+    bcrypt = None
 
 try:
     import libvirt  # type: ignore
@@ -40,6 +53,7 @@ VM_IMAGES_DIR = IMAGES_DIR / "vms"
 STATE_DIR = Path("/var/lib/docker-vm-runner")
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
+MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
 
 class ManagerError(RuntimeError):
@@ -93,9 +107,117 @@ def random_mac() -> str:
 
 def hash_password(password: str) -> str:
     """Generate a salted SHA512 crypt hash for cloud-init."""
-    salt_charset = string.ascii_letters + string.digits
-    salt = "".join(random.choice(salt_charset) for _ in range(16))
-    return crypt.crypt(password, f"$6${salt}")
+    if crypt is not None:
+        salt_charset = string.ascii_letters + string.digits
+        salt = "".join(random.choice(salt_charset) for _ in range(16))
+        return crypt.crypt(password, f"$6${salt}")
+
+    if bcrypt is None:
+        raise ManagerError("crypt module unavailable and bcrypt not installed; cannot hash password")
+
+    # Fallback for Python builds without the crypt module; cloud-init accepts bcrypt hashes.
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    return hashed.decode("utf-8")
+
+
+def detect_container_id() -> Optional[str]:
+    """Try to extract the container ID from cgroup membership."""
+    cgroup_path = Path("/proc/self/cgroup")
+    try:
+        data = cgroup_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):  # pragma: no cover - unlikely but safe
+        return None
+
+    for line in data.splitlines():
+        parts = line.strip().split(":", 2)
+        if len(parts) != 3:
+            continue
+        path = parts[2]
+        for segment in reversed(path.split("/")):
+            seg = segment.strip().lower()
+            if 12 <= len(seg) <= 64 and all(ch in string.hexdigits for ch in seg):
+                return seg
+    return None
+
+
+def derive_vm_name(distro: str) -> str:
+    explicit = get_env("GUEST_NAME")
+    if explicit:
+        return explicit.strip()
+
+    container_name = os.environ.get("CONTAINER_NAME")
+    if container_name:
+        candidate = container_name.strip()
+        if candidate:
+            return candidate
+
+    container_id = detect_container_id()
+    if container_id:
+        return container_id[:12]
+
+    hostname_env = os.environ.get("HOSTNAME")
+    if hostname_env:
+        candidate = hostname_env.strip()
+        if candidate:
+            return candidate
+
+    return distro
+
+
+def deterministic_mac(seed: str) -> str:
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    octets = [0x52, 0x54, 0x00, digest[0], digest[1], digest[2]]
+    octets[3] = octets[3] | 0x02  # ensure locally administered bit
+    octets[3] = octets[3] & 0xFE  # clear multicast bit
+    return ":".join(f"{octet:02x}" for octet in octets)
+
+
+def render_network_xml(
+    config: NetworkConfig, ssh_port: int, mac_address: Optional[str] = None
+) -> Tuple[str, str]:
+    """Render a libvirt interface definition based on the requested network mode."""
+    mac = (mac_address or config.mac_address or random_mac()).lower()
+
+    if config.mode == "user":
+        body = [
+            "<interface type='user'>",
+            f"  <mac address='{mac}'/>",
+            "  <model type='virtio'/>",
+            "  <protocol type='tcp'>",
+            f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
+            "    <destination mode='connect' service='22'/>",
+            "  </protocol>",
+            "</interface>",
+        ]
+        return "\n".join(body), mac
+
+    if config.mode == "bridge":
+        if not config.bridge_name:
+            raise ManagerError("NETWORK_BRIDGE must be set when NETWORK_MODE=bridge")
+        body = [
+            "<interface type='bridge'>",
+            f"  <mac address='{mac}'/>",
+            "  <driver name='vhost'/>",
+            "  <model type='virtio'/>",
+            f"  <source bridge='{config.bridge_name}'/>",
+            "</interface>",
+        ]
+        return "\n".join(body), mac
+
+    if config.mode == "direct":
+        if not config.direct_device:
+            raise ManagerError("NETWORK_DIRECT_DEV must be set when NETWORK_MODE=direct")
+        body = [
+            "<interface type='direct'>",
+            f"  <mac address='{mac}'/>",
+            "  <driver name='vhost'/>",
+            "  <model type='virtio'/>",
+            f"  <source dev='{config.direct_device}' mode='bridge'/>",
+        ]
+        body.append("</interface>")
+        return "\n".join(body), mac
+
+    raise ManagerError(f"Unsupported network mode: {config.mode}")
 
 
 def run(cmd: List[str], check: bool = True, **kwargs) -> subprocess.CompletedProcess:
@@ -103,6 +225,14 @@ def run(cmd: List[str], check: bool = True, **kwargs) -> subprocess.CompletedPro
     log("INFO", f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=check, text=True, **kwargs)
     return result
+
+
+@dataclass
+class NetworkConfig:
+    mode: str
+    bridge_name: Optional[str] = None
+    direct_device: Optional[str] = None
+    mac_address: Optional[str] = None
 
 
 @dataclass
@@ -138,6 +268,7 @@ class VMConfig:
     redfish_port: int
     redfish_system_id: str
     redfish_enabled: bool
+    network: NetworkConfig
 
 
 class ServiceManager:
@@ -412,6 +543,7 @@ class VMManager:
         self.boot_iso = Path(self.cfg.boot_iso_path) if self.cfg.boot_iso_path else None
         self.seed_iso = self.vm_dir / "seed.iso" if self.cfg.cloud_init_enabled else None
         self._disk_reused = False
+        self._network_mac: Optional[str] = self.cfg.network.mac_address
 
     def connect(self) -> None:
         self.conn = libvirt.open(LIBVIRT_URI)
@@ -597,20 +729,12 @@ class VMManager:
                 + "\n</qemu:commandline>"
             )
 
-        interface_mac = random_mac()
-        ssh_port = self.cfg.ssh_port
-        network_xml = textwrap.dedent(
-            f"""
-            <interface type='user'>
-              <mac address='{interface_mac}'/>
-              <model type='virtio'/>
-              <protocol type='tcp'>
-                <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>
-                <destination mode='connect' service='22'/>
-              </protocol>
-            </interface>
-            """
-        ).strip()
+        network_xml, resolved_mac = render_network_xml(
+            self.cfg.network,
+            self.cfg.ssh_port,
+            mac_address=self._network_mac,
+        )
+        self._network_mac = resolved_mac
 
         display_xml = ""
         graphics = self.cfg.graphics_type
@@ -767,6 +891,8 @@ class VMManager:
 
 
 def load_distro_config(distro: str, config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, str]:
+    if yaml is None:
+        raise ManagerError("PyYAML is required to load distribution configuration")
     if not config_path.exists():
         raise ManagerError(f"Distribution config missing: {config_path}")
     data = yaml.safe_load(config_path.read_text())
@@ -855,10 +981,52 @@ def parse_env() -> VMConfig:
     guest_password = get_env("GUEST_PASSWORD", "password")
     ssh_port = int(get_env("SSH_PORT", "2222"))
 
-    hostname = os.environ.get("HOSTNAME", distro)
-    vm_name = get_env("GUEST_NAME")
-    if not vm_name:
-        vm_name = hostname
+    network_mode_raw = get_env("NETWORK_MODE", "nat")
+    network_mode_normalized = (network_mode_raw or "nat").strip().lower()
+    network_mode_aliases = {
+        "nat": "user",
+        "user": "user",
+        "usernat": "user",
+        "bridge": "bridge",
+        "bridged": "bridge",
+        "host-bridge": "bridge",
+        "direct": "direct",
+        "macvtap": "direct",
+    }
+    network_mode = network_mode_aliases.get(network_mode_normalized)
+    if network_mode is None:
+        raise ManagerError(
+            f"Unsupported NETWORK_MODE '{network_mode_raw}'. Expected one of nat, bridge, direct."
+        )
+
+    bridge_name = None
+    direct_device = None
+    if network_mode == "bridge":
+        bridge_name = get_env("NETWORK_BRIDGE")
+        if not bridge_name:
+            raise ManagerError("NETWORK_BRIDGE is required when NETWORK_MODE=bridge")
+        bridge_name = bridge_name.strip()
+    elif network_mode == "direct":
+        direct_device = get_env("NETWORK_DIRECT_DEV")
+        if not direct_device:
+            raise ManagerError("NETWORK_DIRECT_DEV is required when NETWORK_MODE=direct")
+        direct_device = direct_device.strip()
+
+    vm_name = derive_vm_name(distro)
+
+    mac_raw = get_env("NETWORK_MAC")
+    mac_address = mac_raw.strip().lower() if mac_raw else None
+    if mac_address and not MAC_ADDRESS_RE.match(mac_address):
+        raise ManagerError(f"Invalid NETWORK_MAC '{mac_raw}'. Use format aa:bb:cc:dd:ee:ff")
+    if not mac_address:
+        mac_address = deterministic_mac(vm_name)
+
+    network_cfg = NetworkConfig(
+        mode=network_mode,
+        bridge_name=bridge_name,
+        direct_device=direct_device,
+        mac_address=mac_address,
+    )
 
     persist = get_env_bool("PERSIST", False)
     ssh_pubkey = get_env("SSH_PUBKEY")
@@ -900,6 +1068,7 @@ def parse_env() -> VMConfig:
         redfish_port=redfish_port,
         redfish_system_id=redfish_system_id,
         redfish_enabled=redfish_enabled,
+        network=network_cfg,
     )
 
 
@@ -924,7 +1093,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
-    log("INFO", f"SSH forward: localhost:{cfg.ssh_port} -> guest:22")
+    if cfg.network.mode == "user":
+        log("INFO", f"SSH forward: localhost:{cfg.ssh_port} -> guest:22")
+    elif cfg.network.mode == "bridge":
+        bridge = cfg.network.bridge_name or "<unspecified>"
+        log("INFO", f"Bridge networking via {bridge} (guest obtains IP from upstream)")
+    elif cfg.network.mode == "direct":
+        dev = cfg.network.direct_device or "<unspecified>"
+        log("INFO", f"Direct/macvtap networking via host device {dev}")
     log("INFO", f"Display mode: {cfg.display}")
     if cfg.graphics_type != "none":
         log("INFO", f"Graphics backend: {cfg.graphics_type}")

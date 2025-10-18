@@ -23,7 +23,7 @@ Default networking uses QEMU user-mode NAT:
 - Start: `docker compose up -d`
 - SSH: `ssh -p $SSH_PORT <user>@localhost` (default `2222`)
 
-To switch to bridge or other configurations, edit the domain XML via `EXTRA_ARGS` or customize the manager as needed.
+To expose the VM on an upstream network, switch to bridge or direct/macvtap mode with the variables described in the [Networking Guide](networking.md).
 
 ## Compose Usage
 

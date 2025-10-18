@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y \
     genisoimage \
     wget \
     curl \
+    iproute2 \
+    bridge-utils \
     openssl \
     python3 \
     python3-yaml \

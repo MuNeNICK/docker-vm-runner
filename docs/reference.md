@@ -36,12 +36,21 @@ These map to entries in `distros.yaml` (bind-mount your own file to `/config/dis
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GUEST_NAME` | container hostname | Internal VM name, used for disk paths. |
+| `GUEST_NAME` | container hostname | Internal VM name, used for disk paths. Set explicitly when using host networking. |
 | `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
 | `PERSIST` | `0` | Keep the work disk and libvirt domain after shutdown. |
 | `NO_CONSOLE` | `0` | Skip attaching `virsh console` (`1`, `true`, `yes`, `on`). |
+
+### Networking
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NETWORK_MODE` | `nat` | `nat` (QEMU user-mode), `bridge` (libvirt bridge), or `direct` (macvtap). |
+| `NETWORK_BRIDGE` | *(required for bridge)* | Name of the host bridge (e.g., `br0`) when `NETWORK_MODE=bridge`. |
+| `NETWORK_DIRECT_DEV` | *(required for direct)* | Host NIC to bind (e.g., `eth0`) when `NETWORK_MODE=direct` (requires `--volume /dev:/dev` and `--privileged`). |
+| `NETWORK_MAC` | *(auto)* | Override the guest MAC address (`aa:bb:cc:dd:ee:ff`). |
 
 ### Graphics & GUI
 
