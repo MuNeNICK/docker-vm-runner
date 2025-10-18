@@ -19,7 +19,7 @@ usage() {
 Usage: bash scripts/run-vm.sh [--cpus <n>] [--memory <MB|GB>] [--persist] [--use-local-config] [--no-console] [--] [extra docker args...]
 
 Environment (forwarded if set):
-  DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_ARCH, VM_CPU_MODEL,
+  DISTRO, VM_MEMORY, VM_CPUS, VM_DISK_SIZE, VM_DISPLAY, VM_VNC_PORT, VM_NOVNC_PORT, VM_ARCH, VM_CPU_MODEL,
   VM_PASSWORD, VM_SSH_PUBKEY, EXTRA_ARGS, REDFISH_USERNAME, REDFISH_PASSWORD,
   REDFISH_PORT
 
@@ -192,7 +192,7 @@ forward_env() {
   fi
 }
 
-for v in DISTRO VM_MEMORY VM_CPUS VM_DISK_SIZE VM_DISPLAY VM_ARCH VM_CPU_MODEL VM_PASSWORD VM_SSH_PUBKEY EXTRA_ARGS; do
+for v in DISTRO VM_MEMORY VM_CPUS VM_DISK_SIZE VM_DISPLAY VM_VNC_PORT VM_NOVNC_PORT VM_ARCH VM_CPU_MODEL VM_PASSWORD VM_SSH_PUBKEY EXTRA_ARGS; do
   forward_env "$v"
 done
 for v in REDFISH_USERNAME REDFISH_PASSWORD REDFISH_PORT; do
@@ -208,6 +208,18 @@ DOCKER_ARGS+=( -p ${SSH_PORT}:${SSH_PORT} )
 
 # Redfish port mapping
 DOCKER_ARGS+=( -p ${REDFISH_PORT}:${REDFISH_PORT} )
+
+# Graphics/noVNC port mapping when requested
+DISPLAY_MODE=${VM_DISPLAY:-none}
+DISPLAY_MODE=${DISPLAY_MODE,,}
+if [[ "$DISPLAY_MODE" == "vnc" || "$DISPLAY_MODE" == "novnc" ]]; then
+  VNC_PORT=${VM_VNC_PORT:-5900}
+  DOCKER_ARGS+=( -p ${VNC_PORT}:${VNC_PORT} )
+fi
+if [[ "$DISPLAY_MODE" == "novnc" ]]; then
+  NOVNC_PORT=${VM_NOVNC_PORT:-6080}
+  DOCKER_ARGS+=( -p ${NOVNC_PORT}:${NOVNC_PORT} )
+fi
 
 # Allow extra docker args after --
 if [[ $# -gt 0 ]]; then

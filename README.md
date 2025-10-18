@@ -101,6 +101,7 @@ Notes:
 - Redfish API is exposed on `8443/tcp` by default and uses a self-signed certificate. Override with `REDFISH_PORT`, `REDFISH_USERNAME`, `REDFISH_PASSWORD`.
 - Containers run unprivileged by default; only `/dev/kvm` access is required. On hosts with strict AppArmor/SELinux profiles you may need `--security-opt apparmor=unconfined` (or equivalent) to allow libvirt to access `/dev/kvm`.
 - When `--persist` is enabled, helper scripts bind-mount `./images/state` to preserve the generated Redfish certificate and other management artifacts between runs.
+- Browser console: set `VM_DISPLAY=novnc` (and optionally override `VM_NOVNC_PORT`) to expose the built-in noVNC UI secured with the same certificate as Redfish.
 - VM names default to the container hostname; pass `--hostname <name>` (or `VM_NAME=<name>`) if you want deterministic names.
 - If the GHCR image is private, run `echo $GITHUB_TOKEN | docker login ghcr.io -u munenick --password-stdin` or set the image public in GitHub Packages.
 
@@ -121,7 +122,9 @@ Notes:
 - `VM_MEMORY`: Default `4096` - memory in MB.
 - `VM_CPUS`: Default `2` - number of vCPUs.
 - `VM_DISK_SIZE`: Default `20G` - resize target for the work image.
-- `VM_DISPLAY`: Default `none` - headless mode.
+- `VM_DISPLAY`: Default `none` - headless mode. Set to `vnc` to expose the native VNC server, or `novnc` to enable the bundled noVNC web console.
+- `VM_VNC_PORT`: Default `5900` - container/host port that the VNC server listens on when `VM_DISPLAY` is `vnc` or `novnc`.
+- `VM_NOVNC_PORT`: Default `6080` - container/host port that serves the noVNC web client when `VM_DISPLAY=novnc`.
 - `VM_ARCH`: Default `x86_64` - QEMU system architecture.
 - `VM_CPU_MODEL`: Default `host` - CPU model.
 - `VM_PASSWORD`: Default `password` - console password set via cloud-init.

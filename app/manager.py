@@ -104,9 +104,13 @@ class VMConfig:
     cpus: int
     disk_size: str
     display: str
+    graphics_type: str
     arch: str
     cpu_model: str
     extra_args: str
+    novnc_enabled: bool
+    vnc_port: int
+    novnc_port: int
     password: str
     ssh_port: int
     vm_name: str
@@ -129,6 +133,7 @@ class ServiceManager:
         self.config_dir = STATE_DIR / "sushy"
         ensure_directory(self.cert_dir)
         ensure_directory(self.config_dir)
+        self._novnc_started = False
 
     def start(self) -> None:
         self._start_libvirt()
@@ -259,6 +264,92 @@ class ServiceManager:
             text=True,
         )
         self.processes.append(proc)
+
+    def start_novnc(self) -> None:
+        if not self.vm_config.novnc_enabled:
+            return
+        if self._novnc_started:
+            return
+
+        if shutil.which("websockify") is None:
+            raise ManagerError(
+                "noVNC requested but websockify is missing. Install websockify inside the container image."
+            )
+
+        web_root = Path("/usr/share/novnc")
+        if not web_root.exists():
+            raise ManagerError("noVNC static assets not found at /usr/share/novnc.")
+
+        # Ensure landing on / renders the viewer automatically instead of a directory listing.
+        index_path = web_root / "index.html"
+        if (web_root / "vnc.html").exists():
+            redirect_marker = "<!-- docker-qemu novnc redirect -->"
+            try:
+                existing = index_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                existing = ""
+            except OSError:
+                existing = None
+            if existing is None or redirect_marker not in existing:
+                redirect_html = f"""<!DOCTYPE html>
+<html>
+  <head>
+    {redirect_marker}
+    <meta charset="utf-8" />
+    <meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=1&resize=scale" />
+    <title>noVNC</title>
+  </head>
+  <body>
+    <p>Redirecting to <a href="vnc.html?autoconnect=1&resize=scale">noVNC console</a>…</p>
+    <script>window.location.replace("vnc.html?autoconnect=1&resize=scale");</script>
+  </body>
+</html>
+"""
+                try:
+                    index_path.write_text(redirect_html, encoding="utf-8")
+                except OSError:
+                    log(
+                        "WARN",
+                        f"Failed to update {index_path} for noVNC redirect; directory listing will remain.",
+                    )
+
+        self._ensure_certificates()
+        cert = self.cert_dir / "sushy.crt"
+        key = self.cert_dir / "sushy.key"
+
+        listen = f"0.0.0.0:{self.vm_config.novnc_port}"
+        target = f"127.0.0.1:{self.vm_config.vnc_port}"
+        cmd = [
+            "websockify",
+            "--web",
+            str(web_root),
+            "--cert",
+            str(cert),
+            "--key",
+            str(key),
+            listen,
+            target,
+        ]
+        log(
+            "INFO",
+            f"Starting noVNC proxy (web:{self.vm_config.novnc_port} -> VNC:{self.vm_config.vnc_port})",
+        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise ManagerError(f"Failed to start noVNC proxy: {exc}") from exc
+
+        self.processes.append(proc)
+        self._novnc_started = True
+        log(
+            "INFO",
+            f"noVNC web client available at https://<host>:{self.vm_config.novnc_port}/vnc.html",
+        )
 
     def stop(self) -> None:
         if self._shutdown:
@@ -468,10 +559,16 @@ class VMManager:
         ).strip()
 
         display_xml = ""
-        if self.cfg.display and self.cfg.display != "none":
-            display_xml = (
-                f"<graphics type='{self.cfg.display}' listen='0.0.0.0' autoport='yes'/>"
-            )
+        graphics = self.cfg.graphics_type
+        if graphics and graphics != "none":
+            if graphics == "vnc":
+                display_xml = (
+                    f"<graphics type='{graphics}' listen='0.0.0.0' port='{self.cfg.vnc_port}' autoport='no'/>"
+                )
+            else:
+                display_xml = (
+                    f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'/>"
+                )
 
         memory_unit = "MiB"
         xml = f"""
@@ -532,6 +629,8 @@ class VMManager:
                     )
                 raise
             log("SUCCESS", f"Domain {self.cfg.vm_name} started")
+        if self.cfg.novnc_enabled:
+            self.service_manager.start_novnc()
 
     def wait_until_stopped(self) -> None:
         if self.domain is None:
@@ -594,7 +693,24 @@ def parse_env() -> VMConfig:
     memory_mb = int(os.environ.get("VM_MEMORY", "4096"))
     cpus = int(os.environ.get("VM_CPUS", "2"))
     disk_size = os.environ.get("VM_DISK_SIZE", "20G")
-    display = os.environ.get("VM_DISPLAY", "none")
+    display_raw = os.environ.get("VM_DISPLAY", "none")
+    display = display_raw.strip().lower()
+    graphics_type = display
+    novnc_enabled = False
+    if display in ("", "none"):
+        graphics_type = "none"
+    elif display == "novnc":
+        graphics_type = "vnc"
+        novnc_enabled = True
+    elif display == "vnc":
+        graphics_type = "vnc"
+    else:
+        graphics_type = display
+
+    vnc_port = int(os.environ.get("VM_VNC_PORT", "5900"))
+    novnc_port = int(os.environ.get("VM_NOVNC_PORT", "6080"))
+    if novnc_enabled and graphics_type != "vnc":
+        raise ManagerError("noVNC requires a VNC graphics backend")
     arch = os.environ.get("VM_ARCH", "x86_64")
     cpu_model = os.environ.get("VM_CPU_MODEL", "host")
     extra_args = os.environ.get("EXTRA_ARGS", "")
@@ -619,9 +735,13 @@ def parse_env() -> VMConfig:
         cpus=cpus,
         disk_size=disk_size,
         display=display,
+        graphics_type=graphics_type,
         arch=arch,
         cpu_model=cpu_model,
         extra_args=extra_args,
+        novnc_enabled=novnc_enabled,
+        vnc_port=vnc_port,
+        novnc_port=novnc_port,
         password=password,
         ssh_port=ssh_port,
         vm_name=vm_name,
@@ -656,6 +776,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
     log("INFO", f"SSH forward: localhost:{cfg.ssh_port} -> guest:22")
+    log("INFO", f"Display mode: {cfg.display}")
+    if cfg.graphics_type != "none":
+        log("INFO", f"Graphics backend: {cfg.graphics_type}")
+    if cfg.novnc_enabled:
+        log("INFO", f"noVNC web: https://<host>:{cfg.novnc_port}/vnc.html")
+    elif cfg.graphics_type == "vnc":
+        log("INFO", f"VNC server: <host>:{cfg.vnc_port}")
 
     ensure_directory(STATE_DIR)
 

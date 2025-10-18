@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y \
     libvirt-daemon-system \
     libvirt-daemon-driver-qemu \
     libvirt-clients \
+    novnc \
+    websockify \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
