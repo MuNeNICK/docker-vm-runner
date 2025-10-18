@@ -34,16 +34,9 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 try:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        import crypt  # type: ignore
-except ImportError:  # pragma: no cover
-    crypt = None
-
-try:
     import bcrypt  # type: ignore
-except ImportError:  # pragma: no cover
-    bcrypt = None
+except ImportError as exc:  # pragma: no cover
+    raise SystemExit("bcrypt is required but not installed") from exc
 
 try:
     import libvirt  # type: ignore
@@ -136,17 +129,9 @@ def random_mac() -> str:
 
 
 def hash_password(password: str) -> str:
-    """Generate a salted SHA512 crypt hash for cloud-init."""
-    if bcrypt is not None:
-        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-        return hashed.decode("utf-8")
-
-    if crypt is not None:
-        salt_charset = string.ascii_letters + string.digits
-        salt = "".join(random.choice(salt_charset) for _ in range(16))
-        return crypt.crypt(password, f"$6${salt}")
-
-    raise ManagerError("bcrypt not installed and crypt module unavailable; cannot hash password")
+    """Generate a bcrypt hash for cloud-init."""
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    return hashed.decode("utf-8")
 
 
 def detect_container_id() -> Optional[str]:
@@ -202,47 +187,62 @@ def deterministic_mac(seed: str) -> str:
 
 
 def render_network_xml(
-    config: NetworkConfig, ssh_port: int, mac_address: Optional[str] = None
+    config: NetworkConfig,
+    ssh_port: int,
+    mac_address: Optional[str] = None,
+    boot_order: Optional[int] = None,
 ) -> Tuple[str, str]:
     """Render a libvirt interface definition based on the requested network mode."""
     mac = (mac_address or config.mac_address or random_mac()).lower()
 
     if config.mode == "user":
-        body = [
-            "<interface type='user'>",
-            f"  <mac address='{mac}'/>",
-            "  <model type='virtio'/>",
-            "  <protocol type='tcp'>",
-            f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
-            "    <destination mode='connect' service='22'/>",
-            "  </protocol>",
-            "</interface>",
-        ]
+        body = ["<interface type='user'>"]
+        if boot_order is not None:
+            body.append(f"  <boot order='{boot_order}'/>")
+        body.extend(
+            [
+                f"  <mac address='{mac}'/>",
+                "  <model type='virtio'/>",
+                "  <protocol type='tcp'>",
+                f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
+                "    <destination mode='connect' service='22'/>",
+                "  </protocol>",
+                "</interface>",
+            ]
+        )
         return "\n".join(body), mac
 
     if config.mode == "bridge":
         if not config.bridge_name:
             raise ManagerError("NETWORK_BRIDGE must be set when NETWORK_MODE=bridge")
-        body = [
-            "<interface type='bridge'>",
-            f"  <mac address='{mac}'/>",
-            "  <driver name='vhost'/>",
-            "  <model type='virtio'/>",
-            f"  <source bridge='{config.bridge_name}'/>",
-            "</interface>",
-        ]
+        body = ["<interface type='bridge'>"]
+        if boot_order is not None:
+            body.append(f"  <boot order='{boot_order}'/>")
+        body.extend(
+            [
+                f"  <mac address='{mac}'/>",
+                "  <driver name='vhost'/>",
+                "  <model type='virtio'/>",
+                f"  <source bridge='{config.bridge_name}'/>",
+                "</interface>",
+            ]
+        )
         return "\n".join(body), mac
 
     if config.mode == "direct":
         if not config.direct_device:
             raise ManagerError("NETWORK_DIRECT_DEV must be set when NETWORK_MODE=direct")
-        body = [
-            "<interface type='direct'>",
-            f"  <mac address='{mac}'/>",
-            "  <driver name='vhost'/>",
-            "  <model type='virtio'/>",
-            f"  <source dev='{config.direct_device}' mode='bridge'/>",
-        ]
+        body = ["<interface type='direct'>"]
+        if boot_order is not None:
+            body.append(f"  <boot order='{boot_order}'/>")
+        body.extend(
+            [
+                f"  <mac address='{mac}'/>",
+                "  <driver name='vhost'/>",
+                "  <model type='virtio'/>",
+                f"  <source dev='{config.direct_device}' mode='bridge'/>",
+            ]
+        )
         body.append("</interface>")
         return "\n".join(body), mac
 
@@ -827,10 +827,14 @@ class VMManager:
                 + "\n</qemu:commandline>"
             )
 
+        boot_order_priority = {dev: idx + 1 for idx, dev in enumerate(self.cfg.boot_order)}
+
+        network_order = boot_order_priority.get("network")
         network_xml, resolved_mac = render_network_xml(
             self.cfg.network,
             self.cfg.ssh_port,
             mac_address=self._network_mac,
+            boot_order=network_order,
         )
         self._network_mac = resolved_mac
 
@@ -845,8 +849,6 @@ class VMManager:
                 display_xml = (
                     f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'/>"
                 )
-
-        boot_order_priority = {dev: idx + 1 for idx, dev in enumerate(self.cfg.boot_order)}
 
         seed_iso_xml = ""
         if self.seed_iso:
@@ -1072,7 +1074,10 @@ def parse_env() -> VMConfig:
         boot_order = ["hd"]
 
     cloud_init_enabled = get_env_bool("CLOUD_INIT", True)
-    arch = get_env("ARCH", "x86_64")
+    arch = (get_env("ARCH", "x86_64") or "x86_64").strip()
+    if arch.lower() != "x86_64":
+        raise ManagerError("ARCH must be x86_64 in this release.")
+    arch = "x86_64"
     cpu_model = get_env("CPU_MODEL", "host")
     extra_args = get_env("EXTRA_ARGS", "")
 

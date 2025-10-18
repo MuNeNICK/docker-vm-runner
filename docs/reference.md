@@ -28,7 +28,7 @@ These map to entries in `distros.yaml` (bind-mount your own file to `/config/dis
 | `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM (`/images/base/...`). |
 | `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). |
 | `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
-| `ARCH` | `x86_64` | QEMU architecture. |
+| `ARCH` | `x86_64` | Fixed to `x86_64`; other architectures are not supported in this release. |
 | `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
 | `EXTRA_ARGS` | *(blank)* | Additional QEMU CLI arguments (space-delimited). |
 
