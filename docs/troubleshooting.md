@@ -9,7 +9,7 @@
   Verify `DISTRO` matches a key in `distros.yaml` and that the file is available inside the container at `/config/distros.yaml`.
 
 - **Console input not accepted**  
-  Ensure the container runs with `stdin_open: true` and `tty: true` (compose already sets these). Reattach with `docker attach <container>` or `docker compose attach`.
+  Ensure the container runs with `stdin_open: true` and `tty: true` (compose already sets these). Reattach with `docker attach <container>` or use `docker compose exec <service> virsh console <guest>`.
 
 - **Redfish HTTPS warnings / failures**  
   Redfish is disabled unless `REDFISH_ENABLE=1`. When enabled, the manager generates a self-signed certificate under `/var/lib/docker-vm-runner/certs`. Bind-mount that directory to persist or replace it. Override credentials via `REDFISH_USERNAME` / `REDFISH_PASSWORD`.

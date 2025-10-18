@@ -16,8 +16,9 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./images/vm1:/images
-      - ./state/vm1:/var/lib/docker-vm-runner
+      - ./images/base:/images/base
+      - ./images/vm1:/images/vms/vm1
+      - ./images/state/vm1:/var/lib/docker-vm-runner
     environment:
       DISTRO: ubuntu-2404
       GUEST_NAME: vm1
@@ -34,8 +35,9 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./images/vm2:/images
-      - ./state/vm2:/var/lib/docker-vm-runner
+      - ./images/base:/images/base
+      - ./images/vm2:/images/vms/vm2
+      - ./images/state/vm2:/var/lib/docker-vm-runner
     environment:
       DISTRO: debian-12
       GUEST_NAME: vm2
@@ -50,7 +52,7 @@ services:
 
 *Tips*
 
-- Separate `./images/<vm>` and `./state/<vm>` per guest when persistence is required.
+- Reuse `./images/base` to share cached cloud images across services, mount each persistent disk at `/images/vms/<guest>` (e.g., `./images/vm1:/images/vms/vm1`), and dedicate a state directory per VM (e.g., `./images/state/vm1:/var/lib/docker-vm-runner`).
 - Avoid port collisions by choosing distinct `SSH_PORT`, `VNC_PORT`, `NOVNC_PORT`, and (if enabled) `REDFISH_PORT`.
 - Redfish endpoints provide power and boot control: `curl -k https://localhost:8444/redfish/v1/Systems/vm2` or use any Redfish client with the configured credentials.
 
@@ -67,8 +69,9 @@ services:
     network_mode: host
     volumes:
       - /dev:/dev
-      - ./images/vm-direct:/images
-      - ./state/vm-direct:/var/lib/docker-vm-runner
+      - ./images/base:/images/base
+      - ./images/vm-direct:/images/vms/vm-direct
+      - ./images/state/vm-direct:/var/lib/docker-vm-runner
     devices:
       - /dev/kvm:/dev/kvm
     environment:
@@ -96,6 +99,6 @@ Compose keeps the desired state in one YAML file, making it straightforward to r
 ## Accessing Running VMs
 
 - SSH via forwarded ports: `ssh -p 2222 <user>@localhost` (replace the port per service).
-- Attach to the container’s serial console: `docker compose attach vm1` or `docker compose exec vm1 virsh console vm1`.
+- Attach to the container’s serial console: `docker attach vm1` or `docker compose exec vm1 virsh console vm1`.
 - Detach from a console session with `Ctrl+]`.
 - Inspect guest state without leaving Compose: `docker compose exec vm2 virsh list`, `docker compose logs -f vm1`, etc.
