@@ -2,6 +2,10 @@
 
 Run lightweight QEMU/KVM virtual machines within Docker. Each container hosts a libvirt-managed VM with optional Redfish control and noVNC console support. Images are pulled automatically from upstream cloud sources or can be supplied locally.
 
+## Background
+
+I rely on containers to avoid polluting host machines while developing applications, but containerized environments have limits around systemd, networking, and kernel features. Docker-VM-Runner bridges that gap by making it just as easy to spin up a full virtual machine: a single `docker run` fetches the requested cloud image, boots it, and attaches your terminal to the VM console immediately.
+
 ## Quick Start
 
 ```bash
@@ -32,20 +36,6 @@ For persistence, GUI, ISO installs, and compose workflows see the [documentation
 - [Configuration Reference](docs/reference.md)
 - [Troubleshooting & Operations](docs/troubleshooting.md)
 - [Redfish Guide](docs/redfish.md)
-
-## Project Layout
-
-```
-docker-vm-runner/
-  Dockerfile           # QEMU container image
-  docker-compose.yml   # Compose configuration
-  distros.yaml         # Distribution map (mounted into the container)
-  entrypoint.sh        # Startup shim -> Python manager
-  app/manager.py       # Libvirt + sushy orchestration
-  docs/                # Extended documentation
-  images/              # Cached VM images
-  README.md
-```
 
 ## License
 
