@@ -305,16 +305,28 @@ class ServiceManager:
             if sock.exists():
                 sock.unlink()
 
+        virtlogd_cmd = ["/usr/sbin/virtlogd"]
+        virtlogd_conf = Path("/etc/libvirt/virtlogd.conf")
+        if virtlogd_conf.exists():
+            virtlogd_cmd.extend(["-f", str(virtlogd_conf)])
+        else:  # pragma: no cover - only hit in slim images
+            log("WARN", "virtlogd.conf not found; using built-in defaults")
         virtlogd = subprocess.Popen(
-            ["/usr/sbin/virtlogd", "-f", "/etc/libvirt/virtlogd.conf"],
+            virtlogd_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
         self.processes.append(virtlogd)
 
+        libvirtd_cmd = ["/usr/sbin/libvirtd"]
+        libvirtd_conf = Path("/etc/libvirt/libvirtd.conf")
+        if libvirtd_conf.exists():
+            libvirtd_cmd.extend(["-f", str(libvirtd_conf)])
+        else:  # pragma: no cover - only hit in slim images
+            log("WARN", "libvirtd.conf not found; using built-in defaults")
         libvirtd = subprocess.Popen(
-            ["/usr/sbin/libvirtd", "-f", "/etc/libvirt/libvirtd.conf"],
+            libvirtd_cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
