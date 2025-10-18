@@ -9,6 +9,7 @@ through sushy-emulator.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import os
 import random
@@ -16,6 +17,7 @@ import re
 import shutil
 import signal
 import string
+import socket
 import subprocess
 import sys
 import tempfile
@@ -85,6 +87,17 @@ def get_env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.lower() in TRUTHY
+
+
+def has_controlling_tty() -> bool:
+    """Return True if both stdin and stdout are attached to a TTY."""
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            if not stream.isatty():
+                return False
+        except (AttributeError, ValueError):
+            return False
+    return True
 
 
 def wait_for_path(path: Path, timeout: float = 10.0, interval: float = 0.1) -> bool:
@@ -304,8 +317,7 @@ class ServiceManager:
             Path("/var/run/libvirt/virtlogd-sock"),
         ]
         for sock in sockets:
-            if sock.exists():
-                sock.unlink()
+            self._cleanup_socket(sock)
 
         virtlogd_cmd = ["/usr/sbin/virtlogd"]
         virtlogd_conf = Path("/etc/libvirt/virtlogd.conf")
@@ -337,6 +349,37 @@ class ServiceManager:
         log("INFO", "libvirt services spawned")
         self._assert_running(virtlogd, "virtlogd")
         self._assert_running(libvirtd, "libvirtd")
+
+    def _cleanup_socket(self, path: Path) -> None:
+        """Remove stale libvirt sockets without touching active host instances."""
+        if not path.exists() or not path.is_socket():
+            return
+
+        stale = False
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(0.2)
+                client.connect(str(path))
+        except socket.timeout:
+            stale = True
+        except OSError as exc:
+            if exc.errno in {errno.ECONNREFUSED, errno.ENOENT}:
+                stale = True
+            else:
+                log("WARN", f"Skipping removal of socket {path}: {exc}")
+                return
+        else:
+            log("INFO", f"Detected active libvirt socket at {path}; leaving in place")
+            return
+
+        if stale:
+            try:
+                path.unlink()
+                log("INFO", f"Removed stale libvirt socket {path}")
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                log("WARN", f"Failed to remove stale socket {path}: {exc}")
 
     def _assert_running(self, proc: subprocess.Popen, name: str) -> None:
         time.sleep(0.5)
@@ -1114,6 +1157,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
     args = parser.parse_args(argv)
 
+    console_requested = not args.no_console
+    if console_requested and not has_controlling_tty():
+        log(
+            "WARN",
+            "No controlling TTY detected; skipping interactive console. "
+            "Set NO_CONSOLE=1 to hide this warning.",
+        )
+        console_requested = False
+
     cfg = parse_env()
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
@@ -1149,7 +1201,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         vm_mgr.prepare()
         vm_mgr.start()
         retcode = 0
-        if args.no_console:
+        if not console_requested:
             vm_mgr.wait_until_stopped()
         else:
             retcode = run_console(cfg.vm_name)
