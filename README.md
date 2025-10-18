@@ -83,24 +83,12 @@ Storage layout inside the container:
  - Show logs (compose): `docker compose logs vm1`
  - Debug inside the container (compose): `docker compose exec vm1 /bin/bash`
 
-## Helper Script
-
-- Run via curl (default image):
-  - `curl -fsSL https://raw.github.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash`
-- Run with CPU/Memory:
-  - `curl -fsSL https://raw.github.com/munenick/docker-qemu/main/scripts/run-vm.sh | bash -s -- --memory 2g --cpus 4`
-
-Preflight checks performed by the script:
-- Docker CLI present and Docker daemon reachable
-- KVM availability and basic permission hinting (`/dev/kvm` readable)
-- Clear errors with next-step guidance if checks fail
-
 Notes:
 - If `/dev/kvm` exists, KVM is enabled automatically; otherwise it falls back to TCG (slower).
-- The one-shot flow is ephemeral by default (no volumes). Use `--persist` to cache images in `./images`.
+- Containers are ephemeral unless you bind-mount `./images` (or another directory) into `/images` to keep disks/certs.
+- To persist generated management artifacts (Redfish certificates, etc.), bind-mount a host directory (e.g. `./images/state`) to `/var/lib/docker-qemu`.
 - Redfish API is exposed on `8443/tcp` by default and uses a self-signed certificate. Override with `REDFISH_PORT`, `REDFISH_USERNAME`, `REDFISH_PASSWORD`.
 - Containers run unprivileged by default; only `/dev/kvm` access is required. On hosts with strict AppArmor/SELinux profiles you may need `--security-opt apparmor=unconfined` (or equivalent) to allow libvirt to access `/dev/kvm`.
-- When `--persist` is enabled, helper scripts bind-mount `./images/state` to preserve the generated Redfish certificate and other management artifacts between runs.
 - Browser console: set `VM_DISPLAY=novnc` (and optionally override `VM_NOVNC_PORT`) to expose the built-in noVNC UI secured with the same certificate as Redfish.
 - Custom media:
   - Place local disks/ISOs under `./images/base` (auto-mounted to `/images/base` inside the container).
@@ -152,20 +140,28 @@ Place your media and (optionally) seed disk images under `./images/base` (mounte
 `/images/base` inside the container whenever you pass `--persist`) and launch:
 
 ```bash
-VM_NAME=ubuntu-desktop \
-VM_DISPLAY=novnc \
-VM_NO_CONSOLE=1 \
-VM_BLANK_DISK=1 \
-VM_DISK_SIZE=40G \
-VM_BASE_IMAGE=blank \
-VM_BOOT_ISO=/images/base/ubuntu-24.04.3-desktop-amd64.iso \
-VM_BOOT_ORDER=cdrom,hd \
-EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
-bash scripts/run-vm.sh --persist --use-local-config
+docker run --rm \
+  --name ubuntu-desktop-vm \
+  --device /dev/kvm:/dev/kvm \
+  --security-opt apparmor=unconfined \
+  -v "$(pwd)/images:/images" \
+  -v "$(pwd)/images/state:/var/lib/docker-qemu" \
+  -v "$(pwd)/distros.yaml:/config/distros.yaml:ro" \
+  -p 2222:2222 \
+  -p 8443:8443 \
+  -p 6080:6080 \
+  -e VM_NAME=ubuntu-desktop \
+  -e VM_DISPLAY=novnc \
+  -e VM_NO_CONSOLE=1 \
+  -e VM_DISK_SIZE=40G \
+  -e VM_BOOT_ISO=/images/base/ubuntu-24.04.3-desktop-amd64.iso \
+  -e VM_BOOT_ORDER=cdrom,hd \
+  -e VM_CLOUD_INIT=0 \
+  -e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
+  docker-qemu-novnc-test
 ```
 
-- `VM_BLANK_DISK=1` (or `VM_BASE_IMAGE=blank`) creates a fresh QCOW2 at the requested size.
-- Remove `VM_BOOT_ISO` / switch `VM_BOOT_ORDER` back to `hd` after installation to boot from disk directly.
+- Omit the ISO / switch `VM_BOOT_ORDER` back to `hd` after installation to boot from disk directly.
 - The noVNC console is reachable at `https://localhost:6080/` when `VM_DISPLAY=novnc`.
 
 Cloud-init is always enabled with a minimal NoCloud seed to set the default
@@ -182,7 +178,6 @@ docker-qemu/
   distros.yaml         # Distribution map (mounted into the container)
   entrypoint.sh        # Startup shim -> Python manager
   app/manager.py       # Libvirt + sushy orchestration
-  scripts/run-vm.sh    # One-shot runner for plain docker
   images/              # Cached VM images
   README.md
 ```
@@ -197,7 +192,7 @@ Note: `docker-compose.yml` mounts only `distros.yaml` into
 - Unknown distribution: ensure `DISTRO` matches a key in `distros.yaml` and
   that the file is mounted into the container at `/config/distros.yaml`.
  - If input is not accepted, ensure the container has `stdin_open: true` and `tty: true` (compose already sets these), then re-run `docker attach vm1` (for plain docker) or `docker attach $(docker compose ps -q vm1)` (for compose).
-- Redfish connection issues: trust or replace the self-signed certificate under `/var/lib/docker-qemu/certs` (persisted automatically when `--persist` is enabled), or override with `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
+- Redfish connection issues: trust or replace the self-signed certificate under `/var/lib/docker-qemu/certs` (bind-mount `/var/lib/docker-qemu` to persist it), or override with `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
 
 ## Redfish Management
 
