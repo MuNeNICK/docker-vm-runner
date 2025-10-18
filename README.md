@@ -102,6 +102,10 @@ Notes:
 - Containers run unprivileged by default; only `/dev/kvm` access is required. On hosts with strict AppArmor/SELinux profiles you may need `--security-opt apparmor=unconfined` (or equivalent) to allow libvirt to access `/dev/kvm`.
 - When `--persist` is enabled, helper scripts bind-mount `./images/state` to preserve the generated Redfish certificate and other management artifacts between runs.
 - Browser console: set `VM_DISPLAY=novnc` (and optionally override `VM_NOVNC_PORT`) to expose the built-in noVNC UI secured with the same certificate as Redfish.
+- Custom media:
+  - Place local disks/ISOs under `./images/base` (auto-mounted to `/images/base` inside the container).
+  - Use `VM_BASE_IMAGE` to point at an existing QCOW2/RAW base disk (skips downloads), or `VM_BLANK_DISK=1` to start from an empty disk of size `VM_DISK_SIZE`.
+  - Attach installation media by setting `VM_BOOT_ISO=/images/base/<iso>.iso`; the manager will boot from CD first by default when this is present.
 - VM names default to the container hostname; pass `--hostname <name>` (or `VM_NAME=<name>`) if you want deterministic names.
 - If the GHCR image is private, run `echo $GITHUB_TOKEN | docker login ghcr.io -u munenick --password-stdin` or set the image public in GitHub Packages.
 
@@ -125,6 +129,11 @@ Notes:
 - `VM_DISPLAY`: Default `none` - headless mode. Set to `vnc` to expose the native VNC server, or `novnc` to enable the bundled noVNC web console.
 - `VM_VNC_PORT`: Default `5900` - container/host port that the VNC server listens on when `VM_DISPLAY` is `vnc` or `novnc`.
 - `VM_NOVNC_PORT`: Default `6080` - container/host port that serves the noVNC web client when `VM_DISPLAY=novnc`.
+- `VM_BASE_IMAGE`: Optional - absolute path (inside the container) to a QCOW2/RAW image to use as the base disk instead of downloading from `distros.yaml`. Set to `blank` (or combine with `VM_BLANK_DISK=1`) to start from an empty disk.
+- `VM_BLANK_DISK`: Default `0` - set to `1` to create a fresh blank disk of size `VM_DISK_SIZE`.
+- `VM_BOOT_ISO`: Optional - path to an ISO that will be attached as CD-ROM (`/images/base/...` when mounted via `--persist`). When set, boot order automatically prioritises the CD.
+- `VM_BOOT_ORDER`: Default `hd` - comma-separated libvirt boot devices (`hd`, `cd`, `network`, ...).
+- `VM_CLOUD_INIT`: Default `1` - set `0` to disable cloud-init seed generation/attachment.
 - `VM_ARCH`: Default `x86_64` - QEMU system architecture.
 - `VM_CPU_MODEL`: Default `host` - CPU model.
 - `VM_PASSWORD`: Default `password` - console password set via cloud-init.
@@ -136,6 +145,28 @@ Notes:
 - `VM_NO_CONSOLE`: Set `1` to skip attaching the console (helper script `--no-console`).
 - `REDFISH_PORT`: Default `8443` - host/guest port used by the embedded Redfish endpoint.
 - `REDFISH_USERNAME`, `REDFISH_PASSWORD`: Credentials for Redfish Basic auth (defaults `admin`/`password`).
+
+### Example: Booting a Local Desktop ISO
+
+Place your media and (optionally) seed disk images under `./images/base` (mounted to
+`/images/base` inside the container whenever you pass `--persist`) and launch:
+
+```bash
+VM_NAME=ubuntu-desktop \
+VM_DISPLAY=novnc \
+VM_NO_CONSOLE=1 \
+VM_BLANK_DISK=1 \
+VM_DISK_SIZE=40G \
+VM_BASE_IMAGE=blank \
+VM_BOOT_ISO=/images/base/ubuntu-24.04.3-desktop-amd64.iso \
+VM_BOOT_ORDER=cdrom,hd \
+EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
+bash scripts/run-vm.sh --persist --use-local-config
+```
+
+- `VM_BLANK_DISK=1` (or `VM_BASE_IMAGE=blank`) creates a fresh QCOW2 at the requested size.
+- Remove `VM_BOOT_ISO` / switch `VM_BOOT_ORDER` back to `hd` after installation to boot from disk directly.
+- The noVNC console is reachable at `https://localhost:6080/` when `VM_DISPLAY=novnc`.
 
 Cloud-init is always enabled with a minimal NoCloud seed to set the default
 user's password for the chosen distribution. Log in on the console using:

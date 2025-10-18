@@ -111,6 +111,11 @@ class VMConfig:
     novnc_enabled: bool
     vnc_port: int
     novnc_port: int
+    base_image_path: Optional[str]
+    blank_work_disk: bool
+    boot_iso_path: Optional[str]
+    boot_order: List[str]
+    cloud_init_enabled: bool
     password: str
     ssh_port: int
     vm_name: str
@@ -381,9 +386,15 @@ class VMManager:
             if self.vm_dir.exists():
                 shutil.rmtree(self.vm_dir, ignore_errors=True)
             ensure_directory(self.vm_dir)
-        self.base_image = BASE_IMAGES_DIR / f"{self.cfg.distro}.{self.cfg.image_format}"
+        self._external_base_image = False
+        if self.cfg.base_image_path:
+            self.base_image = Path(self.cfg.base_image_path)
+            self._external_base_image = True
+        else:
+            self.base_image = BASE_IMAGES_DIR / f"{self.cfg.distro}.{self.cfg.image_format}"
         self.work_image = self.vm_dir / f"disk.{self.cfg.image_format}"
-        self.seed_iso = self.vm_dir / "seed.iso"
+        self.boot_iso = Path(self.cfg.boot_iso_path) if self.cfg.boot_iso_path else None
+        self.seed_iso = self.vm_dir / "seed.iso" if self.cfg.cloud_init_enabled else None
         self._disk_reused = False
 
     def connect(self) -> None:
@@ -397,12 +408,20 @@ class VMManager:
             self.conn = None
 
     def prepare(self) -> None:
-        self._ensure_base_image()
+        if not self.cfg.blank_work_disk:
+            self._ensure_base_image()
         self._prepare_work_image()
+        if self.boot_iso and not self.boot_iso.exists():
+            raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
         self._generate_cloud_init()
         self._define_domain()
 
     def _ensure_base_image(self) -> None:
+        if self._external_base_image:
+            if not self.base_image.exists():
+                raise ManagerError(f"Base image not found: {self.base_image}")
+            log("INFO", f"Using external base image: {self.base_image}")
+            return
         if self.base_image.exists() and self.base_image.stat().st_size > 100 * 1024 * 1024:
             log("INFO", f"Using cached image: {self.base_image}")
             return
@@ -442,15 +461,34 @@ class VMManager:
                 self.work_image.unlink(missing_ok=True)
 
         if not self._disk_reused:
-            log("INFO", f"Creating working disk {self.work_image}")
-            shutil.copy2(self.base_image, self.work_image)
-            if self.cfg.disk_size and self.cfg.disk_size != "0":
-                log("INFO", f"Resizing disk to {self.cfg.disk_size}...")
-                run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
+            if self.cfg.blank_work_disk:
+                log("INFO", f"Creating blank disk {self.work_image} ({self.cfg.disk_size})")
+                run(
+                    [
+                        "qemu-img",
+                        "create",
+                        "-f",
+                        self.cfg.image_format,
+                        str(self.work_image),
+                        self.cfg.disk_size,
+                    ]
+                )
+            else:
+                log("INFO", f"Creating working disk {self.work_image}")
+                if self.base_image.suffix.lower() == ".iso":
+                    raise ManagerError(
+                        "Base image points to an ISO. Use VM_BOOT_ISO for installation media and keep VM_BASE_IMAGE for disk images."
+                    )
+                shutil.copy2(self.base_image, self.work_image)
+                if self.cfg.disk_size and self.cfg.disk_size != "0":
+                    log("INFO", f"Resizing disk to {self.cfg.disk_size}...")
+                    run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
         else:
             log("INFO", f"Persistent disk retained at {self.work_image}")
 
     def _generate_cloud_init(self) -> None:
+        if not self.cfg.cloud_init_enabled:
+            return
         ensure_directory(IMAGES_DIR)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -570,7 +608,47 @@ class VMManager:
                     f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'/>"
                 )
 
+        boot_order_priority = {dev: idx + 1 for idx, dev in enumerate(self.cfg.boot_order)}
+
+        seed_iso_xml = ""
+        if self.seed_iso:
+            seed_iso_xml = textwrap.dedent(
+                f"""
+                <disk type='file' device='cdrom'>
+                  <driver name='qemu' type='raw'/>
+                  <source file='{self.seed_iso}'/>
+                  <target dev='sda' bus='sata'/>
+                  <readonly/>
+                </disk>
+                """
+            ).strip()
+            seed_iso_xml = textwrap.indent(seed_iso_xml, "            ")
+
+        boot_iso_xml = ""
+        if self.boot_iso:
+            boot_order_attr = ""
+            order = boot_order_priority.get("cdrom")
+            if order is not None:
+                boot_order_attr = f"\n                  <boot order='{order}'/>"
+            boot_iso_xml = textwrap.dedent(
+                f"""
+                <disk type='file' device='cdrom'>
+                  <driver name='qemu' type='raw'/>
+                  <source file='{self.boot_iso}'/>
+                  <target dev='sdb' bus='sata'/>
+                  <readonly/>{boot_order_attr}
+                </disk>
+                """
+            ).strip()
+            boot_iso_xml = textwrap.indent(boot_iso_xml, "            ")
+
+        boot_xml = ""
+
         memory_unit = "MiB"
+        disk_boot_attr = ""
+        order = boot_order_priority.get("hd")
+        if order is not None:
+            disk_boot_attr = f"\n              <boot order='{order}'/>"
         xml = f"""
         <domain type='kvm' {qemu_ns}>
           <name>{self.cfg.vm_name}</name>
@@ -578,7 +656,7 @@ class VMManager:
           <vcpu placement='static'>{self.cfg.cpus}</vcpu>
           <os>
             <type arch='{self.cfg.arch}' machine='pc'>hvm</type>
-            <boot dev='hd'/>
+            {boot_xml}
           </os>
           <features>
             <acpi/>
@@ -590,14 +668,10 @@ class VMManager:
             <disk type='file' device='disk'>
               <driver name='qemu' type='{self.cfg.image_format}' cache='none'/>
               <source file='{self.work_image}'/>
-              <target dev='vda' bus='virtio'/>
+              <target dev='vda' bus='virtio'/>{disk_boot_attr}
             </disk>
-            <disk type='file' device='cdrom'>
-              <driver name='qemu' type='raw'/>
-              <source file='{self.seed_iso}'/>
-              <target dev='sda' bus='sata'/>
-              <readonly/>
-            </disk>
+            {seed_iso_xml}
+            {boot_iso_xml}
             {network_xml}
             <serial type='pty'>
               <target port='0'/>
@@ -711,6 +785,45 @@ def parse_env() -> VMConfig:
     novnc_port = int(os.environ.get("VM_NOVNC_PORT", "6080"))
     if novnc_enabled and graphics_type != "vnc":
         raise ManagerError("noVNC requires a VNC graphics backend")
+
+    truthy = {"1", "true", "yes", "on"}
+
+    base_image_override = os.environ.get("VM_BASE_IMAGE")
+    if base_image_override is not None:
+        base_image_override = base_image_override.strip()
+        if not base_image_override:
+            base_image_override = None
+    blank_work_disk = os.environ.get("VM_BLANK_DISK", "0").lower() in truthy
+    if base_image_override and base_image_override.lower() == "blank":
+        blank_work_disk = True
+        base_image_override = None
+    boot_iso = os.environ.get("VM_BOOT_ISO")
+    if boot_iso is not None:
+        boot_iso = boot_iso.strip() or None
+    boot_order_raw = os.environ.get("VM_BOOT_ORDER", "hd")
+    boot_order_input = [item.strip().lower() for item in boot_order_raw.split(",") if item.strip()]
+    boot_aliases = {
+        "hd": "hd",
+        "disk": "hd",
+        "harddisk": "hd",
+        "cd": "cdrom",
+        "cdrom": "cdrom",
+        "dvd": "cdrom",
+        "network": "network",
+        "net": "network",
+        "pxe": "network",
+    }
+    boot_order = [boot_aliases.get(dev, dev) for dev in boot_order_input]
+    if not boot_order:
+        boot_order = ["hd"]
+    if boot_iso and "cdrom" not in boot_order:
+        boot_order = ["cdrom"] + boot_order
+    if boot_iso and base_image_override is None and os.environ.get("VM_BLANK_DISK") is None:
+        # Installing from ISO without an explicit base image -> default to a blank disk.
+        blank_work_disk = True
+    if blank_work_disk and not boot_iso and boot_order == ["hd"]:
+        boot_order = ["hd"]
+    cloud_init_enabled = os.environ.get("VM_CLOUD_INIT", "1").lower() in truthy
     arch = os.environ.get("VM_ARCH", "x86_64")
     cpu_model = os.environ.get("VM_CPU_MODEL", "host")
     extra_args = os.environ.get("EXTRA_ARGS", "")
@@ -742,6 +855,11 @@ def parse_env() -> VMConfig:
         novnc_enabled=novnc_enabled,
         vnc_port=vnc_port,
         novnc_port=novnc_port,
+        base_image_path=base_image_override,
+        blank_work_disk=blank_work_disk,
+        boot_iso_path=boot_iso,
+        boot_order=boot_order,
+        cloud_init_enabled=cloud_init_enabled,
         password=password,
         ssh_port=ssh_port,
         vm_name=vm_name,
