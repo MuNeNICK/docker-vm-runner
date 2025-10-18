@@ -2,7 +2,8 @@
 set -euo pipefail
 
 args=("$@")
-if [[ "${VM_NO_CONSOLE:-0}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
+NO_CONSOLE=${NO_CONSOLE:-0}
+if [[ "${NO_CONSOLE}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
   args=(--no-console "${args[@]}")
 fi
 

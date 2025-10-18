@@ -12,25 +12,16 @@
   Ensure the container runs with `stdin_open: true` and `tty: true` (compose already sets these). Reattach with `docker attach <container>` or `docker compose attach`.
 
 - **Redfish HTTPS warnings / failures**  
-  The manager generates a self-signed certificate under `/var/lib/docker-qemu/certs`. Bind-mount that directory to persist or replace it. Override credentials via `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
+  Redfish is disabled unless `REDFISH_ENABLE=1`. When enabled, the manager generates a self-signed certificate under `/var/lib/docker-qemu/certs`. Bind-mount that directory to persist or replace it. Override credentials via `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
 
-## Redfish Management
-
-- Endpoint: `https://localhost:${REDFISH_PORT:-8443}`  
-  Default credentials: `admin` / `password`.
-- Managed resources track the active libvirt domain; power and boot operations propagate instantly.
-- Quick smoke test:
-
-  ```bash
-  curl -k -u admin:password https://localhost:8443/redfish/v1/Systems
-  ```
+For detailed Redfish enablement and workflows, see the [Redfish Guide](redfish.md).
 
 ## Networking
 
 Default networking uses QEMU user-mode NAT:
 
 - Start: `docker compose up -d`
-- SSH: `ssh -p $VM_SSH_PORT <user>@localhost` (default `2222`)
+- SSH: `ssh -p $SSH_PORT <user>@localhost` (default `2222`)
 
 To switch to bridge or other configurations, edit the domain XML via `EXTRA_ARGS` or customize the manager as needed.
 

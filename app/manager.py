@@ -39,6 +39,7 @@ BASE_IMAGES_DIR = IMAGES_DIR / "base"
 VM_IMAGES_DIR = IMAGES_DIR / "vms"
 STATE_DIR = Path("/var/lib/docker-qemu")
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
+TRUTHY = {"1", "true", "yes", "on"}
 
 
 class ManagerError(RuntimeError):
@@ -56,6 +57,17 @@ def log(level: str, message: str) -> None:
     colour = colours.get(level, "")
     reset = "\033[0m" if colour else ""
     print(f"{colour}[{level}]{reset} {message}", flush=True)
+
+
+def get_env(name: str, default: Optional[str] = None) -> Optional[str]:
+    return os.environ.get(name, default)
+
+
+def get_env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.lower() in TRUTHY
 
 
 def wait_for_path(path: Path, timeout: float = 10.0, interval: float = 0.1) -> bool:
@@ -125,6 +137,7 @@ class VMConfig:
     redfish_password: str
     redfish_port: int
     redfish_system_id: str
+    redfish_enabled: bool
 
 
 class ServiceManager:
@@ -143,7 +156,10 @@ class ServiceManager:
     def start(self) -> None:
         self._start_libvirt()
         self._wait_for_libvirt()
-        self._start_sushy()
+        if self.vm_config.redfish_enabled:
+            self._start_sushy()
+        else:
+            log("INFO", "Redfish disabled (set REDFISH_ENABLE=1 to enable)")
 
     def _start_libvirt(self) -> None:
         ensure_directory(Path("/run/libvirt"))
@@ -477,7 +493,7 @@ class VMManager:
                 log("INFO", f"Creating working disk {self.work_image}")
                 if self.base_image.suffix.lower() == ".iso":
                     raise ManagerError(
-                        "Base image points to an ISO. Use VM_BOOT_ISO for installation media and keep VM_BASE_IMAGE for disk images."
+                        "Base image points to an ISO. Use BOOT_ISO for installation media and keep BASE_IMAGE for disk images."
                     )
                 shutil.copy2(self.base_image, self.work_image)
                 if self.cfg.disk_size and self.cfg.disk_size != "0":
@@ -762,13 +778,18 @@ def load_distro_config(distro: str, config_path: Path = DEFAULT_CONFIG_PATH) -> 
 
 
 def parse_env() -> VMConfig:
-    distro = os.environ.get("DISTRO", "ubuntu-2404")
+    distro = get_env("DISTRO", "ubuntu-2404")
     distro_info = load_distro_config(distro)
-    memory_mb = int(os.environ.get("VM_MEMORY", "4096"))
-    cpus = int(os.environ.get("VM_CPUS", "2"))
-    disk_size = os.environ.get("VM_DISK_SIZE", "20G")
-    display_raw = os.environ.get("VM_DISPLAY", "none")
-    display = display_raw.strip().lower()
+
+    memory_mb = int(get_env("MEMORY", "4096"))
+    cpus = int(get_env("CPUS", "2"))
+    disk_size = get_env("DISK_SIZE", "20G")
+
+    graphics_raw = get_env("GRAPHICS", None)
+    if graphics_raw is None:
+        display = "none"
+    else:
+        display = graphics_raw.strip().lower() or "none"
     graphics_type = display
     novnc_enabled = False
     if display in ("", "none"):
@@ -781,26 +802,28 @@ def parse_env() -> VMConfig:
     else:
         graphics_type = display
 
-    vnc_port = int(os.environ.get("VM_VNC_PORT", "5900"))
-    novnc_port = int(os.environ.get("VM_NOVNC_PORT", "6080"))
+    vnc_port = int(get_env("VNC_PORT", "5900"))
+    novnc_port = int(get_env("NOVNC_PORT", "6080"))
     if novnc_enabled and graphics_type != "vnc":
         raise ManagerError("noVNC requires a VNC graphics backend")
 
-    truthy = {"1", "true", "yes", "on"}
-
-    base_image_override = os.environ.get("VM_BASE_IMAGE")
+    base_image_override = get_env("BASE_IMAGE")
     if base_image_override is not None:
         base_image_override = base_image_override.strip()
         if not base_image_override:
             base_image_override = None
-    blank_work_disk = os.environ.get("VM_BLANK_DISK", "0").lower() in truthy
+
+    blank_disk_raw = get_env("BLANK_DISK")
+    blank_work_disk = get_env_bool("BLANK_DISK", False)
     if base_image_override and base_image_override.lower() == "blank":
         blank_work_disk = True
         base_image_override = None
-    boot_iso = os.environ.get("VM_BOOT_ISO")
+
+    boot_iso = get_env("BOOT_ISO")
     if boot_iso is not None:
         boot_iso = boot_iso.strip() or None
-    boot_order_raw = os.environ.get("VM_BOOT_ORDER", "hd")
+
+    boot_order_raw = get_env("BOOT_ORDER", "hd")
     boot_order_input = [item.strip().lower() for item in boot_order_raw.split(",") if item.strip()]
     boot_aliases = {
         "hd": "hd",
@@ -818,25 +841,32 @@ def parse_env() -> VMConfig:
         boot_order = ["hd"]
     if boot_iso and "cdrom" not in boot_order:
         boot_order = ["cdrom"] + boot_order
-    if boot_iso and base_image_override is None and os.environ.get("VM_BLANK_DISK") is None:
+    if boot_iso and base_image_override is None and blank_disk_raw is None:
         # Installing from ISO without an explicit base image -> default to a blank disk.
         blank_work_disk = True
     if blank_work_disk and not boot_iso and boot_order == ["hd"]:
         boot_order = ["hd"]
-    cloud_init_enabled = os.environ.get("VM_CLOUD_INIT", "1").lower() in truthy
-    arch = os.environ.get("VM_ARCH", "x86_64")
-    cpu_model = os.environ.get("VM_CPU_MODEL", "host")
-    extra_args = os.environ.get("EXTRA_ARGS", "")
-    password = os.environ.get("VM_PASSWORD", "password")
-    ssh_port = int(os.environ.get("VM_SSH_PORT", "2222"))
+
+    cloud_init_enabled = get_env_bool("CLOUD_INIT", True)
+    arch = get_env("ARCH", "x86_64")
+    cpu_model = get_env("CPU_MODEL", "host")
+    extra_args = get_env("EXTRA_ARGS", "")
+
+    guest_password = get_env("GUEST_PASSWORD", "password")
+    ssh_port = int(get_env("SSH_PORT", "2222"))
+
     hostname = os.environ.get("HOSTNAME", distro)
-    vm_name = os.environ.get("VM_NAME", hostname)
-    persist = os.environ.get("VM_PERSIST", "0") in ("1", "true", "yes", "on")
-    ssh_pubkey = os.environ.get("VM_SSH_PUBKEY")
-    redfish_user = os.environ.get("REDFISH_USERNAME", "admin")
-    redfish_password = os.environ.get("REDFISH_PASSWORD", "password")
-    redfish_port = int(os.environ.get("REDFISH_PORT", "8443"))
-    redfish_system_id = os.environ.get("REDFISH_SYSTEM_ID", vm_name)
+    vm_name = get_env("GUEST_NAME")
+    if not vm_name:
+        vm_name = hostname
+
+    persist = get_env_bool("PERSIST", False)
+    ssh_pubkey = get_env("SSH_PUBKEY")
+    redfish_user = get_env("REDFISH_USERNAME", "admin")
+    redfish_password = get_env("REDFISH_PASSWORD", "password")
+    redfish_port = int(get_env("REDFISH_PORT", "8443"))
+    redfish_system_id = get_env("REDFISH_SYSTEM_ID", vm_name)
+    redfish_enabled = get_env_bool("REDFISH_ENABLE", False)
 
     return VMConfig(
         distro=distro,
@@ -860,7 +890,7 @@ def parse_env() -> VMConfig:
         boot_iso_path=boot_iso,
         boot_order=boot_order,
         cloud_init_enabled=cloud_init_enabled,
-        password=password,
+        password=guest_password,
         ssh_port=ssh_port,
         vm_name=vm_name,
         persist=persist,
@@ -869,6 +899,7 @@ def parse_env() -> VMConfig:
         redfish_password=redfish_password,
         redfish_port=redfish_port,
         redfish_system_id=redfish_system_id,
+        redfish_enabled=redfish_enabled,
     )
 
 
@@ -901,6 +932,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         log("INFO", f"noVNC web: https://<host>:{cfg.novnc_port}/vnc.html")
     elif cfg.graphics_type == "vnc":
         log("INFO", f"VNC server: <host>:{cfg.vnc_port}")
+    if cfg.redfish_enabled:
+        log("INFO", f"Redfish: https://<host>:{cfg.redfish_port}/")
+    else:
+        log("INFO", "Redfish disabled (set REDFISH_ENABLE=1 to enable)")
 
     ensure_directory(STATE_DIR)
 

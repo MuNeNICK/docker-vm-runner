@@ -15,33 +15,51 @@ These map to entries in `distros.yaml` (bind-mount your own file to `/config/dis
 
 ## Environment Variables
 
+### Compute & Storage
+
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DISTRO` | `ubuntu-2404` | Distribution key from `distros.yaml`. |
-| `VM_MEMORY` | `4096` | Memory in MiB. |
-| `VM_CPUS` | `2` | Number of vCPUs. |
-| `VM_DISK_SIZE` | `20G` | Size for the working disk (resize target). |
-| `VM_DISPLAY` | `none` | Graphics backend (`none`, `vnc`, `novnc`). |
-| `VM_VNC_PORT` | `5900` | VNC listen port (when `VM_DISPLAY` is `vnc` or `novnc`). |
-| `VM_NOVNC_PORT` | `6080` | noVNC/websockify port (when `VM_DISPLAY=novnc`). |
-| `VM_BASE_IMAGE` | *(downloaded per distro)* | Override base QCOW2/RAW path. Use `blank` to force blank disk creation. |
-| `VM_BLANK_DISK` | `0` | Set `1` to create a blank disk (size from `VM_DISK_SIZE`). |
-| `VM_BOOT_ISO` | *(unset)* | Path to attach as CD-ROM (`/images/base/…`). |
-| `VM_BOOT_ORDER` | `hd` | Comma-separated boot devices (`cdrom`, `hd`, `network`). Order controls `<boot order>` hints. |
-| `VM_CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
-| `VM_ARCH` | `x86_64` | QEMU architecture. |
-| `VM_CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, or named). |
+| `MEMORY` | `4096` | Memory in MiB. |
+| `CPUS` | `2` | Number of vCPUs. |
+| `DISK_SIZE` | `20G` | Working disk size; resized on first boot. |
+| `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. |
+| `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
+| `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM (`/images/base/...`). |
+| `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). |
+| `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
+| `ARCH` | `x86_64` | QEMU architecture. |
+| `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
 | `EXTRA_ARGS` | *(blank)* | Additional QEMU CLI arguments (space-delimited). |
-| `VM_PASSWORD` | `password` | Console password (cloud-init). |
-| `VM_SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22` (user-mode networking). |
-| `VM_NAME` | hostname | VM name (affects disk paths). |
-| `VM_SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
-| `VM_PERSIST` | `0` | Keep work disk & domain after shutdown. |
-| `VM_NO_CONSOLE` | `0` | Skip `virsh console` attachment in the entrypoint. |
+
+### Console & Access
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GUEST_NAME` | container hostname | Internal VM name, used for disk paths. |
+| `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
+| `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
+| `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
+| `PERSIST` | `0` | Keep the work disk and libvirt domain after shutdown. |
+| `NO_CONSOLE` | `0` | Skip attaching `virsh console` (`1`, `true`, `yes`, `on`). |
+
+### Graphics & GUI
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GRAPHICS` | `none` | Graphics backend (`none`, `vnc`, `novnc`). |
+| `VNC_PORT` | `5900` | VNC listen port. |
+| `NOVNC_PORT` | `6080` | noVNC/websockify port. |
+
+### Redfish
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `REDFISH_ENABLE` | `0` | Start sushy-emulator for Redfish. |
 | `REDFISH_PORT` | `8443` | Redfish HTTPS port. |
 | `REDFISH_USERNAME` | `admin` | Redfish username. |
 | `REDFISH_PASSWORD` | `password` | Redfish password. |
-| `REDFISH_SYSTEM_ID` | `VM_NAME` | Redfish system identifier. |
+| `REDFISH_SYSTEM_ID` | `GUEST_NAME` | Redfish system identifier. |
 
 ### Advanced
 
