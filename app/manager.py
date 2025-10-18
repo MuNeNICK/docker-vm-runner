@@ -21,6 +21,7 @@ import sys
 import tempfile
 import textwrap
 import time
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -31,7 +32,9 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 try:
-    import crypt  # type: ignore
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import crypt  # type: ignore
 except ImportError:  # pragma: no cover
     crypt = None
 
@@ -107,17 +110,16 @@ def random_mac() -> str:
 
 def hash_password(password: str) -> str:
     """Generate a salted SHA512 crypt hash for cloud-init."""
+    if bcrypt is not None:
+        hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+        return hashed.decode("utf-8")
+
     if crypt is not None:
         salt_charset = string.ascii_letters + string.digits
         salt = "".join(random.choice(salt_charset) for _ in range(16))
         return crypt.crypt(password, f"$6${salt}")
 
-    if bcrypt is None:
-        raise ManagerError("crypt module unavailable and bcrypt not installed; cannot hash password")
-
-    # Fallback for Python builds without the crypt module; cloud-init accepts bcrypt hashes.
-    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-    return hashed.decode("utf-8")
+    raise ManagerError("bcrypt not installed and crypt module unavailable; cannot hash password")
 
 
 def detect_container_id() -> Optional[str]:

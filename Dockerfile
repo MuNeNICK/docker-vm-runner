@@ -13,13 +13,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bridge-utils \
         ca-certificates \
+        dbus \
+        dnsmasq-base \
+        dmidecode \
         genisoimage \
         iproute2 \
+        iptables \
         libvirt-clients \
         libvirt-daemon \
         libvirt-daemon-config-network \
         libvirt-daemon-config-nwfilter \
         libvirt-daemon-driver-qemu \
+        libvirt-daemon-system \
         openssl \
         python3 \
         python3-libvirt \
@@ -28,7 +33,7 @@ RUN apt-get update \
         qemu-utils \
         tini \
         wget \
-    && python3 -m venv /opt/docker-vm-runner/.venv \
+    && python3 -m venv --system-site-packages /opt/docker-vm-runner/.venv \
     && /opt/docker-vm-runner/.venv/bin/pip install --upgrade --no-cache-dir pip \
     && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir \
         bcrypt \
