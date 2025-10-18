@@ -462,12 +462,23 @@ class ServiceManager:
   <head>
     {redirect_marker}
     <meta charset="utf-8" />
-    <meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=1&resize=scale" />
     <title>noVNC</title>
+    <script>
+      window.location.replace("vnc.html?autoconnect=1&resize=scale");
+    </script>
   </head>
   <body>
-    <p>Redirecting to <a href="vnc.html?autoconnect=1&resize=scale">noVNC console</a>…</p>
-    <script>window.location.replace("vnc.html?autoconnect=1&resize=scale");</script>
+    <p>
+      Redirecting to
+      <a href="vnc.html?autoconnect=1&resize=scale">noVNC console</a>…
+    </p>
+    <noscript>
+      <meta http-equiv="refresh" content="1;url=vnc_lite.html">
+      <p>
+        JavaScript is required for the full noVNC client.
+        You will be redirected to the lite client shortly.
+      </p>
+    </noscript>
   </body>
 </html>
 """

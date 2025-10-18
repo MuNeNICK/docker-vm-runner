@@ -43,7 +43,6 @@ RUN apt-get update \
     && mkdir -p /usr/share/novnc \
     && wget -qO- "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
         | tar -xz --strip-components=1 -C /usr/share/novnc \
-    && ln -sf vnc.html /usr/share/novnc/index.html \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # Replace libvirt qemu.conf with container-friendly settings
