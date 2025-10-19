@@ -50,6 +50,7 @@ docker run --rm -it \\
 Notes:
 
 - Some hypervisors block MAC spoofing on host NICs; allow it if your upstream switch enforces port security.
+- If a second VM errors with “Device or resource busy” when reusing the same NIC, enable promiscuous mode on the host interface (`ip link set dev eth1 promisc on`) so the driver accepts additional macvtap filters, or switch to bridge mode.
 - macvtap traffic is not visible to the host IP stack. Use bridge mode if the host must communicate with the guest.
 - Ensure the host kernel has `macvtap`/`macvlan` loaded. Libvirt will create `/dev/tap*` automatically on the host, and the bind-mounted `/dev` makes it visible inside the container.
 
