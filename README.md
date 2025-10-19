@@ -38,6 +38,12 @@ For persistence, GUI, ISO installs, and compose workflows see the [documentation
 - [Troubleshooting & Operations](docs/troubleshooting.md)
 - [Redfish Guide](docs/redfish.md)
 
+## Host Platform Support
+
+- **Linux** (`/dev/kvm` available) — highest performance. Containers can pass through KVM directly on bare-metal hosts or inside nested environments that expose the KVM device. This is the primary development and validation target.
+- **Windows** (Docker Desktop / WSL2) — supports `/dev/kvm` when the host provides nested virtualization (Windows 11+ with WSL2 + `wsl --install --web-download`, or Hyper-V with virtualization enabled). Performance matches the Linux case when KVM is available; otherwise the container falls back to TCG emulation.
+- **macOS** (Docker Desktop) — functional with the TCG fallback. Apple’s Virtualization.framework cannot be accessed from Linux containers, so expect reduced performance compared to native macOS hypervisors.
+
 ## License
 
 MIT License
