@@ -76,6 +76,11 @@ ARCH_ALIASES = {
     "aarch64": "aarch64",
 }
 
+IPXE_DEFAULT_ROMS = {
+    "x86_64": Path("/usr/lib/ipxe/qemu/pxe-virtio.rom"),
+    "aarch64": Path("/usr/lib/ipxe/qemu/efi-virtio.rom"),
+}
+
 
 class ManagerError(RuntimeError):
     """Raised on unrecoverable configuration or runtime errors."""
@@ -214,6 +219,7 @@ def render_network_xml(
     ssh_port: int,
     mac_address: Optional[str] = None,
     boot_order: Optional[int] = None,
+    rom_file: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Render a libvirt interface definition based on the requested network mode."""
     mac = (mac_address or config.mac_address or random_mac()).lower()
@@ -222,17 +228,19 @@ def render_network_xml(
         body = ["<interface type='user'>"]
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
+        body.append(f"  <mac address='{mac}'/>")
+        body.append("  <model type='virtio'/>")
+        if rom_file:
+            body.append(f"  <rom file='{rom_file}'/>")
         body.extend(
             [
-                f"  <mac address='{mac}'/>",
-                "  <model type='virtio'/>",
                 "  <protocol type='tcp'>",
                 f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
                 "    <destination mode='connect' service='22'/>",
                 "  </protocol>",
-                "</interface>",
             ]
         )
+        body.append("</interface>")
         return "\n".join(body), mac
 
     if config.mode == "bridge":
@@ -241,15 +249,13 @@ def render_network_xml(
         body = ["<interface type='bridge'>"]
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
-        body.extend(
-            [
-                f"  <mac address='{mac}'/>",
-                "  <driver name='vhost'/>",
-                "  <model type='virtio'/>",
-                f"  <source bridge='{config.bridge_name}'/>",
-                "</interface>",
-            ]
-        )
+        body.append(f"  <mac address='{mac}'/>")
+        body.append("  <driver name='vhost'/>")
+        body.append("  <model type='virtio'/>")
+        if rom_file:
+            body.append(f"  <rom file='{rom_file}'/>")
+        body.append(f"  <source bridge='{config.bridge_name}'/>")
+        body.append("</interface>")
         return "\n".join(body), mac
 
     if config.mode == "direct":
@@ -258,14 +264,12 @@ def render_network_xml(
         body = ["<interface type='direct'>"]
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
-        body.extend(
-            [
-                f"  <mac address='{mac}'/>",
-                "  <driver name='vhost'/>",
-                "  <model type='virtio'/>",
-                f"  <source dev='{config.direct_device}' mode='bridge'/>",
-            ]
-        )
+        body.append(f"  <mac address='{mac}'/>")
+        body.append("  <driver name='vhost'/>")
+        body.append("  <model type='virtio'/>")
+        if rom_file:
+            body.append(f"  <rom file='{rom_file}'/>")
+        body.append(f"  <source dev='{config.direct_device}' mode='bridge'/>")
         body.append("</interface>")
         return "\n".join(body), mac
 
@@ -321,6 +325,8 @@ class VMConfig:
     redfish_system_id: str
     redfish_enabled: bool
     network: NetworkConfig
+    ipxe_enabled: bool
+    ipxe_rom_path: Optional[str]
 
 
 class ServiceManager:
@@ -654,6 +660,14 @@ class VMManager:
         self.seed_iso = self.vm_dir / "seed.iso" if self.cfg.cloud_init_enabled else None
         self._disk_reused = False
         self._network_mac: Optional[str] = self.cfg.network.mac_address
+        self._ipxe_rom_path: Optional[Path] = None
+        if self.cfg.ipxe_enabled:
+            if not self.cfg.ipxe_rom_path:
+                raise ManagerError("IPXE_ENABLE=1 requires an iPXE ROM path.")
+            rom_candidate = Path(self.cfg.ipxe_rom_path)
+            if not rom_candidate.exists():
+                raise ManagerError(f"iPXE ROM not found at {rom_candidate}")
+            self._ipxe_rom_path = rom_candidate
 
     def connect(self) -> None:
         self.conn = libvirt.open(LIBVIRT_URI)
@@ -906,11 +920,13 @@ class VMManager:
             loader_xml = textwrap.indent(loader_xml, "            ")
 
         network_order = boot_order_priority.get("network")
+        rom_file = str(self._ipxe_rom_path) if self._ipxe_rom_path else None
         network_xml, resolved_mac = render_network_xml(
             self.cfg.network,
             self.cfg.ssh_port,
             mac_address=self._network_mac,
             boot_order=network_order,
+            rom_file=rom_file,
         )
         self._network_mac = resolved_mac
 
@@ -1151,6 +1167,9 @@ def parse_env() -> VMConfig:
         boot_order = ["hd"]
 
     cloud_init_enabled = get_env_bool("CLOUD_INIT", True)
+    ipxe_enabled = get_env_bool("IPXE_ENABLE", False)
+    ipxe_rom_raw = get_env("IPXE_ROM_PATH")
+    ipxe_rom_override = ipxe_rom_raw.strip() if ipxe_rom_raw else None
 
     distro_arch_raw = distro_info.get("arch")
     arch_env = get_env("ARCH")
@@ -1236,6 +1255,32 @@ def parse_env() -> VMConfig:
         direct_device=direct_device,
         mac_address=mac_address,
     )
+    ipxe_rom_path: Optional[str] = None
+    if ipxe_enabled:
+        if "network" in boot_order:
+            boot_order = ["network"] + [dev for dev in boot_order if dev != "network"]
+        else:
+            boot_order = ["network"] + boot_order
+        default_rom = IPXE_DEFAULT_ROMS.get(arch)
+        if ipxe_rom_override:
+            ipxe_rom_path = ipxe_rom_override
+        elif default_rom:
+            ipxe_rom_path = str(default_rom)
+        if not ipxe_rom_path:
+            raise ManagerError(
+                f"IPXE_ENABLE=1 requires IPXE_ROM_PATH when ARCH='{arch}' does not have a default ROM."
+            )
+        rom_candidate = Path(ipxe_rom_path)
+        if not rom_candidate.exists():
+            raise ManagerError(
+                f"iPXE ROM not found at {rom_candidate}. Install ipxe-qemu inside the image or override IPXE_ROM_PATH."
+            )
+        if network_mode == "user":
+            log(
+                "WARN",
+                "IPXE_ENABLE=1 with NETWORK_MODE=nat relies on the built-in user-mode DHCP/TFTP. "
+                "For real PXE environments prefer bridge or direct networking.",
+            )
 
     persist = get_env_bool("PERSIST", False)
     ssh_pubkey = get_env("SSH_PUBKEY")
@@ -1278,6 +1323,8 @@ def parse_env() -> VMConfig:
         redfish_system_id=redfish_system_id,
         redfish_enabled=redfish_enabled,
         network=network_cfg,
+        ipxe_enabled=ipxe_enabled,
+        ipxe_rom_path=ipxe_rom_path,
     )
 
 
@@ -1319,6 +1366,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif cfg.network.mode == "direct":
         dev = cfg.network.direct_device or "<unspecified>"
         log("INFO", f"Direct/macvtap networking via host device {dev}")
+    if cfg.ipxe_enabled:
+        rom_display = cfg.ipxe_rom_path or "<unspecified>"
+        log("INFO", f"iPXE enabled (ROM: {rom_display})")
     log("INFO", f"Display mode: {cfg.display}")
     if cfg.graphics_type != "none":
         log("INFO", f"Graphics backend: {cfg.graphics_type}")

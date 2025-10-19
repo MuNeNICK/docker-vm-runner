@@ -19,6 +19,7 @@ RUN apt-get update \
         genisoimage \
         iproute2 \
         iptables \
+        ipxe-qemu \
         libvirt-clients \
         libvirt-daemon \
         libvirt-daemon-config-network \

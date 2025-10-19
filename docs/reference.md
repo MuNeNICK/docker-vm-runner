@@ -53,6 +53,8 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `NETWORK_BRIDGE` | *(required for bridge)* | Name of the host bridge (e.g., `br0`) when `NETWORK_MODE=bridge`. |
 | `NETWORK_DIRECT_DEV` | *(required for direct)* | Host NIC to bind (e.g., `eth0`) when `NETWORK_MODE=direct` (requires `--volume /dev:/dev` and `--privileged`). |
 | `NETWORK_MAC` | *(auto)* | Override the guest MAC address (`aa:bb:cc:dd:ee:ff`). |
+| `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the virtio-net interface and prioritize `network` in the boot order. |
+| `IPXE_ROM_PATH` | *(auto)* | Override the ROM (`/usr/lib/ipxe/qemu/pxe-virtio.rom` on x86_64, `efi-virtio.rom` on aarch64). Provide a full path when using a custom build. |
 
 ### Graphics & GUI
 
