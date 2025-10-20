@@ -1,0 +1,67 @@
+services:
+  pxe-gateway:
+    image: ghcr.io/netbootxyz/netbootxyz
+    container_name: pxe-gateway
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    environment:
+      NGINX_PORT: ${NETBOOT_HTTP_PORT:-8080}
+      WEB_APP_PORT: ${NETBOOT_WEB_PORT:-3000}
+      TFTPD_OPTS: >-
+        --interface=${PXE_BRIDGE_NAME}
+        --listen-address=${NETBOOT_IP}
+        --bind-interfaces
+        --dhcp-range=${NETBOOT_DHCP_RANGE_START},${NETBOOT_DHCP_RANGE_END},12h
+        --dhcp-option=3,${NETBOOT_ROUTER}
+        --dhcp-option=6,${NETBOOT_DNS}
+        --dhcp-boot=netboot.xyz.kpxe,,${NETBOOT_IP}
+  
+  pxe-client:
+    image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
+    container_name: pxe-client
+    privileged: true
+    network_mode: host
+    depends_on:
+      - pxe-gateway
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - /dev:/dev
+    environment:
+      GUEST_NAME: pxe-lab
+      NETWORK_MODE: bridge
+      NETWORK_BRIDGE: ${PXE_BRIDGE_NAME}
+      NETWORK_MODEL: e1000
+      NETWORK_BOOT: "1"
+      IPXE_ENABLE: "1"
+      BOOT_ORDER: network,hd
+      BLANK_DISK: "1"
+      GRAPHICS: novnc
+      NOVNC_PORT: "6081"
+      VNC_PORT: "5901"
+
+  pxe-client-2:
+    image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
+    container_name: pxe-client-2
+    privileged: true
+    network_mode: host
+    depends_on:
+      - pxe-gateway
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - /dev:/dev
+    environment:
+      GUEST_NAME: pxe-lab-2
+      NETWORK_MODE: bridge
+      NETWORK_BRIDGE: ${PXE_BRIDGE_NAME}
+      NETWORK_MODEL: e1000
+      NETWORK_BOOT: "1"
+      IPXE_ENABLE: "1"
+      BOOT_ORDER: network,hd
+      BLANK_DISK: "1"
+      GRAPHICS: novnc
+      NOVNC_PORT: "6082"
+      VNC_PORT: "5902"
