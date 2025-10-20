@@ -248,8 +248,8 @@ def deterministic_mac(seed: str) -> str:
 
 
 def render_network_xml(
-    config: NetworkConfig,
-    ssh_port: int,
+    config: NicConfig,
+    ssh_port: Optional[int] = None,
     mac_address: Optional[str] = None,
     boot_order: Optional[int] = None,
     rom_file: Optional[str] = None,
@@ -266,14 +266,15 @@ def render_network_xml(
         body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
-        body.extend(
-            [
-                "  <protocol type='tcp'>",
-                f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
-                "    <destination mode='connect' service='22'/>",
-                "  </protocol>",
-            ]
-        )
+        if ssh_port is not None:
+            body.extend(
+                [
+                    "  <protocol type='tcp'>",
+                    f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
+                    "    <destination mode='connect' service='22'/>",
+                    "  </protocol>",
+                ]
+            )
         body.append("</interface>")
         return "\n".join(body), mac
 
@@ -320,12 +321,14 @@ def run(cmd: List[str], check: bool = True, **kwargs) -> subprocess.CompletedPro
 
 
 @dataclass
-class NetworkConfig:
+class NicConfig:
     mode: str
     bridge_name: Optional[str] = None
     direct_device: Optional[str] = None
     mac_address: Optional[str] = None
     model: str = "virtio"
+    boot: bool = False
+    usernet_forwards: Optional[str] = None
 
 
 @dataclass
@@ -361,7 +364,7 @@ class VMConfig:
     redfish_port: int
     redfish_system_id: str
     redfish_enabled: bool
-    network: NetworkConfig
+    nics: List[NicConfig]
     ipxe_enabled: bool
     ipxe_rom_path: Optional[str]
 
@@ -696,7 +699,7 @@ class VMManager:
         self.boot_iso = Path(self.cfg.boot_iso_path) if self.cfg.boot_iso_path else None
         self.seed_iso = self.vm_dir / "seed.iso" if self.cfg.cloud_init_enabled else None
         self._disk_reused = False
-        self._network_mac: Optional[str] = self.cfg.network.mac_address
+        self._network_macs: Dict[int, str] = {}
         self._ipxe_rom_path: Optional[Path] = None
         if self.cfg.ipxe_enabled:
             if not self.cfg.ipxe_rom_path:
@@ -957,15 +960,26 @@ class VMManager:
             loader_xml = textwrap.indent(loader_xml, "            ")
 
         network_order = boot_order_priority.get("network")
-        rom_file = str(self._ipxe_rom_path) if self._ipxe_rom_path else None
-        network_xml, resolved_mac = render_network_xml(
-            self.cfg.network,
-            self.cfg.ssh_port,
-            mac_address=self._network_mac,
-            boot_order=network_order,
-            rom_file=rom_file,
-        )
-        self._network_mac = resolved_mac
+        interfaces_xml: List[str] = []
+        for idx, nic in enumerate(self.cfg.nics):
+            nic_boot_order = network_order if nic.boot else None
+            rom_file = None
+            if nic.boot and self._ipxe_rom_path is not None:
+                rom_file = str(self._ipxe_rom_path)
+            ssh_forward = self.cfg.ssh_port if idx == 0 and nic.mode == "user" else None
+            mac_seed = self._network_macs.get(idx)
+            nic_xml, resolved_mac = render_network_xml(
+                nic,
+                ssh_port=ssh_forward,
+                mac_address=mac_seed,
+                boot_order=nic_boot_order,
+                rom_file=rom_file,
+            )
+            self._network_macs[idx] = resolved_mac
+            interfaces_xml.append(textwrap.indent(nic_xml, "            "))
+        interfaces_block = ""
+        if interfaces_xml:
+            interfaces_block = "\n" + "\n".join(interfaces_xml)
 
         display_xml = ""
         graphics = self.cfg.graphics_type
@@ -1042,7 +1056,7 @@ class VMManager:
             </disk>
             {seed_iso_xml}
             {boot_iso_xml}
-            {network_xml}
+{interfaces_block}
             <serial type='pty'>
               <target port='0'/>
             </serial>
@@ -1246,8 +1260,8 @@ def parse_env() -> VMConfig:
     guest_password = get_env("GUEST_PASSWORD", "password")
     ssh_port = int(get_env("SSH_PORT", "2222"))
 
-    network_mode_raw = get_env("NETWORK_MODE", "nat")
-    network_mode_normalized = (network_mode_raw or "nat").strip().lower()
+    vm_name = derive_vm_name(distro)
+
     network_mode_aliases = {
         "nat": "user",
         "user": "user",
@@ -1258,78 +1272,124 @@ def parse_env() -> VMConfig:
         "direct": "direct",
         "macvtap": "direct",
     }
-    network_mode = network_mode_aliases.get(network_mode_normalized)
-    if network_mode is None:
-        raise ManagerError(
-            f"Unsupported NETWORK_MODE '{network_mode_raw}'. Expected one of nat, bridge, direct."
+
+    def get_env_indexed(name: str, index: int) -> Optional[str]:
+        if index == 1:
+            return get_env(name)
+        return get_env(f"{name}{index}")
+
+    def build_nic(index: int) -> Optional[NicConfig]:
+        mode_raw = get_env_indexed("NETWORK_MODE", index)
+        if mode_raw is None or not mode_raw.strip():
+            if index == 1:
+                mode_raw = "nat"
+            else:
+                return None
+        mode_key = network_mode_aliases.get(mode_raw.strip().lower())
+        if mode_key is None:
+            suffix = "" if index == 1 else str(index)
+            raise ManagerError(
+                f"Unsupported NETWORK{suffix}_MODE '{mode_raw}'. Expected one of nat, bridge, direct."
+            )
+
+        bridge_name = None
+        direct_device = None
+        if mode_key == "bridge":
+            bridge_name = get_env_indexed("NETWORK_BRIDGE", index)
+            if not bridge_name:
+                suffix = "" if index == 1 else str(index)
+                raise ManagerError(
+                    f"NETWORK{suffix}_BRIDGE is required when NETWORK{suffix}_MODE=bridge"
+                )
+            bridge_name = bridge_name.strip()
+        elif mode_key == "direct":
+            direct_device = get_env_indexed("NETWORK_DIRECT_DEV", index)
+            if not direct_device:
+                suffix = "" if index == 1 else str(index)
+                raise ManagerError(
+                    f"NETWORK{suffix}_DIRECT_DEV is required when NETWORK{suffix}_MODE=direct"
+                )
+            direct_device = direct_device.strip()
+
+        mac_raw = get_env_indexed("NETWORK_MAC", index)
+        mac_address = mac_raw.strip().lower() if mac_raw else None
+        if mac_address and not MAC_ADDRESS_RE.match(mac_address):
+            suffix = "" if index == 1 else str(index)
+            raise ManagerError(
+                f"Invalid NETWORK{suffix}_MAC '{mac_raw}'. Use format aa:bb:cc:dd:ee:ff"
+            )
+        if not mac_address:
+            mac_address = deterministic_mac(f"{vm_name}:{index}")
+
+        model_raw = get_env_indexed("NETWORK_MODEL", index)
+        if model_raw is None or not model_raw.strip():
+            model_raw = "virtio"
+        model_candidate = model_raw.strip().lower()
+        model = NETWORK_MODEL_ALIASES.get(model_candidate)
+        if model is None:
+            supported_models = ", ".join(sorted(SUPPORTED_NETWORK_MODELS))
+            suffix = "" if index == 1 else str(index)
+            raise ManagerError(
+                f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported models: {supported_models}"
+            )
+
+        usernet_forwards = get_env_indexed("NETWORK_USERNET_FORWARDS", index)
+        forwards_clean = usernet_forwards.strip() if usernet_forwards else None
+
+        nic = NicConfig(
+            mode=mode_key,
+            bridge_name=bridge_name,
+            direct_device=direct_device,
+            mac_address=mac_address,
+            model=model,
+            boot=False,
+            usernet_forwards=forwards_clean,
         )
 
-    network_model_raw = get_env("NETWORK_MODEL", "virtio")
-    if network_model_raw is None:
-        network_model_raw = "virtio"
-    network_model_candidate = network_model_raw.strip().lower()
-    if not network_model_candidate:
-        network_model_candidate = "virtio"
-    network_model = NETWORK_MODEL_ALIASES.get(network_model_candidate)
-    if network_model is None:
-        supported_models = ", ".join(sorted(SUPPORTED_NETWORK_MODELS))
-        raise ManagerError(
-            f"Unsupported NETWORK_MODEL '{network_model_raw}'. Supported models: {supported_models}"
-        )
+        boot_override = get_env_indexed("NETWORK_BOOT", index)
+        if boot_override is not None:
+            nic.boot = boot_override.strip().lower() in TRUTHY
+        return nic
 
-    bridge_name = None
-    direct_device = None
-    if network_mode == "bridge":
-        bridge_name = get_env("NETWORK_BRIDGE")
-        if not bridge_name:
-            raise ManagerError("NETWORK_BRIDGE is required when NETWORK_MODE=bridge")
-        bridge_name = bridge_name.strip()
-    elif network_mode == "direct":
-        direct_device = get_env("NETWORK_DIRECT_DEV")
-        if not direct_device:
-            raise ManagerError("NETWORK_DIRECT_DEV is required when NETWORK_MODE=direct")
-        direct_device = direct_device.strip()
+    nics: List[NicConfig] = []
+    primary_nic = build_nic(1)
+    if primary_nic is None:
+        raise ManagerError("Failed to configure primary network interface")
+    nics.append(primary_nic)
 
-    vm_name = derive_vm_name(distro)
+    idx = 2
+    while True:
+        nic = build_nic(idx)
+        if nic is None:
+            break
+        nics.append(nic)
+        idx += 1
 
-    mac_raw = get_env("NETWORK_MAC")
-    mac_address = mac_raw.strip().lower() if mac_raw else None
-    if mac_address and not MAC_ADDRESS_RE.match(mac_address):
-        raise ManagerError(f"Invalid NETWORK_MAC '{mac_raw}'. Use format aa:bb:cc:dd:ee:ff")
-    if not mac_address:
-        mac_address = deterministic_mac(vm_name)
-
-    network_cfg = NetworkConfig(
-        mode=network_mode,
-        bridge_name=bridge_name,
-        direct_device=direct_device,
-        mac_address=mac_address,
-        model=network_model,
-    )
     ipxe_rom_path: Optional[str] = None
     if ipxe_enabled:
         if "network" in boot_order:
             boot_order = ["network"] + [dev for dev in boot_order if dev != "network"]
         else:
             boot_order = ["network"] + boot_order
+        primary_nic.boot = True
         default_roms = IPXE_DEFAULT_ROMS.get(arch, {})
         if ipxe_rom_override:
             ipxe_rom_path = ipxe_rom_override
         else:
-            default_rom = default_roms.get(network_model)
+            default_rom = default_roms.get(primary_nic.model)
             if default_rom:
                 ipxe_rom_path = str(default_rom)
         if not ipxe_rom_path:
             raise ManagerError(
                 "IPXE_ENABLE=1 requires IPXE_ROM_PATH when a default ROM is not available for "
-                f"ARCH='{arch}' with NETWORK_MODEL='{network_model}'."
+                f"ARCH='{arch}' with NETWORK_MODEL='{primary_nic.model}'."
             )
         rom_candidate = Path(ipxe_rom_path)
         if not rom_candidate.exists():
             raise ManagerError(
                 f"iPXE ROM not found at {rom_candidate}. Install ipxe-qemu inside the image or override IPXE_ROM_PATH."
             )
-        if network_mode == "user":
+        if primary_nic.mode == "user":
             log(
                 "WARN",
                 "IPXE_ENABLE=1 with NETWORK_MODE=nat relies on the built-in user-mode DHCP/TFTP. "
@@ -1376,7 +1436,7 @@ def parse_env() -> VMConfig:
         redfish_port=redfish_port,
         redfish_system_id=redfish_system_id,
         redfish_enabled=redfish_enabled,
-        network=network_cfg,
+        nics=nics,
         ipxe_enabled=ipxe_enabled,
         ipxe_rom_path=ipxe_rom_path,
     )
@@ -1412,15 +1472,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
-    if cfg.network.mode == "user":
-        log("INFO", f"SSH forward: localhost:{cfg.ssh_port} -> guest:22")
-    elif cfg.network.mode == "bridge":
-        bridge = cfg.network.bridge_name or "<unspecified>"
-        log("INFO", f"Bridge networking via {bridge} (guest obtains IP from upstream)")
-    elif cfg.network.mode == "direct":
-        dev = cfg.network.direct_device or "<unspecified>"
-        log("INFO", f"Direct/macvtap networking via host device {dev}")
-    log("INFO", f"NIC model: {cfg.network.model}")
+    for idx, nic in enumerate(cfg.nics, start=1):
+        label = "Primary NIC" if idx == 1 else f"NIC #{idx}"
+        if nic.mode == "user":
+            message = f"{label}: user-mode networking"
+            if idx == 1:
+                message += f" (SSH forward localhost:{cfg.ssh_port} -> guest:22)"
+            elif nic.usernet_forwards:
+                message += f" (forwards: {nic.usernet_forwards})"
+            log("INFO", message)
+        elif nic.mode == "bridge":
+            bridge = nic.bridge_name or "<unspecified>"
+            log("INFO", f"{label}: bridge networking via {bridge}")
+        elif nic.mode == "direct":
+            dev = nic.direct_device or "<unspecified>"
+            log("INFO", f"{label}: direct/macvtap via {dev}")
+        else:
+            log("INFO", f"{label}: mode={nic.mode}")
+        log("INFO", f"{label} model: {nic.model}")
+        log("INFO", f"{label} MAC: {nic.mac_address or '<deterministic>'}")
+        if nic.boot:
+            log("INFO", f"{label} participates in boot order")
     if cfg.ipxe_enabled:
         rom_display = cfg.ipxe_rom_path or "<unspecified>"
         log("INFO", f"iPXE enabled (ROM: {rom_display})")
