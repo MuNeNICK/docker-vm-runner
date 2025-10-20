@@ -76,9 +76,42 @@ ARCH_ALIASES = {
     "aarch64": "aarch64",
 }
 
+NETWORK_MODEL_ALIASES = {
+    "virtio": "virtio",
+    "virtio-net": "virtio",
+    "virtio_net": "virtio",
+    "virtio-net-pci": "virtio",
+    "e1000": "e1000",
+    "e1000e": "e1000e",
+    "rtl8139": "rtl8139",
+    "ne2k": "ne2k_pci",
+    "ne2k_pci": "ne2k_pci",
+    "pcnet": "pcnet",
+    "pcnet32": "pcnet",
+    "vmxnet3": "vmxnet3",
+}
+
+SUPPORTED_NETWORK_MODELS = set(NETWORK_MODEL_ALIASES.values())
+
 IPXE_DEFAULT_ROMS = {
-    "x86_64": Path("/usr/lib/ipxe/qemu/pxe-virtio.rom"),
-    "aarch64": Path("/usr/lib/ipxe/qemu/efi-virtio.rom"),
+    "x86_64": {
+        "virtio": Path("/usr/lib/ipxe/qemu/pxe-virtio.rom"),
+        "e1000": Path("/usr/lib/ipxe/qemu/pxe-e1000.rom"),
+        "e1000e": Path("/usr/lib/ipxe/qemu/pxe-e1000e.rom"),
+        "rtl8139": Path("/usr/lib/ipxe/qemu/pxe-rtl8139.rom"),
+        "ne2k_pci": Path("/usr/lib/ipxe/qemu/pxe-ne2k_pci.rom"),
+        "pcnet": Path("/usr/lib/ipxe/qemu/pxe-pcnet.rom"),
+        "vmxnet3": Path("/usr/lib/ipxe/qemu/pxe-vmxnet3.rom"),
+    },
+    "aarch64": {
+        "virtio": Path("/usr/lib/ipxe/qemu/efi-virtio.rom"),
+        "e1000": Path("/usr/lib/ipxe/qemu/efi-e1000.rom"),
+        "e1000e": Path("/usr/lib/ipxe/qemu/efi-e1000e.rom"),
+        "rtl8139": Path("/usr/lib/ipxe/qemu/efi-rtl8139.rom"),
+        "ne2k_pci": Path("/usr/lib/ipxe/qemu/efi-ne2k_pci.rom"),
+        "pcnet": Path("/usr/lib/ipxe/qemu/efi-pcnet.rom"),
+        "vmxnet3": Path("/usr/lib/ipxe/qemu/efi-vmxnet3.rom"),
+    },
 }
 
 
@@ -223,13 +256,14 @@ def render_network_xml(
 ) -> Tuple[str, str]:
     """Render a libvirt interface definition based on the requested network mode."""
     mac = (mac_address or config.mac_address or random_mac()).lower()
+    model = config.model
 
     if config.mode == "user":
         body = ["<interface type='user'>"]
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
         body.append(f"  <mac address='{mac}'/>")
-        body.append("  <model type='virtio'/>")
+        body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
         body.extend(
@@ -250,8 +284,9 @@ def render_network_xml(
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
         body.append(f"  <mac address='{mac}'/>")
-        body.append("  <driver name='vhost'/>")
-        body.append("  <model type='virtio'/>")
+        if model == "virtio":
+            body.append("  <driver name='vhost'/>")
+        body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
         body.append(f"  <source bridge='{config.bridge_name}'/>")
@@ -265,8 +300,9 @@ def render_network_xml(
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
         body.append(f"  <mac address='{mac}'/>")
-        body.append("  <driver name='vhost'/>")
-        body.append("  <model type='virtio'/>")
+        if model == "virtio":
+            body.append("  <driver name='vhost'/>")
+        body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
         body.append(f"  <source dev='{config.direct_device}' mode='bridge'/>")
@@ -289,6 +325,7 @@ class NetworkConfig:
     bridge_name: Optional[str] = None
     direct_device: Optional[str] = None
     mac_address: Optional[str] = None
+    model: str = "virtio"
 
 
 @dataclass
@@ -1227,6 +1264,19 @@ def parse_env() -> VMConfig:
             f"Unsupported NETWORK_MODE '{network_mode_raw}'. Expected one of nat, bridge, direct."
         )
 
+    network_model_raw = get_env("NETWORK_MODEL", "virtio")
+    if network_model_raw is None:
+        network_model_raw = "virtio"
+    network_model_candidate = network_model_raw.strip().lower()
+    if not network_model_candidate:
+        network_model_candidate = "virtio"
+    network_model = NETWORK_MODEL_ALIASES.get(network_model_candidate)
+    if network_model is None:
+        supported_models = ", ".join(sorted(SUPPORTED_NETWORK_MODELS))
+        raise ManagerError(
+            f"Unsupported NETWORK_MODEL '{network_model_raw}'. Supported models: {supported_models}"
+        )
+
     bridge_name = None
     direct_device = None
     if network_mode == "bridge":
@@ -1254,6 +1304,7 @@ def parse_env() -> VMConfig:
         bridge_name=bridge_name,
         direct_device=direct_device,
         mac_address=mac_address,
+        model=network_model,
     )
     ipxe_rom_path: Optional[str] = None
     if ipxe_enabled:
@@ -1261,14 +1312,17 @@ def parse_env() -> VMConfig:
             boot_order = ["network"] + [dev for dev in boot_order if dev != "network"]
         else:
             boot_order = ["network"] + boot_order
-        default_rom = IPXE_DEFAULT_ROMS.get(arch)
+        default_roms = IPXE_DEFAULT_ROMS.get(arch, {})
         if ipxe_rom_override:
             ipxe_rom_path = ipxe_rom_override
-        elif default_rom:
-            ipxe_rom_path = str(default_rom)
+        else:
+            default_rom = default_roms.get(network_model)
+            if default_rom:
+                ipxe_rom_path = str(default_rom)
         if not ipxe_rom_path:
             raise ManagerError(
-                f"IPXE_ENABLE=1 requires IPXE_ROM_PATH when ARCH='{arch}' does not have a default ROM."
+                "IPXE_ENABLE=1 requires IPXE_ROM_PATH when a default ROM is not available for "
+                f"ARCH='{arch}' with NETWORK_MODEL='{network_model}'."
             )
         rom_candidate = Path(ipxe_rom_path)
         if not rom_candidate.exists():
@@ -1366,6 +1420,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif cfg.network.mode == "direct":
         dev = cfg.network.direct_device or "<unspecified>"
         log("INFO", f"Direct/macvtap networking via host device {dev}")
+    log("INFO", f"NIC model: {cfg.network.model}")
     if cfg.ipxe_enabled:
         rom_display = cfg.ipxe_rom_path or "<unspecified>"
         log("INFO", f"iPXE enabled (ROM: {rom_display})")
