@@ -964,7 +964,7 @@ class VMManager:
         for idx, nic in enumerate(self.cfg.nics):
             nic_boot_order = network_order if nic.boot else None
             rom_file = None
-            if nic.boot and self._ipxe_rom_path is not None:
+            if self._ipxe_rom_path is not None:
                 rom_file = str(self._ipxe_rom_path)
             ssh_forward = self.cfg.ssh_port if idx == 0 and nic.mode == "user" else None
             mac_seed = self._network_macs.get(idx)
@@ -1276,6 +1276,9 @@ def parse_env() -> VMConfig:
     def get_env_indexed(name: str, index: int) -> Optional[str]:
         if index == 1:
             return get_env(name)
+        if "_" in name:
+            prefix, rest = name.split("_", 1)
+            return get_env(f"{prefix}{index}_{rest}")
         return get_env(f"{name}{index}")
 
     def build_nic(index: int) -> Optional[NicConfig]:
