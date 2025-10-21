@@ -1,0 +1,115 @@
+services:
+  redfish-controler:
+    image: ${IRONIC_IMAGE:-quay.io/metal3-io/ironic:latest}
+    container_name: redfish-controler
+    restart: unless-stopped
+    networks:
+      redfish-net:
+        aliases:
+          - redfish-controler
+    environment:
+      ISO_HTTP_PORT: ${ISO_HTTP_PORT:-8080}
+      TARGET_ISO_FILENAME: ${TARGET_ISO_FILENAME:-alpine-standard-3.20.2-x86_64.iso}
+      TARGET_ISO_URL: ${TARGET_ISO_URL:-https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-standard-3.20.2-x86_64.iso}
+      TARGET_REDFISH_PORT: 8443
+      TARGET_REDFISH_USERNAME: admin
+      TARGET_REDFISH_PASSWORD: password
+      TARGET_REDFISH_SYSTEM_ID: auto
+      PROVISIONING_INTERFACE: eth0
+    ports:
+      - "${ISO_HTTP_PORT:-8080}:${ISO_HTTP_PORT:-8080}"
+    volumes:
+      - ./scripts/bootstrap-control.sh:/usr/local/bin/bootstrap-control.sh:ro
+    entrypoint: ["/usr/local/bin/bootstrap-control.sh"]
+
+  redfish-provisioner:
+    image: ${IRONIC_CLIENT_IMAGE:-quay.io/metal3-io/ironic-client:latest}
+    container_name: redfish-provisioner
+    restart: "no"
+    depends_on:
+      - redfish-controler
+    networks:
+      redfish-net:
+        aliases:
+          - redfish-provisioner
+    environment:
+      OS_AUTH_TYPE: none
+      OS_ENDPOINT: http://redfish-controler:6385
+      TARGET_ISO_FILENAME: ${TARGET_ISO_FILENAME:-alpine-standard-3.20.2-x86_64.iso}
+      ISO_HTTP_PORT: ${ISO_HTTP_PORT:-8080}
+      KEEP_REDFISH_PROVISIONER_ALIVE: 1
+      TARGET_REDFISH_NODES: "redfish-client-1 redfish-client-2"
+      TARGET_REDFISH_PORT: 8443
+      TARGET_REDFISH_USERNAME: admin
+      TARGET_REDFISH_PASSWORD: password
+    volumes:
+      - ./scripts/run-cli.sh:/usr/local/bin/run-cli.sh:ro
+    entrypoint: ["/usr/local/bin/run-cli.sh"]
+
+  redfish-client-1:
+    image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
+    container_name: redfish-client-1
+    restart: unless-stopped
+    privileged: true
+    networks:
+      redfish-net:
+        aliases:
+          - redfish-client-1
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - ./images/base:/images/base
+      - ./images/vms/redfish-client-1:/images/vms/redfish-client-1
+      - ./images/state/redfish-client-1:/var/lib/docker-vm-runner
+    ports:
+      - "6081:6080"
+    environment:
+      GUEST_NAME: redfish-client-1
+      PERSIST: "1"
+      REDFISH_ENABLE: "1"
+      REDFISH_PORT: 8443
+      REDFISH_USERNAME: admin
+      REDFISH_PASSWORD: password
+      REDFISH_SYSTEM_ID: redfish-client-1
+      NOVNC_PORT: 6080
+      VNC_PORT: 5900
+      BASE_IMAGE: blank
+      BLANK_DISK: "1"
+      CLOUD_INIT: "0"
+      GRAPHICS: novnc
+
+  redfish-client-2:
+    image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
+    container_name: redfish-client-2
+    restart: unless-stopped
+    privileged: true
+    networks:
+      redfish-net:
+        aliases:
+          - redfish-client-2
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - ./images/base:/images/base
+      - ./images/vms/redfish-client-2:/images/vms/redfish-client-2
+      - ./images/state/redfish-client-2:/var/lib/docker-vm-runner
+    ports:
+      - "6082:6080"
+    environment:
+      GUEST_NAME: redfish-client-2
+      PERSIST: "1"
+      REDFISH_ENABLE: "1"
+      REDFISH_PORT: 8443
+      REDFISH_USERNAME: admin
+      REDFISH_PASSWORD: password
+      REDFISH_SYSTEM_ID: redfish-client-2
+      NOVNC_PORT: 6080
+      VNC_PORT: 5900
+      BASE_IMAGE: blank
+      BLANK_DISK: "1"
+      CLOUD_INIT: "0"
+      GRAPHICS: novnc
+
+networks:
+  redfish-net:
+    driver: bridge
