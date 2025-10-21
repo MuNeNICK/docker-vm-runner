@@ -46,6 +46,19 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `PERSIST` | `0` | Keep the work disk and libvirt domain after shutdown. |
 | `NO_CONSOLE` | `0` | Skip attaching `virsh console` (`1`, `true`, `yes`, `on`). |
 
+### Filesystem Sharing
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `FILESYSTEM_SOURCE` | *(unset)* | Directory inside the container to expose to the guest (bind-mount a host path here). |
+| `FILESYSTEM_TARGET` | *(unset)* | Guest-facing tag presented to the VM (mount with `mount -t virtiofs <tag> <path>`). |
+| `FILESYSTEM_DRIVER` | `virtiofs` | Filesystem driver: `virtiofs` (default) or `9p` (falls back to virtio-9p). |
+| `FILESYSTEM_ACCESSMODE` | `passthrough` | Access mode (`passthrough`, `mapped`, or `squash`). |
+| `FILESYSTEM_READONLY` | `0` | Set to `1` to present the share as read-only. |
+
+Append an index (`FILESYSTEM2_SOURCE`, `FILESYSTEM3_SOURCE`, …) to define multiple shares. Only the variables you override are required for each additional index.
+The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtiofs requires the container to allow `unshare(2)` (e.g., `--security-opt seccomp=unconfined`). If that isn’t possible, set `FILESYSTEM_DRIVER=9p`.
+
 ### Networking
 
 | Variable | Default | Description |

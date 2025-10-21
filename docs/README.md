@@ -7,6 +7,7 @@ This directory collects task-specific guides and reference material for Docker-V
 - [GUI & Installation Media](gui-and-media.md) — enabling noVNC and booting from local ISO/blank disks.
 - [iPXE Boot](ipxe.md) — enabling network boot via injected iPXE ROMs.
 - [Networking Guide](networking.md) — choosing between NAT, bridge, and direct/macvtap modes.
+- [Filesystem Sharing](filesystem-sharing.md) — sharing host directories via virtiofs or 9p.
 - [Configuration Reference](reference.md) — supported distribution keys and environment variables.
 - [Troubleshooting & Operations](troubleshooting.md) — common issues, Redfish tips, networking, and compose notes.
 - [Redfish Guide](redfish.md) — enabling the Redfish API and performing power/boot actions.

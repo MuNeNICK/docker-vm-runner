@@ -28,6 +28,7 @@ For persistence, GUI, ISO installs, and compose workflows see the [documentation
 - KVM acceleration with automatic fallback to TCG when `/dev/kvm` is unavailable.
 - Libvirt manages lifecycle, with optional sushy-emulator (Redfish) power/boot control.
 - Cloud-init injects default credentials and optional SSH keys.
+- Bind-mount host directories into the guest via virtiofs or 9p for easy file sharing.
 - Optional noVNC web console with TLS, local ISO/blank disk workflows, and docker-compose support.
 
 ## Documentation

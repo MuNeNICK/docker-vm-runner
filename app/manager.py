@@ -270,6 +270,13 @@ def deterministic_mac(seed: str) -> str:
     return ":".join(f"{octet:02x}" for octet in octets)
 
 
+def sanitize_mount_target(tag: str) -> str:
+    """Return a filesystem-safe name for mounting inside the guest."""
+    safe = re.sub(r"[^0-9A-Za-z._-]", "-", tag)
+    safe = safe.strip("-")
+    return safe or "share"
+
+
 def render_network_xml(
     config: NicConfig,
     ssh_port: Optional[int] = None,
@@ -286,6 +293,7 @@ def render_network_xml(
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
         body.append(f"  <mac address='{mac}'/>")
+        body.append("  <source/>")
         body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
@@ -293,8 +301,8 @@ def render_network_xml(
             body.extend(
                 [
                     "  <protocol type='tcp'>",
-                    f"    <source mode='bind' address='0.0.0.0' service='{ssh_port}'/>",
-                    "    <destination mode='connect' service='22'/>",
+                    f"    <source address='0.0.0.0' service='{ssh_port}'/>",
+                    "    <destination address='10.0.2.15' service='22'/>",
                     "  </protocol>",
                 ]
             )
@@ -355,6 +363,15 @@ class NicConfig:
 
 
 @dataclass
+class FilesystemConfig:
+    source: Path
+    target: str
+    driver: str = "virtiofs"
+    accessmode: str = "passthrough"
+    readonly: bool = False
+
+
+@dataclass
 class VMConfig:
     distro: str
     image_url: str
@@ -391,6 +408,7 @@ class VMConfig:
     nics: List[NicConfig]
     ipxe_enabled: bool
     ipxe_rom_path: Optional[str]
+    filesystems: List[FilesystemConfig]
 
 
 class ServiceManager:
@@ -934,23 +952,61 @@ class VMManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             passwd_hash = hash_password(self.cfg.password)
-            vendor_user_data = textwrap.dedent(
-                f"""
-                #cloud-config
-                users:
-                  - name: {self.cfg.login_user}
-                    lock_passwd: false
-                    sudo: ALL=(ALL) NOPASSWD:ALL
-                    shell: /bin/bash
-                    passwd: '{passwd_hash}'
-                chpasswd:
-                  expire: False
-                ssh_pwauth: true
-                """
-            ).strip() + "\n"
+
+            cloud_cfg: Dict[str, object] = {
+                "users": [
+                    {
+                        "name": self.cfg.login_user,
+                        "lock_passwd": False,
+                        "sudo": "ALL=(ALL) NOPASSWD:ALL",
+                        "shell": "/bin/bash",
+                        "passwd": passwd_hash,
+                    }
+                ],
+                "chpasswd": {"expire": False},
+                "ssh_pwauth": True,
+            }
+
             if self.cfg.ssh_pubkey:
-                vendor_user_data += "ssh_authorized_keys:\n"
-                vendor_user_data += f"  - {self.cfg.ssh_pubkey}\n"
+                cloud_cfg["ssh_authorized_keys"] = [self.cfg.ssh_pubkey]
+
+            if self.cfg.filesystems:
+                mounts = []
+                runcmd: List[List[str]] = []
+                for fs in self.cfg.filesystems:
+                    tag = fs.target
+                    safe_target = sanitize_mount_target(tag)
+                    mount_dir = Path("/mnt") / safe_target
+                    mkdir_cmd = ["mkdir", "-p", str(mount_dir)]
+                    if mkdir_cmd not in runcmd:
+                        runcmd.append(mkdir_cmd)
+                    if fs.driver == "virtiofs":
+                        fstype = "virtiofs"
+                        options = ["defaults", "_netdev"]
+                    else:
+                        fstype = "9p"
+                        options = ["trans=virtio,version=9p2000.L", "_netdev"]
+                    if fs.readonly:
+                        options.append("ro")
+                    mount_entry = [
+                        tag,
+                        str(mount_dir),
+                        fstype,
+                        ",".join(options),
+                        "0",
+                        "0",
+                    ]
+                    mounts.append(mount_entry)
+                if mounts:
+                    cloud_cfg["mounts"] = mounts
+                if runcmd:
+                    cloud_cfg["runcmd"] = runcmd
+
+            if yaml is None:
+                raise ManagerError("PyYAML is required to render cloud-init configuration")
+            vendor_user_data = "#cloud-config\n" + yaml.safe_dump(
+                cloud_cfg, sort_keys=False, default_flow_style=False
+            )
 
             user_data_payload = vendor_user_data
             override_path = self.cfg.cloud_init_user_data_path
@@ -1109,6 +1165,28 @@ class VMManager:
         if interfaces_xml:
             interfaces_block = "\n" + "\n".join(interfaces_xml)
 
+        filesystems_xml: List[str] = []
+        for fs in self.cfg.filesystems:
+            driver_type = "virtiofs" if fs.driver == "virtiofs" else "path"
+            fs_lines = [
+                f"<filesystem type='mount' accessmode='{fs.accessmode}'>",
+                f"  <driver type='{driver_type}'/>",
+                f"  <source dir='{fs.source}'/>",
+                f"  <target dir='{fs.target}'/>",
+            ]
+            if fs.driver == "virtiofs":
+                fs_lines.insert(
+                    2,
+                    "  <binary path='/usr/lib/qemu/virtiofsd'/>",
+                )
+            if fs.readonly:
+                fs_lines.append("  <readonly/>")
+            fs_lines.append("</filesystem>")
+            filesystems_xml.append(textwrap.indent("\n".join(fs_lines), "            "))
+        filesystems_block = ""
+        if filesystems_xml:
+            filesystems_block = "\n" + "\n".join(filesystems_xml)
+
         display_xml = ""
         graphics = self.cfg.graphics_type
         if graphics and graphics != "none":
@@ -1159,6 +1237,17 @@ class VMManager:
         if order is not None:
             disk_boot_attr = f"\n              <boot order='{order}'/>"
 
+        memory_backing_xml = ""
+        if any(fs.driver == "virtiofs" for fs in self.cfg.filesystems):
+            memory_backing_xml = textwrap.dedent(
+                """
+                <memoryBacking>
+                  <source type='memfd'/>
+                  <access mode='shared'/>
+                </memoryBacking>
+                """
+            ).strip()
+
         os_lines = [
             f"            <type arch='{self.cfg.arch}' machine='{machine_type}'>hvm</type>",
         ]
@@ -1175,6 +1264,7 @@ class VMManager:
 {os_block}
           </os>
 {features_block}
+          {memory_backing_xml}
           {cpu_xml}
           <devices>
             <disk type='file' device='disk'>
@@ -1185,6 +1275,7 @@ class VMManager:
             {seed_iso_xml}
             {boot_iso_xml}
 {interfaces_block}
+{filesystems_block}
             <serial type='pty'>
               <target port='0'/>
             </serial>
@@ -1495,6 +1586,84 @@ def parse_env() -> VMConfig:
             nic.boot = boot_override.strip().lower() in TRUTHY
         return nic
 
+    def build_filesystem(index: int) -> Optional[FilesystemConfig]:
+        source_raw = get_env_indexed("FILESYSTEM_SOURCE", index)
+        target_raw = get_env_indexed("FILESYSTEM_TARGET", index)
+        driver_raw = get_env_indexed("FILESYSTEM_DRIVER", index)
+        accessmode_raw = get_env_indexed("FILESYSTEM_ACCESSMODE", index)
+        readonly_raw = get_env_indexed("FILESYSTEM_READONLY", index)
+
+        trigger_values = [source_raw, target_raw, driver_raw, accessmode_raw]
+        has_value = any(
+            value is not None and value.strip() for value in trigger_values if isinstance(value, str)
+        )
+        if not has_value and readonly_raw is not None:
+            if readonly_raw.strip().lower() in TRUTHY:
+                has_value = True
+        if not has_value:
+            return None
+
+        suffix = "" if index == 1 else str(index)
+
+        if source_raw is None or not source_raw.strip():
+            raise ManagerError(f"FILESYSTEM{suffix}_SOURCE is required when configuring a filesystem share")
+        if target_raw is None or not target_raw.strip():
+            raise ManagerError(f"FILESYSTEM{suffix}_TARGET is required when configuring a filesystem share")
+
+        readonly = False
+        if readonly_raw is not None:
+            readonly = readonly_raw.strip().lower() in TRUTHY
+
+        source_path = Path(source_raw).expanduser()
+        if source_path.exists():
+            if not source_path.is_dir():
+                raise ManagerError(f"FILESYSTEM{suffix}_SOURCE {source_path} must point to a directory")
+        else:
+            if readonly:
+                raise ManagerError(
+                    f"FILESYSTEM{suffix}_SOURCE {source_path} does not exist and cannot be created while readonly"
+                )
+            ensure_directory(source_path)
+        if not source_path.is_dir():
+            raise ManagerError(f"FILESYSTEM{suffix}_SOURCE {source_path} must point to a directory")
+
+        target = target_raw.strip()
+        if "/" in target:
+            raise ManagerError(f"FILESYSTEM{suffix}_TARGET '{target}' must be a simple tag without '/' characters")
+
+        driver_value = (driver_raw or "virtiofs").strip().lower()
+        driver_aliases = {
+            "virtiofs": "virtiofs",
+            "virtio-fs": "virtiofs",
+            "virtio_fs": "virtiofs",
+            "9p": "9p",
+            "virtio9p": "9p",
+            "virtio-9p": "9p",
+            "virtio": "9p",
+            "path": "9p",
+        }
+        driver = driver_aliases.get(driver_value)
+        if driver is None:
+            supported = ", ".join(sorted({"virtiofs", "9p"}))
+            raise ManagerError(
+                f"Unsupported FILESYSTEM{suffix}_DRIVER '{driver_value}'. Supported drivers: {supported}"
+            )
+
+        accessmode = (accessmode_raw or "passthrough").strip().lower()
+        if accessmode not in {"passthrough", "mapped", "squash"}:
+            raise ManagerError(
+                f"Unsupported FILESYSTEM{suffix}_ACCESSMODE '{accessmode}'. "
+                "Supported values: passthrough, mapped, squash."
+            )
+
+        return FilesystemConfig(
+            source=source_path,
+            target=target,
+            driver=driver,
+            accessmode=accessmode,
+            readonly=readonly,
+        )
+
     nics: List[NicConfig] = []
     primary_nic = build_nic(1)
     if primary_nic is None:
@@ -1508,6 +1677,15 @@ def parse_env() -> VMConfig:
             break
         nics.append(nic)
         idx += 1
+
+    filesystems: List[FilesystemConfig] = []
+    fs_index = 1
+    while True:
+        filesystem = build_filesystem(fs_index)
+        if filesystem is None:
+            break
+        filesystems.append(filesystem)
+        fs_index += 1
 
     ipxe_rom_path: Optional[str] = None
     if ipxe_enabled:
@@ -1584,6 +1762,7 @@ def parse_env() -> VMConfig:
         nics=nics,
         ipxe_enabled=ipxe_enabled,
         ipxe_rom_path=ipxe_rom_path,
+        filesystems=filesystems,
     )
 
 
@@ -1643,6 +1822,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.ipxe_enabled:
         rom_display = cfg.ipxe_rom_path or "<unspecified>"
         log("INFO", f"iPXE enabled (ROM: {rom_display})")
+    if cfg.filesystems:
+        for idx, fs in enumerate(cfg.filesystems, start=1):
+            mode = "read-only" if fs.readonly else "read-write"
+            mount_dir = Path("/mnt") / sanitize_mount_target(fs.target)
+            log(
+                "INFO",
+                f"Filesystem #{idx}: {fs.source} -> guest tag '{fs.target}' "
+                f"({mode}, driver={fs.driver}, accessmode={fs.accessmode}, mount={mount_dir})",
+            )
     log("INFO", f"Display mode: {cfg.display}")
     if cfg.graphics_type != "none":
         log("INFO", f"Graphics backend: {cfg.graphics_type}")
