@@ -381,11 +381,16 @@ class ServiceManager:
         ensure_directory(self.cert_dir)
         ensure_directory(self.config_dir)
         self._novnc_started = False
+        self._storage_pool_name = os.environ.get("REDFISH_STORAGE_POOL", "default")
+        self._storage_pool_path = Path(
+            os.environ.get("REDFISH_STORAGE_PATH", "/var/lib/libvirt/images")
+        )
 
     def start(self) -> None:
         self._start_libvirt()
         self._wait_for_libvirt()
         if self.vm_config.redfish_enabled:
+            self._ensure_storage_pool()
             self._start_sushy()
         else:
             log("INFO", "Redfish disabled (set REDFISH_ENABLE=1 to enable)")
@@ -556,6 +561,61 @@ class ServiceManager:
             text=True,
         )
         self.processes.append(proc)
+
+    def _ensure_storage_pool(self) -> None:
+        ensure_directory(self._storage_pool_path)
+        conn: Optional[libvirt.virConnect] = None
+        try:
+            conn = libvirt.open(LIBVIRT_URI)
+            if conn is None:
+                log(
+                    "WARN",
+                    f"Failed to open libvirt connection at {LIBVIRT_URI}; "
+                    "virtual media may be unavailable",
+                )
+                return
+            try:
+                pool = conn.storagePoolLookupByName(self._storage_pool_name)
+            except libvirt.libvirtError:
+                pool = None
+            if pool is None:
+                pool_xml = textwrap.dedent(
+                    f"""
+                    <pool type='dir'>
+                      <name>{self._storage_pool_name}</name>
+                      <target>
+                        <path>{self._storage_pool_path}</path>
+                      </target>
+                    </pool>
+                    """
+                ).strip()
+                pool = conn.storagePoolDefineXML(pool_xml, 0)
+                try:
+                    pool.build(0)
+                except libvirt.libvirtError as exc:
+                    log(
+                        "WARN",
+                        f"Storage pool '{self._storage_pool_name}' build failed: {exc}",
+                    )
+                else:
+                    log(
+                        "INFO",
+                        f"Created libvirt storage pool "
+                        f"'{self._storage_pool_name}' "
+                        f"({self._storage_pool_path})",
+                    )
+            if pool.isActive() == 0:
+                pool.create(0)
+            if pool.autostart() == 0:
+                pool.setAutostart(True)
+        except libvirt.libvirtError as exc:
+            log(
+                "WARN",
+                f"Unable to ensure storage pool '{self._storage_pool_name}': {exc}",
+            )
+        finally:
+            if conn is not None:
+                conn.close()
 
     def start_novnc(self) -> None:
         if not self.vm_config.novnc_enabled:
