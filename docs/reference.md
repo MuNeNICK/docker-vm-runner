@@ -30,6 +30,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM (`/images/base/...`). |
 | `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). |
 | `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
+| `CLOUD_INIT_USER_DATA` | *(unset)* | Path to an additional cloud-init payload file. Added as a second multipart section after the built-in configuration. |
 | `ARCH` | `x86_64` | Guest architecture. Accepts `x86_64` (alias `amd64`) or `aarch64` (alias `arm64`). Defaults to the distribution's declared `arch` or `x86_64`. |
 | `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
 | `EXTRA_ARGS` | *(blank)* | Additional QEMU CLI arguments (space-delimited). |

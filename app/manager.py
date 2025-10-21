@@ -23,6 +23,8 @@ import sys
 import tempfile
 import textwrap
 import time
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -195,6 +197,27 @@ def hash_password(password: str) -> str:
     return hashed.decode("utf-8")
 
 
+def detect_cloud_init_content_type(payload: str) -> str:
+    """Infer the MIME type for cloud-init user data."""
+    stripped = payload.lstrip()
+    if not stripped:
+        return "text/cloud-config"
+    first_line = stripped.splitlines()[0].strip().lower()
+    if stripped.startswith("#!"):
+        return "text/x-shellscript"
+    if first_line.startswith("#cloud-config-archive"):
+        return "text/cloud-config-archive"
+    if first_line.startswith("#cloud-config"):
+        return "text/cloud-config"
+    if first_line.startswith("#cloud-boothook"):
+        return "text/cloud-boothook"
+    if first_line.startswith("#include"):
+        return "text/x-include-url"
+    if first_line.startswith("#part-handler"):
+        return "text/part-handler"
+    return "text/cloud-config"
+
+
 def detect_container_id() -> Optional[str]:
     """Try to extract the container ID from cgroup membership."""
     cgroup_path = Path("/proc/self/cgroup")
@@ -354,6 +377,7 @@ class VMConfig:
     boot_iso_path: Optional[str]
     boot_order: List[str]
     cloud_init_enabled: bool
+    cloud_init_user_data_path: Optional[Path]
     password: str
     ssh_port: int
     vm_name: str
@@ -910,7 +934,7 @@ class VMManager:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             passwd_hash = hash_password(self.cfg.password)
-            user_data = textwrap.dedent(
+            vendor_user_data = textwrap.dedent(
                 f"""
                 #cloud-config
                 users:
@@ -925,16 +949,60 @@ class VMManager:
                 """
             ).strip() + "\n"
             if self.cfg.ssh_pubkey:
-                user_data += "ssh_authorized_keys:\n"
-                user_data += f"  - {self.cfg.ssh_pubkey}\n"
-            (tmp / "user-data").write_text(user_data)
+                vendor_user_data += "ssh_authorized_keys:\n"
+                vendor_user_data += f"  - {self.cfg.ssh_pubkey}\n"
+
+            user_data_payload = vendor_user_data
+            override_path = self.cfg.cloud_init_user_data_path
+            if override_path:
+                override_content = override_path.read_text(encoding="utf-8")
+                if override_content.strip():
+                    log("INFO", f"Appending user cloud-init data from {override_path}")
+                    multipart = MIMEMultipart()
+                    vendor_part = MIMEText(
+                        vendor_user_data,
+                        _subtype="cloud-config",
+                        _charset="utf-8",
+                    )
+                    vendor_part.add_header(
+                        "Content-Disposition",
+                        "attachment",
+                        filename="00-vendor-cloud-config.yaml",
+                    )
+                    multipart.attach(vendor_part)
+
+                    content_type = detect_cloud_init_content_type(override_content)
+                    main_type, _, subtype = content_type.partition("/")
+                    if main_type != "text" or not subtype:
+                        raise ManagerError(
+                            f"Unsupported content type '{content_type}' inferred for CLOUD_INIT_USER_DATA"
+                        )
+                    user_part = MIMEText(
+                        override_content,
+                        _subtype=subtype,
+                        _charset="utf-8",
+                    )
+                    user_part.add_header(
+                        "Content-Disposition",
+                        "attachment",
+                        filename=f"99-user-data.{subtype.replace('/', '-')}",
+                    )
+                    multipart.attach(user_part)
+                    user_data_payload = multipart.as_string()
+                else:
+                    log(
+                        "WARN",
+                        f"CLOUD_INIT_USER_DATA file {override_path} is empty; only vendor cloud-config will be applied.",
+                    )
+
+            (tmp / "user-data").write_text(user_data_payload, encoding="utf-8")
             meta_data = textwrap.dedent(
                 f"""
                 instance-id: iid-{self.cfg.vm_name}
                 local-hostname: {self.cfg.vm_name}
                 """
             ).strip() + "\n"
-            (tmp / "meta-data").write_text(meta_data)
+            (tmp / "meta-data").write_text(meta_data, encoding="utf-8")
 
             cmd = [
                 "genisoimage",
@@ -1278,6 +1346,19 @@ def parse_env() -> VMConfig:
         boot_order = ["hd"]
 
     cloud_init_enabled = get_env_bool("CLOUD_INIT", True)
+    cloud_init_user_data_env = get_env("CLOUD_INIT_USER_DATA")
+    cloud_init_user_data_path: Optional[Path] = None
+    if cloud_init_user_data_env:
+        candidate = Path(cloud_init_user_data_env)
+        if not candidate.exists():
+            raise ManagerError(
+                f"CLOUD_INIT_USER_DATA file not found: {candidate}"
+            )
+        if not candidate.is_file():
+            raise ManagerError(
+                f"CLOUD_INIT_USER_DATA must point to a regular file: {candidate}"
+            )
+        cloud_init_user_data_path = candidate
     ipxe_enabled = get_env_bool("IPXE_ENABLE", False)
     ipxe_rom_raw = get_env("IPXE_ROM_PATH")
     ipxe_rom_override = ipxe_rom_raw.strip() if ipxe_rom_raw else None
@@ -1489,6 +1570,7 @@ def parse_env() -> VMConfig:
         boot_iso_path=boot_iso,
         boot_order=boot_order,
         cloud_init_enabled=cloud_init_enabled,
+        cloud_init_user_data_path=cloud_init_user_data_path,
         password=guest_password,
         ssh_port=ssh_port,
         vm_name=vm_name,
@@ -1535,6 +1617,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
+    if cfg.cloud_init_user_data_path:
+        log("INFO", f"CLOUD_INIT_USER_DATA: {cfg.cloud_init_user_data_path}")
     for idx, nic in enumerate(cfg.nics, start=1):
         label = "Primary NIC" if idx == 1 else f"NIC #{idx}"
         if nic.mode == "user":

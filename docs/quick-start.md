@@ -56,6 +56,30 @@ Container storage layout:
 - `/images/vms/<name>/seed.iso` — regenerated cloud-init seed (only when cloud-init is enabled).
 - `/var/lib/docker-vm-runner` — management state (Redfish certificates, etc.).
 
+## Custom cloud-init
+
+The container always injects a vendor cloud-config that creates the default login user and password. Supply a second, user-controlled stage by mounting a file and pointing `CLOUD_INIT_USER_DATA` at it:
+
+```bash
+cat <<'EOF' > ./cloud-init/user-data.yaml
+#cloud-config
+packages:
+  - htop
+runcmd:
+  - ['bash', '-lc', 'echo hello from user-data']
+EOF
+
+docker run --rm -it \
+  --name vm1 \
+  -p 2222:2222 \
+  --device /dev/kvm:/dev/kvm \
+  -v "$PWD/cloud-init:/cloud-init:ro" \
+  -e CLOUD_INIT_USER_DATA=/cloud-init/user-data.yaml \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+The file can contain any cloud-init payload (`#cloud-config`, shell script, boothook, etc.). It is attached as the second part of a multipart NoCloud seed so it runs after the built-in configuration, mirroring the “vendor data + user data” flow seen on EC2.
+
 ## Console & Logs
 
 - Attach to the serial console: `virsh console <vm_name>` (inside container) or rely on the container entrypoint (unless `NO_CONSOLE=1`).
