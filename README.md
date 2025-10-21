@@ -2,6 +2,8 @@
 
 Run lightweight QEMU/KVM virtual machines within Docker. Each container hosts a libvirt-managed VM with optional Redfish control and noVNC console support. Images are pulled automatically from upstream cloud sources or can be supplied locally.
 
+https://github.com/user-attachments/assets/434dc6cf-d06c-4bb0-b951-9ec4b81fe5f0
+
 ## Background
 
 I rely on containers to avoid polluting host machines while developing applications, but containerized environments have limits around systemd, networking, and kernel features. Docker-VM-Runner bridges that gap by making it just as easy to spin up a full virtual machine: a single `docker run` fetches the requested cloud image, boots it, and attaches your terminal to the VM console immediately.
