@@ -13,6 +13,8 @@ services:
   vm1:
     image: ghcr.io/munenick/docker-vm-runner:latest
     container_name: vm1
+    stdin_open: true
+    tty: true
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
@@ -32,6 +34,8 @@ services:
   vm2:
     image: ghcr.io/munenick/docker-vm-runner:latest
     container_name: vm2
+    stdin_open: true
+    tty: true
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
