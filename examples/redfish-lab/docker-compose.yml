@@ -57,15 +57,10 @@ services:
           - redfish-client-1
     devices:
       - /dev/kvm:/dev/kvm
-    volumes:
-      - ./images/base:/images/base
-      - ./images/vms/redfish-client-1:/images/vms/redfish-client-1
-      - ./images/state/redfish-client-1:/var/lib/docker-vm-runner
     ports:
       - "6081:6080"
     environment:
       GUEST_NAME: redfish-client-1
-      PERSIST: "1"
       REDFISH_ENABLE: "1"
       REDFISH_PORT: 8443
       REDFISH_USERNAME: admin
@@ -89,15 +84,10 @@ services:
           - redfish-client-2
     devices:
       - /dev/kvm:/dev/kvm
-    volumes:
-      - ./images/base:/images/base
-      - ./images/vms/redfish-client-2:/images/vms/redfish-client-2
-      - ./images/state/redfish-client-2:/var/lib/docker-vm-runner
     ports:
       - "6082:6080"
     environment:
       GUEST_NAME: redfish-client-2
-      PERSIST: "1"
       REDFISH_ENABLE: "1"
       REDFISH_PORT: 8443
       REDFISH_USERNAME: admin
