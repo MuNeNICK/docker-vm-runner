@@ -24,13 +24,13 @@ Navigate to `https://localhost:6080/` and the viewer will auto-connect (`autocon
 ### Option A: Use a locally stored ISO
 
 1. Place the installer under `./images/base/` (e.g., `./images/base/ubuntu-24.04.3-desktop-amd64.iso`).
-2. Bind-mount `./images` and (optionally) `./images/state` so disks and certificates persist.
+2. Bind-mount `./images` (and optionally `./images/state` if you want TLS/metadata persistence).
 3. Set `BOOT_ISO` to the in-container path (`/images/base/...`).
 
 ### Option B: Download the ISO on demand
 
-1. Bind-mount `./images/state` so the download cache (`/var/lib/docker-vm-runner/boot-isos`) persists between runs.
-2. Set `BOOT_ISO_URL=https://…`. The container fetches the ISO the first time and reuses the cached copy afterward.
+1. Bind-mount `./images` for disks; add `./images/state:/var/lib/docker-vm-runner` **only if** you want the download cache (`/var/lib/docker-vm-runner/boot-isos`) to persist between runs.
+2. Set `BOOT_ISO_URL=https://…`. The container fetches the ISO the first time and reuses the cached copy afterward (cache persists only when the state directory is mounted).
 3. Omit `BOOT_ISO` (it’s implied by the download).
 
 When neither a base disk nor blank disk is specified, Docker-VM-Runner automatically provisions a blank QCOW2 sized by `DISK_SIZE`.
@@ -41,10 +41,7 @@ Example (Option A): Ubuntu Desktop with noVNC and a 40G blank disk using a local
 docker run --rm \
   --name ubuntu-desktop-vm \
   --device /dev/kvm:/dev/kvm \
-  --security-opt apparmor=unconfined \
   -v "$(pwd)/images:/images" \
-  -v "$(pwd)/images/state:/var/lib/docker-vm-runner" \
-  -v "$(pwd)/distros.yaml:/config/distros.yaml:ro" \
   -p 2222:2222 \
   -p 6080:6080 \
   -e GUEST_NAME=ubuntu-desktop \
@@ -67,10 +64,7 @@ Example (Option B): Same configuration, but downloading the ISO inside the conta
 docker run --rm \
   --name ubuntu-desktop-vm \
   --device /dev/kvm:/dev/kvm \
-  --security-opt apparmor=unconfined \
   -v "$(pwd)/images:/images" \
-  -v "$(pwd)/images/state:/var/lib/docker-vm-runner" \
-  -v "$(pwd)/distros.yaml:/config/distros.yaml:ro" \
   -p 2222:2222 \
   -p 6080:6080 \
   -e GUEST_NAME=ubuntu-desktop \
