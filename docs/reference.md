@@ -28,6 +28,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. |
 | `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
 | `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM (`/images/base/...`). |
+| `BOOT_ISO_URL` | *(unset)* | HTTP(S) URL to fetch and attach as a CD-ROM. Download occurs inside the container and is cached under `/var/lib/docker-vm-runner/boot-isos`. Mutually exclusive with `BOOT_ISO`. |
 | `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). |
 | `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
 | `CLOUD_INIT_USER_DATA` | *(unset)* | Path to an additional cloud-init payload file. Added as a second multipart section after the built-in configuration. |

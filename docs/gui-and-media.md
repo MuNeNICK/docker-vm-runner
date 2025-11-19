@@ -21,11 +21,21 @@ Navigate to `https://localhost:6080/` and the viewer will auto-connect (`autocon
 
 ## Booting from an Installation ISO
 
-1. Place the ISO under `./images/base/` (e.g., `./images/base/ubuntu-24.04.3-desktop-amd64.iso`).
-2. Bind-mount `./images` and (optionally) `./images/state` so disks and certificates persist.
-3. Set `BOOT_ISO` to the in-container path (`/images/base/...`). If you don’t specify a base disk, Docker-VM-Runner automatically provisions a blank QCOW2 sized by `DISK_SIZE`.
+### Option A: Use a locally stored ISO
 
-Example: Ubuntu Desktop with noVNC and a 40G blank disk.
+1. Place the installer under `./images/base/` (e.g., `./images/base/ubuntu-24.04.3-desktop-amd64.iso`).
+2. Bind-mount `./images` and (optionally) `./images/state` so disks and certificates persist.
+3. Set `BOOT_ISO` to the in-container path (`/images/base/...`).
+
+### Option B: Download the ISO on demand
+
+1. Bind-mount `./images/state` so the download cache (`/var/lib/docker-vm-runner/boot-isos`) persists between runs.
+2. Set `BOOT_ISO_URL=https://…`. The container fetches the ISO the first time and reuses the cached copy afterward.
+3. Omit `BOOT_ISO` (it’s implied by the download).
+
+When neither a base disk nor blank disk is specified, Docker-VM-Runner automatically provisions a blank QCOW2 sized by `DISK_SIZE`.
+
+Example (Option A): Ubuntu Desktop with noVNC and a 40G blank disk using a local ISO.
 
 ```bash
 docker run --rm \
@@ -45,7 +55,33 @@ docker run --rm \
   -e BOOT_ORDER=cdrom,hd \
   -e CLOUD_INIT=0 \
   -e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
-  docker-vm-runner-novnc-test
+  ghcr.io/munenick/docker-vm-runner:latest
+
+# Add Redfish support if required:
+#   -e REDFISH_ENABLE=1 -p 8443:8443
+```
+
+Example (Option B): Same configuration, but downloading the ISO inside the container.
+
+```bash
+docker run --rm \
+  --name ubuntu-desktop-vm \
+  --device /dev/kvm:/dev/kvm \
+  --security-opt apparmor=unconfined \
+  -v "$(pwd)/images:/images" \
+  -v "$(pwd)/images/state:/var/lib/docker-vm-runner" \
+  -v "$(pwd)/distros.yaml:/config/distros.yaml:ro" \
+  -p 2222:2222 \
+  -p 6080:6080 \
+  -e GUEST_NAME=ubuntu-desktop \
+  -e GRAPHICS=novnc \
+  -e NO_CONSOLE=1 \
+  -e DISK_SIZE=40G \
+  -e BOOT_ISO_URL="https://releases.ubuntu.com/24.04/ubuntu-24.04.3-desktop-amd64.iso" \
+  -e BOOT_ORDER=cdrom,hd \
+  -e CLOUD_INIT=0 \
+  -e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
+  ghcr.io/munenick/docker-vm-runner:latest
 
 # Add Redfish support if required:
 #   -e REDFISH_ENABLE=1 -p 8443:8443

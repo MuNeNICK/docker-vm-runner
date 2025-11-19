@@ -28,6 +28,7 @@ from email.mime.text import MIMEText
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 try:
     import yaml  # type: ignore
@@ -50,6 +51,7 @@ IMAGES_DIR = Path("/images")
 BASE_IMAGES_DIR = IMAGES_DIR / "base"
 VM_IMAGES_DIR = IMAGES_DIR / "vms"
 STATE_DIR = Path("/var/lib/docker-vm-runner")
+BOOT_ISO_CACHE_DIR = STATE_DIR / "boot-isos"
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
 MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
@@ -392,6 +394,7 @@ class VMConfig:
     base_image_path: Optional[str]
     blank_work_disk: bool
     boot_iso_path: Optional[str]
+    boot_iso_url: Optional[str]
     boot_order: List[str]
     cloud_init_enabled: bool
     cloud_init_user_data_path: Optional[Path]
@@ -799,10 +802,12 @@ class VMManager:
             self.base_image = BASE_IMAGES_DIR / f"{self.cfg.distro}.{self.cfg.image_format}"
         self.work_image = self.vm_dir / f"disk.{self.cfg.image_format}"
         self.boot_iso = Path(self.cfg.boot_iso_path) if self.cfg.boot_iso_path else None
+        self.boot_iso_url = self.cfg.boot_iso_url
         self.seed_iso = self.vm_dir / "seed.iso" if self.cfg.cloud_init_enabled else None
         self._disk_reused = False
         self._network_macs: Dict[int, str] = {}
         self._ipxe_rom_path: Optional[Path] = None
+        self._boot_iso_cache_path: Optional[Path] = None
         if self.cfg.ipxe_enabled:
             if not self.cfg.ipxe_rom_path:
                 raise ManagerError("IPXE_ENABLE=1 requires an iPXE ROM path.")
@@ -842,6 +847,7 @@ class VMManager:
         if not self.cfg.blank_work_disk:
             self._ensure_base_image()
         self._prepare_work_image()
+        self._prepare_boot_iso()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
         self._prepare_firmware()
@@ -917,6 +923,44 @@ class VMManager:
                     run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
         else:
             log("INFO", f"Persistent disk retained at {self.work_image}")
+
+    def _prepare_boot_iso(self) -> None:
+        if self.boot_iso:
+            return
+        if not self.boot_iso_url:
+            return
+
+        ensure_directory(BOOT_ISO_CACHE_DIR)
+        digest = hashlib.sha256(self.boot_iso_url.encode("utf-8")).hexdigest()
+        parsed = urlparse(self.boot_iso_url)
+        base_name = Path(parsed.path or "").name or "boot.iso"
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", base_name) or "boot.iso"
+        if not Path(safe_name).suffix:
+            safe_name = f"{safe_name}.iso"
+        destination = BOOT_ISO_CACHE_DIR / f"{digest[:12]}-{safe_name}"
+
+        if destination.exists() and destination.stat().st_size > 0:
+            log("INFO", f"Using cached BOOT_ISO_URL download: {destination}")
+        else:
+            log("INFO", f"Downloading boot ISO from {self.boot_iso_url}")
+            with tempfile.NamedTemporaryFile(delete=False, dir=BOOT_ISO_CACHE_DIR) as tmp:
+                tmp_path = Path(tmp.name)
+            try:
+                run([
+                    "wget",
+                    "--progress=bar:force:noscroll",
+                    "-O",
+                    str(tmp_path),
+                    self.boot_iso_url,
+                ])
+                tmp_path.replace(destination)
+            except subprocess.CalledProcessError as exc:
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+                raise ManagerError(f"Failed to download BOOT_ISO_URL {self.boot_iso_url}: {exc}") from exc
+
+        self._boot_iso_cache_path = destination
+        self.boot_iso = destination
 
     def _prepare_firmware(self) -> None:
         firmware_cfg = self._arch_profile.get("firmware")
@@ -1412,6 +1456,13 @@ def parse_env() -> VMConfig:
     if boot_iso is not None:
         boot_iso = boot_iso.strip() or None
 
+    boot_iso_url = get_env("BOOT_ISO_URL")
+    if boot_iso_url is not None:
+        boot_iso_url = boot_iso_url.strip() or None
+
+    if boot_iso and boot_iso_url:
+        raise ManagerError("Set only one of BOOT_ISO or BOOT_ISO_URL, not both.")
+
     boot_order_raw = get_env("BOOT_ORDER", "hd")
     boot_order_input = [item.strip().lower() for item in boot_order_raw.split(",") if item.strip()]
     boot_aliases = {
@@ -1746,6 +1797,7 @@ def parse_env() -> VMConfig:
         base_image_path=base_image_override,
         blank_work_disk=blank_work_disk,
         boot_iso_path=boot_iso,
+        boot_iso_url=boot_iso_url,
         boot_order=boot_order,
         cloud_init_enabled=cloud_init_enabled,
         cloud_init_user_data_path=cloud_init_user_data_path,
