@@ -1463,6 +1463,8 @@ def parse_env() -> VMConfig:
     if boot_iso and boot_iso_url:
         raise ManagerError("Set only one of BOOT_ISO or BOOT_ISO_URL, not both.")
 
+    iso_requested = bool(boot_iso or boot_iso_url)
+
     boot_order_raw = get_env("BOOT_ORDER", "hd")
     boot_order_input = [item.strip().lower() for item in boot_order_raw.split(",") if item.strip()]
     boot_aliases = {
@@ -1479,9 +1481,9 @@ def parse_env() -> VMConfig:
     boot_order = [boot_aliases.get(dev, dev) for dev in boot_order_input]
     if not boot_order:
         boot_order = ["hd"]
-    if boot_iso and "cdrom" not in boot_order:
+    if iso_requested and "cdrom" not in boot_order:
         boot_order = ["cdrom"] + boot_order
-    if boot_iso and base_image_override is None and blank_disk_raw is None:
+    if iso_requested and base_image_override is None and blank_disk_raw is None:
         # Installing from ISO without an explicit base image -> default to a blank disk.
         blank_work_disk = True
     if blank_work_disk and not boot_iso and boot_order == ["hd"]:
