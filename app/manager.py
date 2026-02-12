@@ -84,28 +84,11 @@ SUPPORTED_ARCHES = {
 }
 
 ARCH_ALIASES = {
-    "x86_64": "x86_64",
     "amd64": "x86_64",
     "arm64": "aarch64",
-    "aarch64": "aarch64",
 }
 
-NETWORK_MODEL_ALIASES = {
-    "virtio": "virtio",
-    "virtio-net": "virtio",
-    "virtio_net": "virtio",
-    "virtio-net-pci": "virtio",
-    "e1000": "e1000",
-    "e1000e": "e1000e",
-    "rtl8139": "rtl8139",
-    "ne2k": "ne2k_pci",
-    "ne2k_pci": "ne2k_pci",
-    "pcnet": "pcnet",
-    "pcnet32": "pcnet",
-    "vmxnet3": "vmxnet3",
-}
-
-SUPPORTED_NETWORK_MODELS = set(NETWORK_MODEL_ALIASES.values())
+SUPPORTED_NETWORK_MODELS = {"virtio", "e1000", "e1000e", "rtl8139", "ne2k_pci", "pcnet", "vmxnet3"}
 
 IPXE_DEFAULT_ROMS = {
     "x86_64": {
@@ -1437,19 +1420,9 @@ def parse_env() -> VMConfig:
     cpus = parse_int_env("CPUS", "2")
     disk_size = validate_disk_size(get_env("DISK_SIZE", "20G") or "20G")
 
-    graphics_raw = get_env("GRAPHICS", None)
-    if graphics_raw is None:
-        display = "none"
-    else:
-        display = graphics_raw.strip().lower() or "none"
-    graphics_type = display
-    novnc_enabled = False
-    if display in ("", "none"):
-        graphics_type = "none"
-    elif display == "novnc":
-        graphics_type = "vnc"
-        novnc_enabled = True
-    elif display == "vnc":
+    display = (get_env("GRAPHICS") or "none").strip().lower() or "none"
+    novnc_enabled = display == "novnc"
+    if novnc_enabled:
         graphics_type = "vnc"
     else:
         graphics_type = display
@@ -1465,7 +1438,7 @@ def parse_env() -> VMConfig:
         if not base_image_override:
             base_image_override = None
 
-    blank_disk_raw = get_env("BLANK_DISK")
+    blank_disk_explicit = get_env("BLANK_DISK") is not None
     blank_work_disk = get_env_bool("BLANK_DISK", False)
     if base_image_override and base_image_override.lower() == "blank":
         blank_work_disk = True
@@ -1493,38 +1466,22 @@ def parse_env() -> VMConfig:
 
     boot_order_raw = get_env("BOOT_ORDER", "hd")
     boot_order_input = [item.strip().lower() for item in boot_order_raw.split(",") if item.strip()]
-    boot_aliases = {
-        "hd": "hd",
-        "disk": "hd",
-        "harddisk": "hd",
-        "cd": "cdrom",
-        "cdrom": "cdrom",
-        "dvd": "cdrom",
-        "network": "network",
-        "net": "network",
-        "pxe": "network",
-    }
     valid_boot_devices = {"hd", "cdrom", "network"}
     boot_order = []
     for dev in boot_order_input:
-        resolved = boot_aliases.get(dev)
-        if resolved is None:
-            supported = ", ".join(sorted(boot_aliases.keys()))
-            raise ManagerError(f"Unknown BOOT_ORDER device '{dev}'. Supported values: {supported}")
-        boot_order.append(resolved)
+        if dev not in valid_boot_devices:
+            raise ManagerError(f"Unknown BOOT_ORDER device '{dev}'. Supported: hd, cdrom, network")
+        boot_order.append(dev)
     if not boot_order:
         boot_order = ["hd"]
     if iso_requested and "cdrom" not in boot_order:
         boot_order = ["cdrom"] + boot_order
-    if iso_requested and base_image_override is None and blank_disk_raw is None:
+    if iso_requested and base_image_override is None and not blank_disk_explicit:
         # Installing from ISO without an explicit base image -> default to a blank disk.
         blank_work_disk = True
-    if blank_work_disk and not boot_iso and boot_order == ["hd"]:
-        boot_order = ["hd"]
-
-    cloud_init_explicit = get_env("CLOUD_INIT")
-    if cloud_init_explicit is not None:
-        cloud_init_enabled = cloud_init_explicit.lower() in TRUTHY
+    cloud_init_raw = get_env("CLOUD_INIT")
+    if cloud_init_raw is not None:
+        cloud_init_enabled = cloud_init_raw.lower() in TRUTHY
     elif iso_requested:
         cloud_init_enabled = False
         log("INFO", "BOOT_ISO detected; auto-disabling cloud-init (set CLOUD_INIT=1 to override)")
@@ -1545,31 +1502,27 @@ def parse_env() -> VMConfig:
             )
         cloud_init_user_data_path = candidate
     ipxe_enabled = get_env_bool("IPXE_ENABLE", False)
-    ipxe_rom_raw = get_env("IPXE_ROM_PATH")
-    ipxe_rom_override = ipxe_rom_raw.strip() if ipxe_rom_raw else None
+    ipxe_rom_override = (get_env("IPXE_ROM_PATH") or "").strip() or None
 
     distro_arch_raw = distro_info.get("arch")
     arch_env = get_env("ARCH")
     if arch_env is not None:
-        arch_candidate = arch_env.strip()
+        arch_candidate = arch_env.strip() or "x86_64"
     elif distro_arch_raw:
-        arch_candidate = str(distro_arch_raw).strip()
+        arch_candidate = str(distro_arch_raw).strip() or "x86_64"
     else:
         arch_candidate = "x86_64"
-    if not arch_candidate:
-        arch_candidate = "x86_64"
 
-    arch_key = ARCH_ALIASES.get(arch_candidate.lower())
-    if arch_key is None:
-        supported = ", ".join(sorted(SUPPORTED_ARCHES.keys()))
-        raise ManagerError(f"Unsupported ARCH '{arch_candidate}'. Supported: {supported}")
+    arch_lower = arch_candidate.lower()
+    arch_key = ARCH_ALIASES.get(arch_lower, arch_lower)
     if arch_key not in SUPPORTED_ARCHES:
         supported = ", ".join(sorted(SUPPORTED_ARCHES.keys()))
         raise ManagerError(f"Unsupported ARCH '{arch_candidate}'. Supported: {supported}")
 
     if distro_arch_raw:
-        distro_arch_key = ARCH_ALIASES.get(str(distro_arch_raw).strip().lower())
-        if distro_arch_key is None or distro_arch_key not in SUPPORTED_ARCHES:
+        distro_arch_lower = str(distro_arch_raw).strip().lower()
+        distro_arch_key = ARCH_ALIASES.get(distro_arch_lower, distro_arch_lower)
+        if distro_arch_key not in SUPPORTED_ARCHES:
             raise ManagerError(
                 f"Distribution '{distro}' declares unsupported arch '{distro_arch_raw}'."
             )
@@ -1588,31 +1541,18 @@ def parse_env() -> VMConfig:
 
     vm_name = derive_vm_name(distro)
 
-    network_mode_aliases = {
+    network_mode_map = {
         "nat": "user",
-        "user": "user",
-        "usernat": "user",
         "bridge": "bridge",
-        "bridged": "bridge",
-        "host-bridge": "bridge",
         "direct": "direct",
-        "macvtap": "direct",
     }
 
     def get_env_indexed(name: str, index: int) -> Optional[str]:
+        """Get indexed env var. E.g. get_env_indexed("NETWORK_MODE", 2) -> NETWORK2_MODE."""
         if index == 1:
             return get_env(name)
-        # Support both patterns: NETWORK2_MODE and NETWORK_MODE_2
-        if "_" in name:
-            prefix, rest = name.split("_", 1)
-            result = get_env(f"{prefix}{index}_{rest}")
-            if result is not None:
-                return result
-            return get_env(f"{name}_{index}")
-        result = get_env(f"{name}{index}")
-        if result is not None:
-            return result
-        return get_env(f"{name}_{index}")
+        prefix, rest = name.split("_", 1)
+        return get_env(f"{prefix}{index}_{rest}")
 
     def build_nic(index: int) -> Optional[NicConfig]:
         mode_raw = get_env_indexed("NETWORK_MODE", index)
@@ -1621,7 +1561,7 @@ def parse_env() -> VMConfig:
                 mode_raw = "nat"
             else:
                 return None
-        mode_key = network_mode_aliases.get(mode_raw.strip().lower())
+        mode_key = network_mode_map.get(mode_raw.strip().lower())
         if mode_key is None:
             suffix = "" if index == 1 else str(index)
             raise ManagerError(
@@ -1658,15 +1598,12 @@ def parse_env() -> VMConfig:
             mac_address = deterministic_mac(f"{vm_name}:{index}")
 
         model_raw = get_env_indexed("NETWORK_MODEL", index)
-        if model_raw is None or not model_raw.strip():
-            model_raw = "virtio"
-        model_candidate = model_raw.strip().lower()
-        model = NETWORK_MODEL_ALIASES.get(model_candidate)
-        if model is None:
+        model = (model_raw.strip().lower() if model_raw else "virtio")
+        if model not in SUPPORTED_NETWORK_MODELS:
             supported_models = ", ".join(sorted(SUPPORTED_NETWORK_MODELS))
             suffix = "" if index == 1 else str(index)
             raise ManagerError(
-                f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported models: {supported_models}"
+                f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported: {supported_models}"
             )
 
         nic = NicConfig(
@@ -1735,22 +1672,10 @@ def parse_env() -> VMConfig:
         if "/" in target:
             raise ManagerError(f"FILESYSTEM{suffix}_TARGET '{target}' must be a simple tag without '/' characters")
 
-        driver_value = (driver_raw or "virtiofs").strip().lower()
-        driver_aliases = {
-            "virtiofs": "virtiofs",
-            "virtio-fs": "virtiofs",
-            "virtio_fs": "virtiofs",
-            "9p": "9p",
-            "virtio9p": "9p",
-            "virtio-9p": "9p",
-            "virtio": "9p",
-            "path": "9p",
-        }
-        driver = driver_aliases.get(driver_value)
-        if driver is None:
-            supported = ", ".join(sorted({"virtiofs", "9p"}))
+        driver = (driver_raw or "virtiofs").strip().lower()
+        if driver not in ("virtiofs", "9p"):
             raise ManagerError(
-                f"Unsupported FILESYSTEM{suffix}_DRIVER '{driver_value}'. Supported drivers: {supported}"
+                f"Unsupported FILESYSTEM{suffix}_DRIVER '{driver}'. Supported: virtiofs, 9p"
             )
 
         accessmode = (accessmode_raw or "passthrough").strip().lower()

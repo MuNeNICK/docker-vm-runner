@@ -7,7 +7,7 @@ This project keeps QEMU’s user-mode NAT as the default because it “just work
 - Works out of the box; no host networking changes.
 - Container exposes the SSH/Redfish/VNC ports defined in `docker-compose.yml` or your `docker run` command.
 - Ideal for quick tests or development shells where port forwarding is sufficient.
-- You can append secondary NAT NICs by defining `NETWORK2_MODE=user`, `NETWORK3_MODE=user`, etc., each with optional `NETWORK{N}_MODEL` and `NETWORK{N}_MAC` to control NIC model and MAC addresses.
+- You can append secondary NAT NICs by defining `NETWORK2_MODE=nat`, `NETWORK3_MODE=nat`, etc., each with optional `NETWORK2_MODEL` and `NETWORK2_MAC`.
 
 ## Bridge Mode (libvirt bridge)
 
@@ -26,12 +26,12 @@ Bridge mode attaches the guest NIC to a pre-existing Linux bridge on the host (e
      --network host \\                     # libvirt needs host networking to tap the bridge
      -e NETWORK_MODE=bridge \\
      -e NETWORK_BRIDGE=br0 \\
-     -e NETWORK2_MODE=user \\
+     -e NETWORK2_MODE=nat \\
      -e NETWORK2_MODEL=virtio \\
      -e NETWORK2_MAC=52:54:00:aa:bb:cc \\
      ghcr.io/munenick/docker-vm-runner:latest
    ```
-3. The guest now appears directly on the bridged network. Use DHCP or configure a static IP through cloud-init. If you still need NAT access for package downloads, add a secondary NIC by setting `NETWORK2_MODE=user` (plus optional `NETWORK2_MODEL`, `NETWORK2_MAC`, etc.).
+3. The guest now appears directly on the bridged network. Use DHCP or configure a static IP through cloud-init. If you still need NAT access for package downloads, add a secondary NIC by setting `NETWORK2_MODE=nat` (plus optional `NETWORK2_MODEL`, `NETWORK2_MAC`, etc.).
 
 ### Static addressing with cloud-init
 
@@ -48,7 +48,7 @@ docker run --rm -it \\
   -v /dev:/dev \\                         # bind-mount host /dev so /dev/tap* is visible
   -e NETWORK_MODE=direct \\
   -e NETWORK_DIRECT_DEV=eth1 \\
-  -e NETWORK2_MODE=user \\
+  -e NETWORK2_MODE=nat \\
  ghcr.io/munenick/docker-vm-runner:latest
 ```
 
@@ -56,7 +56,7 @@ Notes:
 
 - Some hypervisors block MAC spoofing on host NICs; allow it if your upstream switch enforces port security.
 - If a second VM errors with “Device or resource busy” when reusing the same NIC, enable promiscuous mode on the host interface (`ip link set dev eth1 promisc on`) so the driver accepts additional macvtap filters, or switch to bridge mode.
-- macvtap traffic is not visible to the host IP stack. Use bridge mode if the host must communicate with the guest, or add a secondary `NETWORK{N}_MODE=user` NIC so the guest stays reachable via forwarded ports.
+- macvtap traffic is not visible to the host IP stack. Use bridge mode if the host must communicate with the guest, or add a secondary `NETWORK2_MODE=nat` NIC so the guest stays reachable via forwarded ports.
 - Ensure the host kernel has `macvtap`/`macvlan` loaded. Libvirt will create `/dev/tap*` automatically on the host, and the bind-mounted `/dev` makes it visible inside the container.
 
 ## Choosing a mode

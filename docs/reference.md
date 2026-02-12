@@ -29,7 +29,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
 | `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM. Accepts a local path or an HTTP(S) URL (URLs are auto-detected and downloaded). When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set. |
 | `BOOT_ISO_URL` | *(unset)* | Explicit URL form (same as setting `BOOT_ISO` to a URL). |
-| `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). Aliases: `disk`→`hd`, `cd`/`dvd`→`cdrom`, `net`/`pxe`→`network`. |
+| `BOOT_ORDER` | `hd` | Comma-separated boot device order: `hd`, `cdrom`, `network`. |
 | `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. Auto-disabled when `BOOT_ISO` is set. |
 | `CLOUD_INIT_USER_DATA` | *(unset)* | Path to an additional cloud-init payload file. Added as a second multipart section after the built-in configuration. |
 | `ARCH` | `x86_64` | Guest architecture. Accepts `x86_64` (alias `amd64`) or `aarch64` (alias `arm64`). Defaults to the distribution's declared `arch` or `x86_64`. |
@@ -53,7 +53,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | --- | --- | --- |
 | `FILESYSTEM_SOURCE` | *(unset)* | Directory inside the container to expose to the guest (bind-mount a host path here). |
 | `FILESYSTEM_TARGET` | *(auto)* | Guest-facing tag presented to the VM. Auto-derived from the last segment of `FILESYSTEM_SOURCE` when omitted. |
-| `FILESYSTEM_DRIVER` | `virtiofs` | Filesystem driver: `virtiofs` (default) or `9p` (falls back to virtio-9p). |
+| `FILESYSTEM_DRIVER` | `virtiofs` | Filesystem driver: `virtiofs` or `9p`. |
 | `FILESYSTEM_ACCESSMODE` | `passthrough` | Access mode (`passthrough`, `mapped`, or `squash`). Note: virtiofs only supports `passthrough`; use `9p` driver for `mapped` or `squash`. |
 | `FILESYSTEM_READONLY` | `0` | Set to `1` to present the share as read-only. |
 
@@ -68,12 +68,12 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `NETWORK_BRIDGE` | *(required for bridge)* | Name of the host bridge (e.g., `br0`) when `NETWORK_MODE=bridge`. |
 | `NETWORK_DIRECT_DEV` | *(required for direct)* | Host NIC to bind (e.g., `eth0`) when `NETWORK_MODE=direct` (requires `--volume /dev:/dev` and `--privileged`). |
 | `NETWORK_MAC` | *(auto)* | Override the guest MAC address (`aa:bb:cc:dd:ee:ff`). |
-| `NETWORK_MODEL` | `virtio` | NIC model: `virtio`, `e1000`, `e1000e`, `rtl8139`, `ne2k`, `pcnet`, `vmxnet3`. |
+| `NETWORK_MODEL` | `virtio` | NIC model: `virtio`, `e1000`, `e1000e`, `rtl8139`, `ne2k_pci`, `pcnet`, `vmxnet3`. |
 | `NETWORK_BOOT` | `0` | Set `1` to include this NIC in the boot order (useful for PXE without iPXE). |
 | `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the primary NIC and prioritize `network` in the boot order. |
 | `IPXE_ROM_PATH` | *(auto)* | Override the iPXE ROM path. Auto-selected based on `NETWORK_MODEL` (e.g. `pxe-virtio.rom` for virtio on x86_64). Provide a full path when using a custom build. |
 
-**Multi-NIC:** Append an index to define additional NICs. Both `NETWORK2_MODE` and `NETWORK_MODE_2` styles are accepted. The first NIC uses the base name (no index).
+**Multi-NIC:** Append an index after the prefix to define additional NICs: `NETWORK2_MODE`, `NETWORK2_BRIDGE`, `NETWORK2_MAC`, etc. The first NIC uses the base name (no index).
 
 ### Graphics & GUI
 
