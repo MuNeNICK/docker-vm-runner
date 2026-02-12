@@ -1360,8 +1360,29 @@ class VMManager:
     def wait_until_stopped(self) -> None:
         if self.domain is None:
             raise ManagerError("Domain not defined")
-        log("INFO", f"Waiting for domain {self.cfg.vm_name} to stop (Ctrl+C to terminate)")
+
+        shutdown_requested = False
+
+        def _request_shutdown(signum, frame):
+            nonlocal shutdown_requested
+            if shutdown_requested:
+                return
+            shutdown_requested = True
+            sig_name = signal.Signals(signum).name
+            log("INFO", f"{sig_name} received, shutting down VM")
+            try:
+                self.domain.shutdown()  # type: ignore[attr-defined]
+            except libvirt.libvirtError:
+                log("WARN", "Graceful shutdown failed; forcing destroy")
+                try:
+                    self.domain.destroy()  # type: ignore[attr-defined]
+                except libvirt.libvirtError:
+                    log("WARN", "Failed to force destroy domain")
+
+        prev_sigterm = signal.signal(signal.SIGTERM, _request_shutdown)
+        prev_sigint = signal.signal(signal.SIGINT, _request_shutdown)
         try:
+            log("INFO", f"Waiting for domain {self.cfg.vm_name} to stop")
             while True:
                 try:
                     active = self.domain.isActive()  # type: ignore[attr-defined]
@@ -1371,16 +1392,9 @@ class VMManager:
                     log("INFO", f"Domain {self.cfg.vm_name} is no longer active")
                     return
                 time.sleep(1)
-        except KeyboardInterrupt:
-            log("INFO", "Interrupt received, attempting graceful shutdown")
-            try:
-                self.domain.shutdown()  # type: ignore[attr-defined]
-            except libvirt.libvirtError:
-                log("WARN", "Graceful shutdown failed; forcing destroy")
-                try:
-                    self.domain.destroy()  # type: ignore[attr-defined]
-                except libvirt.libvirtError:
-                    log("WARN", "Failed to force destroy domain")
+        finally:
+            signal.signal(signal.SIGTERM, prev_sigterm)
+            signal.signal(signal.SIGINT, prev_sigint)
     def cleanup(self) -> None:
         if self.domain is not None:
             try:
@@ -1394,11 +1408,35 @@ class VMManager:
                 self.domain.undefine()
             except libvirt.libvirtError:
                 log("WARN", f"Failed to undefine domain {self.cfg.vm_name}")
+
+        # Safety net: kill any remaining qemu processes to prevent orphans
+        self._kill_remaining_qemu()
+
         if not self.cfg.persist and self.vm_dir.exists():
             try:
                 shutil.rmtree(self.vm_dir)
             except OSError:
                 log("WARN", f"Failed to remove {self.vm_dir}")
+
+    def _kill_remaining_qemu(self) -> None:
+        """Kill any QEMU processes still running inside this container."""
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "qemu-system"],
+                capture_output=True, text=True, check=False,
+            )
+            if result.returncode != 0:
+                return
+            for line in result.stdout.strip().splitlines():
+                pid = line.strip()
+                if pid:
+                    log("WARN", f"Killing orphaned QEMU process (PID {pid})")
+                    try:
+                        os.kill(int(pid), signal.SIGKILL)
+                    except (OSError, ValueError):
+                        pass
+        except FileNotFoundError:
+            pass
 
 
 def load_distro_config(distro: str, config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, str]:
@@ -1806,11 +1844,18 @@ def run_console(vm_name: str) -> int:
     cmd = ["virsh", "-c", LIBVIRT_URI, "console", vm_name]
     log("INFO", "Attaching to VM console (Ctrl+] to exit)")
     proc = subprocess.Popen(cmd)
+
+    def _terminate_console(signum, frame):
+        proc.terminate()
+
+    prev_sigterm = signal.signal(signal.SIGTERM, _terminate_console)
     try:
         return proc.wait()
     except KeyboardInterrupt:
         proc.send_signal(signal.SIGINT)
         return proc.wait()
+    finally:
+        signal.signal(signal.SIGTERM, prev_sigterm)
 
 
 def list_distros(config_path: Path = DEFAULT_CONFIG_PATH) -> None:
