@@ -27,10 +27,10 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `DISK_SIZE` | `20G` | Working disk size; resized on first boot. |
 | `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. |
 | `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
-| `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM (`/images/base/...`). |
-| `BOOT_ISO_URL` | *(unset)* | HTTP(S) URL to fetch and attach as a CD-ROM. Download occurs inside the container and is cached under `/var/lib/docker-vm-runner/boot-isos`. Mutually exclusive with `BOOT_ISO`. |
-| `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). |
-| `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. |
+| `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM. Accepts a local path or an HTTP(S) URL (URLs are auto-detected and downloaded). When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set. |
+| `BOOT_ISO_URL` | *(unset)* | Explicit URL form (same as setting `BOOT_ISO` to a URL). |
+| `BOOT_ORDER` | `hd` | Comma-separated boot device order (`cdrom`, `hd`, `network`). Aliases: `disk`→`hd`, `cd`/`dvd`→`cdrom`, `net`/`pxe`→`network`. |
+| `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. Auto-disabled when `BOOT_ISO` is set. |
 | `CLOUD_INIT_USER_DATA` | *(unset)* | Path to an additional cloud-init payload file. Added as a second multipart section after the built-in configuration. |
 | `ARCH` | `x86_64` | Guest architecture. Accepts `x86_64` (alias `amd64`) or `aarch64` (alias `arm64`). Defaults to the distribution's declared `arch` or `x86_64`. |
 | `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
@@ -40,7 +40,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GUEST_NAME` | *(auto)* | Internal VM name, used for disk paths. Fallback chain: `GUEST_NAME` -> `CONTAINER_NAME` -> container ID (first 12 chars) -> hostname -> distro key. Set explicitly when using host networking. |
+| `GUEST_NAME` | *(auto)* | Internal VM name, used for disk paths. Fallback: `GUEST_NAME` -> `HOSTNAME` -> distro key. Set explicitly when using host networking. |
 | `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
@@ -52,7 +52,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `FILESYSTEM_SOURCE` | *(unset)* | Directory inside the container to expose to the guest (bind-mount a host path here). |
-| `FILESYSTEM_TARGET` | *(unset)* | Guest-facing tag presented to the VM (mount with `mount -t virtiofs <tag> <path>`). |
+| `FILESYSTEM_TARGET` | *(auto)* | Guest-facing tag presented to the VM. Auto-derived from the last segment of `FILESYSTEM_SOURCE` when omitted. |
 | `FILESYSTEM_DRIVER` | `virtiofs` | Filesystem driver: `virtiofs` (default) or `9p` (falls back to virtio-9p). |
 | `FILESYSTEM_ACCESSMODE` | `passthrough` | Access mode (`passthrough`, `mapped`, or `squash`). Note: virtiofs only supports `passthrough`; use `9p` driver for `mapped` or `squash`. |
 | `FILESYSTEM_READONLY` | `0` | Set to `1` to present the share as read-only. |
@@ -73,7 +73,7 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the primary NIC and prioritize `network` in the boot order. |
 | `IPXE_ROM_PATH` | *(auto)* | Override the iPXE ROM path. Auto-selected based on `NETWORK_MODEL` (e.g. `pxe-virtio.rom` for virtio on x86_64). Provide a full path when using a custom build. |
 
-**Multi-NIC:** Append an index to define additional NICs. The index is inserted after the first word of the variable name: `NETWORK2_MODE`, `NETWORK2_BRIDGE`, `NETWORK2_MAC`, etc. The first NIC uses the base name (no index).
+**Multi-NIC:** Append an index to define additional NICs. Both `NETWORK2_MODE` and `NETWORK_MODE_2` styles are accepted. The first NIC uses the base name (no index).
 
 ### Graphics & GUI
 
@@ -97,11 +97,22 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `DATA_DIR` | *(unset)* | Single volume mount for all persistent data. When set, `base/`, `vms/`, and `state/` subdirectories are created under this path. Replaces the need for separate `/images` and `/var/lib/docker-vm-runner` mounts. |
+| `REQUIRE_KVM` | `0` | Set `1` to abort if `/dev/kvm` is not available (instead of falling back to TCG). |
 | `LIBVIRT_URI` | `qemu:///system` | Override the libvirt URI used by the manager (uncommon). |
-| `CONTAINER_NAME` | *(unset)* | Override the VM name (alternative to `GUEST_NAME`). Falls back to container ID or hostname. |
 | `LOG_VERBOSE` | `0` | Set `1` to enable verbose debug logging (shows all subprocess commands). |
 | `REDFISH_STORAGE_POOL` | `default` | Libvirt storage pool name used by sushy-emulator. |
 | `REDFISH_STORAGE_PATH` | `/var/lib/libvirt/images` | Path for the Redfish storage pool. |
+
+### CLI Flags
+
+The manager script accepts these flags (passed as container command arguments):
+
+| Flag | Description |
+| --- | --- |
+| `--list-distros` | Print available distributions from `distros.yaml` and exit. |
+| `--show-config` | Parse environment variables, print the resolved configuration, and exit. |
+| `--no-console` | Do not attach to the serial console (same as `NO_CONSOLE=1`). |
 
 ## Guest Command Execution
 

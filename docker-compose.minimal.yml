@@ -1,0 +1,16 @@
+# Minimal Docker-VM-Runner compose file
+# Start with: docker compose -f docker-compose.minimal.yml up
+# See docker-compose.yml for the full configuration with all options.
+services:
+  vm:
+    image: ghcr.io/munenick/docker-vm-runner:latest
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - ./data:/data
+    environment:
+      DATA_DIR: /data
+    ports:
+      - "2222:2222"
+    stdin_open: true
+    tty: true

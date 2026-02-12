@@ -16,7 +16,6 @@ import random
 import re
 import shutil
 import signal
-import string
 import socket
 import subprocess
 import sys
@@ -47,10 +46,21 @@ except ImportError as exc:  # pragma: no cover
 
 
 DEFAULT_CONFIG_PATH = Path("/config/distros.yaml")
-IMAGES_DIR = Path("/images")
-BASE_IMAGES_DIR = IMAGES_DIR / "base"
-VM_IMAGES_DIR = IMAGES_DIR / "vms"
-STATE_DIR = Path("/var/lib/docker-vm-runner")
+
+# DATA_DIR provides a single mount point for all persistent data.
+# When set, base images, VM disks, and state all live under DATA_DIR.
+_DATA_DIR = os.environ.get("DATA_DIR")
+if _DATA_DIR:
+    _data = Path(_DATA_DIR)
+    IMAGES_DIR = _data
+    BASE_IMAGES_DIR = _data / "base"
+    VM_IMAGES_DIR = _data / "vms"
+    STATE_DIR = _data / "state"
+else:
+    IMAGES_DIR = Path("/images")
+    BASE_IMAGES_DIR = IMAGES_DIR / "base"
+    VM_IMAGES_DIR = IMAGES_DIR / "vms"
+    STATE_DIR = Path("/var/lib/docker-vm-runner")
 BOOT_ISO_CACHE_DIR = STATE_DIR / "boot-isos"
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
@@ -251,40 +261,10 @@ def detect_cloud_init_content_type(payload: str) -> str:
     return "text/cloud-config"
 
 
-def detect_container_id() -> Optional[str]:
-    """Try to extract the container ID from cgroup membership."""
-    cgroup_path = Path("/proc/self/cgroup")
-    try:
-        data = cgroup_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):  # pragma: no cover - unlikely but safe
-        return None
-
-    for line in data.splitlines():
-        parts = line.strip().split(":", 2)
-        if len(parts) != 3:
-            continue
-        path = parts[2]
-        for segment in reversed(path.split("/")):
-            seg = segment.strip().lower()
-            if 12 <= len(seg) <= 64 and all(ch in string.hexdigits for ch in seg):
-                return seg
-    return None
-
-
 def derive_vm_name(distro: str) -> str:
     explicit = get_env("GUEST_NAME")
     if explicit:
         return explicit.strip()
-
-    container_name = os.environ.get("CONTAINER_NAME")
-    if container_name:
-        candidate = container_name.strip()
-        if candidate:
-            return candidate
-
-    container_id = detect_container_id()
-    if container_id:
-        return container_id[:12]
 
     hostname_env = os.environ.get("HOSTNAME")
     if hostname_env:
@@ -853,10 +833,17 @@ class VMManager:
 
     def prepare(self) -> None:
         if not self._kvm_available:
-            log(
-                "WARN",
-                "KVM device not available; falling back to software emulation (TCG). Performance will be degraded.",
-            )
+            log("WARN", "=" * 60)
+            log("WARN", "  /dev/kvm not found!")
+            log("WARN", "  Running in software emulation mode (TCG).")
+            log("WARN", "  Performance will be 10-50x slower.")
+            log("WARN", "  Fix: add --device /dev/kvm:/dev/kvm")
+            log("WARN", "=" * 60)
+            if get_env_bool("REQUIRE_KVM", False):
+                raise ManagerError(
+                    "REQUIRE_KVM=1 is set but /dev/kvm is not available. "
+                    "Add --device /dev/kvm:/dev/kvm or unset REQUIRE_KVM."
+                )
             cpu_lower = self.cfg.cpu_model.lower()
             if cpu_lower in {"host", "host-passthrough"}:
                 fallback = self._arch_profile.get("tcg_fallback")
@@ -1492,6 +1479,13 @@ def parse_env() -> VMConfig:
     if boot_iso_url is not None:
         boot_iso_url = boot_iso_url.strip() or None
 
+    # Auto-detect: if BOOT_ISO looks like a URL, treat it as BOOT_ISO_URL
+    if boot_iso and boot_iso.startswith(("http://", "https://")):
+        if boot_iso_url:
+            raise ManagerError("Set only one of BOOT_ISO or BOOT_ISO_URL, not both.")
+        boot_iso_url = boot_iso
+        boot_iso = None
+
     if boot_iso and boot_iso_url:
         raise ManagerError("Set only one of BOOT_ISO or BOOT_ISO_URL, not both.")
 
@@ -1528,7 +1522,14 @@ def parse_env() -> VMConfig:
     if blank_work_disk and not boot_iso and boot_order == ["hd"]:
         boot_order = ["hd"]
 
-    cloud_init_enabled = get_env_bool("CLOUD_INIT", True)
+    cloud_init_explicit = get_env("CLOUD_INIT")
+    if cloud_init_explicit is not None:
+        cloud_init_enabled = cloud_init_explicit.lower() in TRUTHY
+    elif iso_requested:
+        cloud_init_enabled = False
+        log("INFO", "BOOT_ISO detected; auto-disabling cloud-init (set CLOUD_INIT=1 to override)")
+    else:
+        cloud_init_enabled = True
     cloud_init_user_data_env = get_env("CLOUD_INIT_USER_DATA")
     cloud_init_user_data_path: Optional[Path] = None
     if cloud_init_user_data_env:
@@ -1601,10 +1602,17 @@ def parse_env() -> VMConfig:
     def get_env_indexed(name: str, index: int) -> Optional[str]:
         if index == 1:
             return get_env(name)
+        # Support both patterns: NETWORK2_MODE and NETWORK_MODE_2
         if "_" in name:
             prefix, rest = name.split("_", 1)
-            return get_env(f"{prefix}{index}_{rest}")
-        return get_env(f"{name}{index}")
+            result = get_env(f"{prefix}{index}_{rest}")
+            if result is not None:
+                return result
+            return get_env(f"{name}_{index}")
+        result = get_env(f"{name}{index}")
+        if result is not None:
+            return result
+        return get_env(f"{name}_{index}")
 
     def build_nic(index: int) -> Optional[NicConfig]:
         mode_raw = get_env_indexed("NETWORK_MODE", index)
@@ -1696,8 +1704,15 @@ def parse_env() -> VMConfig:
 
         if source_raw is None or not source_raw.strip():
             raise ManagerError(f"FILESYSTEM{suffix}_SOURCE is required when configuring a filesystem share")
+        # Auto-derive target from last segment of source path
         if target_raw is None or not target_raw.strip():
-            raise ManagerError(f"FILESYSTEM{suffix}_TARGET is required when configuring a filesystem share")
+            derived = Path(source_raw.strip()).name
+            if not derived or derived in (".", "/"):
+                raise ManagerError(
+                    f"FILESYSTEM{suffix}_TARGET is required (could not auto-derive from source '{source_raw}')"
+                )
+            target_raw = derived
+            log("INFO", f"FILESYSTEM{suffix}_TARGET auto-derived as '{derived}' from source path")
 
         readonly = False
         if readonly_raw is not None:
@@ -1873,12 +1888,51 @@ def run_console(vm_name: str) -> int:
         return proc.wait()
 
 
+def list_distros(config_path: Path = DEFAULT_CONFIG_PATH) -> None:
+    """Print available distributions and exit."""
+    if not config_path.exists():
+        log("ERROR", f"Distribution config missing: {config_path}")
+        return
+    data = yaml.safe_load(config_path.read_text())
+    distros = data.get("distributions", {})
+    if not distros:
+        log("WARN", "No distributions found")
+        return
+    max_key = max(len(k) for k in distros)
+    for key in sorted(distros):
+        info = distros[key]
+        name = info.get("name", key)
+        arch = info.get("arch", "x86_64")
+        user = info.get("user", "?")
+        print(f"  {key:<{max_key}}  {name}  (arch={arch}, user={user})")
+
+
+def show_config(cfg: VMConfig) -> None:
+    """Print the resolved VM configuration and exit."""
+    import dataclasses
+    for field in dataclasses.fields(cfg):
+        value = getattr(cfg, field.name)
+        print(f"  {field.name}: {value}")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Docker-VM-Runner libvirt manager")
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
+    parser.add_argument("--list-distros", action="store_true", help="List available distributions and exit")
+    parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
     args = parser.parse_args(argv)
 
+    if args.list_distros:
+        list_distros()
+        return 0
+
+    no_console_explicit = get_env("NO_CONSOLE")
     no_console = args.no_console or get_env_bool("NO_CONSOLE", False)
+    # Auto-infer NO_CONSOLE when GRAPHICS=novnc (serial console is rarely useful alongside GUI)
+    graphics_env = get_env("GRAPHICS", "")
+    if not no_console and no_console_explicit is None and graphics_env.strip().lower() == "novnc":
+        no_console = True
+        log("INFO", "GRAPHICS=novnc detected; auto-disabling serial console (set NO_CONSOLE=0 to override)")
     console_requested = not no_console
     if console_requested and not has_controlling_tty():
         log(
@@ -1892,6 +1946,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     except ManagerError as exc:
         log("ERROR", str(exc))
         return 1
+
+    if args.show_config:
+        show_config(cfg)
+        return 0
+
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
@@ -1902,7 +1961,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if nic.mode == "user":
             message = f"{label}: user-mode networking"
             if idx == 1:
-                message += f" (SSH forward localhost:{cfg.ssh_port} -> guest:22)"
+                message += f" (SSH: ssh -p {cfg.ssh_port} {cfg.login_user}@localhost — ensure -p {cfg.ssh_port}:{cfg.ssh_port} is published)"
             log("INFO", message)
         elif nic.mode == "bridge":
             bridge = nic.bridge_name or "<unspecified>"

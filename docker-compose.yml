@@ -1,3 +1,5 @@
+# Full Docker-VM-Runner compose file with all options.
+# For a minimal setup, see docker-compose.minimal.yml.
 services:
   vm1:
     image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
@@ -5,10 +7,9 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./images:/images
-      - ./images/state:/var/lib/docker-vm-runner
-      - ./distros.yaml:/config/distros.yaml:ro
+      - ./data/vm1:/data
     environment:
+      DATA_DIR: /data
       DISTRO: ${VM1_DISTRO:-ubuntu-2404}
       GUEST_NAME: ${VM1_GUEST_NAME:-vm1}
       ARCH: ${VM1_ARCH:-x86_64}
@@ -44,3 +45,4 @@ services:
     restart: unless-stopped
 
   # Duplicate this block (vm2, vm3, ...) for additional VMs.
+  # Change VM1_ prefix to VM2_, adjust ports to avoid collisions.

@@ -33,28 +33,27 @@ docker run --rm -it \
 
 ## Persisting Disks & Certificates
 
-Bind-mount a host directory to `/images` and opt into persistence:
+Use `DATA_DIR` to keep everything in a single volume:
 
 ```bash
-mkdir -p ./images ./images/state
+mkdir -p ./data
 
 docker run --rm -it \
   --name vm1 \
   -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
-  -v "$PWD/images:/images" \
-  -v "$PWD/images/state:/var/lib/docker-vm-runner" \
+  -v "$PWD/data:/data" \
+  -e DATA_DIR=/data \
   -e PERSIST=1 \
   ghcr.io/munenick/docker-vm-runner:latest
-
 ```
 
-Container storage layout:
+Storage layout under `DATA_DIR`:
 
-- `/images/base/<distro>.qcow2` — cached cloud images per distro.
-- `/images/vms/<name>/disk.qcow2` — working disk (retained when `PERSIST=1`).
-- `/images/vms/<name>/seed.iso` — regenerated cloud-init seed (only when cloud-init is enabled).
-- `/var/lib/docker-vm-runner` — management state (Redfish certificates, etc.).
+- `base/<distro>.qcow2` — cached cloud images per distro.
+- `vms/<name>/disk.qcow2` — working disk (retained when `PERSIST=1`).
+- `vms/<name>/seed.iso` — regenerated cloud-init seed (only when cloud-init is enabled).
+- `state/` — management state (Redfish certificates, boot ISO cache, etc.).
 
 > **Note:** When `PERSIST=1`, cloud-init only runs on the first boot (keyed by the VM name as `instance-id`). Changing `GUEST_PASSWORD` or other cloud-init settings on subsequent runs will not take effect unless you also change `GUEST_NAME` or delete the persistent disk.
 

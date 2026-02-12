@@ -4,7 +4,7 @@ Docker Compose can act as a declarative VM manager: each service corresponds to 
 
 ## Persistent Multi-VM Layout
 
-The example below runs two VMs with dedicated storage trees. Each VM keeps its working disk because `PERSIST=1`. Redfish is enabled on the second VM to expose power-control APIs.
+The example below runs two VMs using `DATA_DIR` for single-volume persistence. Each VM keeps its working disk because `PERSIST=1`. Redfish is enabled on the second VM to expose power-control APIs.
 
 ```yaml
 services:
@@ -16,10 +16,9 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./images/base:/images/base
-      - ./images/vm1:/images/vms/vm1
-      - ./images/state/vm1:/var/lib/docker-vm-runner
+      - ./data/vm1:/data
     environment:
+      DATA_DIR: /data
       DISTRO: ubuntu-2404
       GUEST_NAME: vm1
       SSH_PORT: 2222
@@ -37,10 +36,9 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./images/base:/images/base
-      - ./images/vm2:/images/vms/vm2
-      - ./images/state/vm2:/var/lib/docker-vm-runner
+      - ./data/vm2:/data
     environment:
+      DATA_DIR: /data
       DISTRO: debian-12
       GUEST_NAME: vm2
       SSH_PORT: 2223
@@ -54,8 +52,7 @@ services:
 
 *Tips*
 
-- The examples above use per-VM volume mounts for isolation. The shipped `docker-compose.yml` uses a simpler layout (`./images:/images`) which also works. Mount `distros.yaml` if you want to override the built-in distribution list (`./distros.yaml:/config/distros.yaml:ro`).
-- Reuse `./images/base` to share cached cloud images across services, mount each persistent disk at `/images/vms/<guest>` (e.g., `./images/vm1:/images/vms/vm1`), and dedicate a state directory per VM (e.g., `./images/state/vm1:/var/lib/docker-vm-runner`).
+- `DATA_DIR` consolidates all storage (`base/`, `vms/`, `state/`) into one mount. Mount `distros.yaml` if you want to override the built-in distribution list (`./distros.yaml:/config/distros.yaml:ro`).
 - Avoid port collisions by choosing distinct `SSH_PORT`, `VNC_PORT`, `NOVNC_PORT`, and (if enabled) `REDFISH_PORT`.
 - Redfish endpoints provide power and boot control: `curl -k https://localhost:8444/redfish/v1/Systems/vm2` or use any Redfish client with the configured credentials.
 
@@ -72,12 +69,11 @@ services:
     network_mode: host
     volumes:
       - /dev:/dev
-      - ./images/base:/images/base
-      - ./images/vm-direct:/images/vms/vm-direct
-      - ./images/state/vm-direct:/var/lib/docker-vm-runner
+      - ./data/vm-direct:/data
     devices:
       - /dev/kvm:/dev/kvm
     environment:
+      DATA_DIR: /data
       DISTRO: ubuntu-2404
       GUEST_NAME: vm-direct
       NETWORK_MODE: direct
