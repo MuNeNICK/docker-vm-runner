@@ -14,9 +14,9 @@ Docker-VM-Runner can expose a Redfish-compatible BMC interface via `sushy-emulat
      -e REDFISH_ENABLE=1 \
      ghcr.io/munenick/docker-vm-runner:latest
    ```
-2. Optional: persist certificates by bind-mounting `/var/lib/docker-vm-runner`:
+2. Optional: persist certificates using `DATA_DIR`:
    ```bash
-   -v "$(pwd)/images/state:/var/lib/docker-vm-runner"
+   -v ./data:/data -e DATA_DIR=/data
    ```
 3. Optional: override credentials using `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
 

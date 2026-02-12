@@ -1,95 +1,84 @@
 # GUI & Installation Media
 
-Docker-VM-Runner can expose a web-based console via noVNC and boot from local ISO media or blank disks for desktop installs.
+## Quick Examples
 
-## Enabling the noVNC Console
-
-Set `GRAPHICS=novnc` (and optionally `NO_CONSOLE=1`) to launch the bundled websockify/noVNC stack. Bind ports 5900 (VNC) and 6080 (noVNC) if you want to reach it from the host.
+**VM with noVNC web console:**
 
 ```bash
-docker run --rm \
-  --name vm1 \
+docker run --rm -it \
   --device /dev/kvm:/dev/kvm \
-  -p 2222:2222 \
   -p 6080:6080 \
   -e GRAPHICS=novnc \
-  -e NO_CONSOLE=1 \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
-Navigate to `https://localhost:6080/` and the viewer will auto-connect (`autoconnect=1`) and scale to the browser window. The TLS certificate is the same self-signed cert generated for Redfish.
+Open `https://localhost:6080/` in your browser.
 
-## Booting from an Installation ISO
-
-### Option A: Use a locally stored ISO
-
-1. Place the installer under `./images/base/` (e.g., `./images/base/ubuntu-24.04.3-desktop-amd64.iso`).
-2. Bind-mount `./images` (and optionally `./images/state` if you want TLS/metadata persistence).
-3. Set `BOOT_ISO` to the in-container path (`/images/base/...`).
-
-### Option B: Download the ISO on demand
-
-1. Bind-mount `./images` for disks; add `./images/state:/var/lib/docker-vm-runner` **only if** you want the download cache (`/var/lib/docker-vm-runner/boot-isos`) to persist between runs.
-2. Set `BOOT_ISO_URL=https://…`. The container fetches the ISO the first time and reuses the cached copy afterward (cache persists only when the state directory is mounted).
-3. Omit `BOOT_ISO` (it’s implied by the download).
-
-When neither a base disk nor blank disk is specified, Docker-VM-Runner automatically provisions a blank QCOW2 sized by `DISK_SIZE`.
-
-Example (Option A): Ubuntu Desktop with noVNC and a 40G blank disk using a local ISO.
+**Boot from an ISO installer:**
 
 ```bash
-docker run --rm \
-  --name ubuntu-desktop-vm \
+docker run --rm -it \
   --device /dev/kvm:/dev/kvm \
-  -v "$(pwd)/images:/images" \
-  -p 2222:2222 \
   -p 6080:6080 \
-  -e GUEST_NAME=ubuntu-desktop \
+  -e BOOT_ISO=https://releases.ubuntu.com/24.04/ubuntu-24.04.3-live-server-amd64.iso \
   -e GRAPHICS=novnc \
-  -e NO_CONSOLE=1 \
-  -e DISK_SIZE=40G \
-  -e BOOT_ISO=/images/base/ubuntu-24.04.3-desktop-amd64.iso \
-  -e BOOT_ORDER=cdrom,hd \
-  -e CLOUD_INIT=0 \
-  -e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
   ghcr.io/munenick/docker-vm-runner:latest
-
-# Add Redfish support if required:
-#   -e REDFISH_ENABLE=1 -p 8443:8443
 ```
 
-Example (Option B): Same configuration, but downloading the ISO inside the container.
+`BOOT_ISO` accepts both URLs (auto-downloaded) and local paths:
 
 ```bash
-docker run --rm \
-  --name ubuntu-desktop-vm \
+docker run --rm -it \
   --device /dev/kvm:/dev/kvm \
-  -v "$(pwd)/images:/images" \
-  -p 2222:2222 \
   -p 6080:6080 \
-  -e GUEST_NAME=ubuntu-desktop \
+  -v ./my.iso:/boot.iso:ro \
+  -e BOOT_ISO=/boot.iso \
   -e GRAPHICS=novnc \
-  -e NO_CONSOLE=1 \
-  -e DISK_SIZE=40G \
-  -e BOOT_ISO_URL="https://releases.ubuntu.com/24.04/ubuntu-24.04.3-desktop-amd64.iso" \
-  -e BOOT_ORDER=cdrom,hd \
-  -e CLOUD_INIT=0 \
-  -e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080" \
   ghcr.io/munenick/docker-vm-runner:latest
-
-# Add Redfish support if required:
-#   -e REDFISH_ENABLE=1 -p 8443:8443
 ```
 
-Notes:
+When an ISO is detected, the following are auto-configured:
+- `BOOT_ORDER` includes `cdrom`
+- `CLOUD_INIT=0` (manual install assumed)
+- A blank work disk is created (unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set)
 
-- After installation, drop `BOOT_ISO` and set `BOOT_ORDER=hd` to boot directly from disk.
-- To reuse an existing base disk, set `BASE_IMAGE=/images/base/<disk>.qcow2` instead of relying on the blank-disk automatic path.
-- Cloud-init can stay enabled (default) to inject credentials, or disable it with `CLOUD_INIT=0` when installing manually.
+## Detailed Options
 
-## Display Scaling & Resolution
+### noVNC Settings
 
-The viewer scales to fit the browser window, but QEMU’s VNC server keeps whatever resolution the guest exposes. For higher resolutions:
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GRAPHICS` | `none` | Set to `novnc` for VNC + web console. |
+| `VNC_PORT` | `5900` | VNC listen port. |
+| `NOVNC_PORT` | `6080` | noVNC web port. |
 
-- Use a GPU device that advertises larger EDID: `-e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080"`.
-- Configure the guest OS (e.g., `xrandr`) to switch to the desired resolution after boot.
+`GRAPHICS=novnc` auto-disables the serial console (override with `NO_CONSOLE=0`). The TLS certificate is shared with Redfish (self-signed).
+
+### ISO Boot Details
+
+For a local ISO, specify the in-container path:
+
+```bash
+-v "$(pwd)/images:/images" \
+-e BOOT_ISO=/images/ubuntu-desktop.iso
+```
+
+For a URL, the ISO is downloaded and cached inside the container. To persist the cache, use `DATA_DIR`:
+
+```bash
+-v ./data:/data \
+-e DATA_DIR=/data \
+-e BOOT_ISO=https://releases.ubuntu.com/24.04/ubuntu-24.04.3-desktop-amd64.iso
+```
+
+After installation, remove `BOOT_ISO` and set `BOOT_ORDER=hd` to boot from disk.
+
+### Display Resolution
+
+To increase the default VGA resolution:
+
+```
+-e EXTRA_ARGS="-device virtio-gpu-pci,edid=on,xres=1920,yres=1080"
+```
+
+The guest OS may also need configuration (e.g., `xrandr`).

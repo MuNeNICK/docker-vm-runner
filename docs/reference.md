@@ -1,5 +1,28 @@
 # Configuration Reference
 
+## Common Examples
+
+```bash
+# Change distro and resources
+docker run --rm -it --device /dev/kvm:/dev/kvm \
+  -e DISTRO=debian-12 -e MEMORY=8192 -e CPUS=4 ...
+
+# Boot from ISO with GUI
+docker run --rm -it --device /dev/kvm:/dev/kvm -p 6080:6080 \
+  -e BOOT_ISO=https://example.com/install.iso -e GRAPHICS=novnc ...
+
+# Persistent VM with DATA_DIR
+docker run --rm -it --device /dev/kvm:/dev/kvm \
+  -v ./data:/data -e DATA_DIR=/data -e PERSIST=1 ...
+
+# Share a host directory into the guest
+docker run --rm -it --device /dev/kvm:/dev/kvm \
+  -v ./share:/share -e FILESYSTEM_SOURCE=/share -e FILESYSTEM_DRIVER=9p ...
+
+# List available distributions
+docker run --rm ghcr.io/munenick/docker-vm-runner:latest --list-distros
+```
+
 ## Supported Distribution Keys
 
 These map to entries in `distros.yaml` (bind-mount your own file to `/config/distros.yaml` to customize).

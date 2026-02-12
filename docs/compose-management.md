@@ -1,8 +1,30 @@
 # Compose-Based VM Management
 
-Docker Compose can act as a declarative VM manager: each service corresponds to one guest. Keep the desired state in `docker-compose.yml` and let `docker compose up` create or resume the machines, while `docker compose stop` gracefully shuts them down.
+## Minimal Setup
 
-## Persistent Multi-VM Layout
+```yaml
+services:
+  vm:
+    image: ghcr.io/munenick/docker-vm-runner:latest
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - ./data:/data
+    environment:
+      DATA_DIR: /data
+    ports:
+      - "2222:2222"
+    stdin_open: true
+    tty: true
+```
+
+```bash
+docker compose up
+```
+
+See `docker-compose.minimal.yml` in the repository root for a ready-to-use version.
+
+## Multi-VM Layout
 
 The example below runs two VMs using `DATA_DIR` for single-volume persistence. Each VM keeps its working disk because `PERSIST=1`. Redfish is enabled on the second VM to expose power-control APIs.
 
