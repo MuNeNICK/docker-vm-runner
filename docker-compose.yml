@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   vm1:
     image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}

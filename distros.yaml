@@ -143,9 +143,6 @@ distributions:
     format: qcow2
     arch: x86_64
 
-# Default VM settings (can be overridden by environment variables)
-defaults:
-  memory: 4096      # MB
-  cpus: 2
-  disk_size: 20G
-  network: user     # user, bridge, or none
+# Default VM settings are controlled via environment variables:
+#   MEMORY=4096  CPUS=2  DISK_SIZE=20G  NETWORK_MODE=nat
+# See docs/reference.md for the full list.

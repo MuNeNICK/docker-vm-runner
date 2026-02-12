@@ -32,8 +32,8 @@ from urllib.parse import urlparse
 
 try:
     import yaml  # type: ignore
-except ImportError:  # pragma: no cover
-    yaml = None
+except ImportError as exc:  # pragma: no cover
+    raise SystemExit("PyYAML is required but not installed") from exc
 
 try:
     import bcrypt  # type: ignore
@@ -123,13 +123,19 @@ class ManagerError(RuntimeError):
     """Raised on unrecoverable configuration or runtime errors."""
 
 
+_LOG_VERBOSE = os.environ.get("LOG_VERBOSE", "").lower() in {"1", "true", "yes", "on"}
+
+
 def log(level: str, message: str) -> None:
     """Lightweight structured logging compatible with existing colour expectation."""
+    if level == "DEBUG" and not _LOG_VERBOSE:
+        return
     colours = {
         "INFO": "\033[0;34m",
         "WARN": "\033[1;33m",
         "ERROR": "\033[0;31m",
         "SUCCESS": "\033[0;32m",
+        "DEBUG": "\033[0;90m",
     }
     colour = colours.get(level, "")
     reset = "\033[0m" if colour else ""
@@ -145,6 +151,31 @@ def get_env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.lower() in TRUTHY
+
+
+def parse_int_env(name: str, default: str, min_val: int = 1, max_val: Optional[int] = None) -> int:
+    raw = get_env(name, default)
+    assert raw is not None
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ManagerError(f"{name} must be an integer (got '{raw}')")
+    if value < min_val:
+        raise ManagerError(f"{name} must be >= {min_val} (got {value})")
+    if max_val is not None and value > max_val:
+        raise ManagerError(f"{name} must be <= {max_val} (got {value})")
+    return value
+
+
+DISK_SIZE_RE = re.compile(r"^\d+[KMGTkmgt]?$")
+
+
+def validate_disk_size(raw: str) -> str:
+    if not DISK_SIZE_RE.match(raw):
+        raise ManagerError(
+            f"Invalid DISK_SIZE '{raw}'. Use a number with optional suffix: K, M, G, T (e.g. '20G')"
+        )
+    return raw
 
 
 def kvm_available() -> bool:
@@ -348,7 +379,7 @@ def render_network_xml(
 
 def run(cmd: List[str], check: bool = True, **kwargs) -> subprocess.CompletedProcess:
     """Run command with logging."""
-    log("INFO", f"Running: {' '.join(cmd)}")
+    log("DEBUG", f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=check, text=True, **kwargs)
     return result
 
@@ -361,7 +392,6 @@ class NicConfig:
     mac_address: Optional[str] = None
     model: str = "virtio"
     boot: bool = False
-    usernet_forwards: Optional[str] = None
 
 
 @dataclass
@@ -808,13 +838,8 @@ class VMManager:
         self._network_macs: Dict[int, str] = {}
         self._ipxe_rom_path: Optional[Path] = None
         self._boot_iso_cache_path: Optional[Path] = None
-        if self.cfg.ipxe_enabled:
-            if not self.cfg.ipxe_rom_path:
-                raise ManagerError("IPXE_ENABLE=1 requires an iPXE ROM path.")
-            rom_candidate = Path(self.cfg.ipxe_rom_path)
-            if not rom_candidate.exists():
-                raise ManagerError(f"iPXE ROM not found at {rom_candidate}")
-            self._ipxe_rom_path = rom_candidate
+        if self.cfg.ipxe_enabled and self.cfg.ipxe_rom_path:
+            self._ipxe_rom_path = Path(self.cfg.ipxe_rom_path)
 
     def connect(self) -> None:
         self.conn = libvirt.open(LIBVIRT_URI)
@@ -864,7 +889,8 @@ class VMManager:
             log("INFO", f"Using cached image: {self.base_image}")
             return
         if self.base_image.exists():
-            log("WARN", f"Cached image too small; removing {self.base_image}")
+            size_mb = self.base_image.stat().st_size / (1024 * 1024)
+            log("WARN", f"Cached image too small ({size_mb:.1f} MiB < 100 MiB threshold); re-downloading {self.base_image}")
             self.base_image.unlink()
 
         log("INFO", f"Downloading image: {self.cfg.image_url}")
@@ -895,7 +921,8 @@ class VMManager:
                 log("INFO", f"Reusing persistent disk {self.work_image}")
                 self._disk_reused = True
             else:
-                log("WARN", f"Existing disk too small; recreating {self.work_image}")
+                size_mb = size / (1024 * 1024)
+                log("WARN", f"Existing disk too small ({size_mb:.1f} MiB < 100 MiB threshold); recreating {self.work_image}")
                 self.work_image.unlink(missing_ok=True)
 
         if not self._disk_reused:
@@ -915,7 +942,8 @@ class VMManager:
                 log("INFO", f"Creating working disk {self.work_image}")
                 if self.base_image.suffix.lower() == ".iso":
                     raise ManagerError(
-                        "Base image points to an ISO. Use BOOT_ISO for installation media and keep BASE_IMAGE for disk images."
+                        f"BASE_IMAGE points to an ISO ({self.base_image}). "
+                        f"Try: BOOT_ISO={self.base_image} (and optionally BLANK_DISK=1)"
                     )
                 shutil.copy2(self.base_image, self.work_image)
                 if self.cfg.disk_size and self.cfg.disk_size != "0":
@@ -1051,8 +1079,6 @@ class VMManager:
             if runcmd:
                 cloud_cfg["runcmd"] = runcmd
 
-            if yaml is None:
-                raise ManagerError("PyYAML is required to render cloud-init configuration")
             vendor_user_data = "#cloud-config\n" + yaml.safe_dump(
                 cloud_cfg, sort_keys=False, default_flow_style=False
             )
@@ -1352,11 +1378,11 @@ class VMManager:
             except libvirt.libvirtError as exc:
                 message = exc.get_error_message() if hasattr(exc, "get_error_message") else str(exc)
                 if "cgroup" in message.lower():
-                    log(
-                        "ERROR",
-                        "libvirt could not access host cgroups. Run the container with --cgroupns=host.",
-                    )
-                raise
+                    raise ManagerError(
+                        f"libvirt could not access host cgroups: {message}\n"
+                        "Run the container with --cgroupns=host to fix this."
+                    ) from exc
+                raise ManagerError(f"Failed to start domain: {message}") from exc
             log("SUCCESS", f"Domain {self.cfg.vm_name} started")
         if self.cfg.novnc_enabled:
             self.service_manager.start_novnc()
@@ -1406,8 +1432,6 @@ class VMManager:
 
 
 def load_distro_config(distro: str, config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, str]:
-    if yaml is None:
-        raise ManagerError("PyYAML is required to load distribution configuration")
     if not config_path.exists():
         raise ManagerError(f"Distribution config missing: {config_path}")
     data = yaml.safe_load(config_path.read_text())
@@ -1422,9 +1446,9 @@ def parse_env() -> VMConfig:
     distro = get_env("DISTRO", "ubuntu-2404")
     distro_info = load_distro_config(distro)
 
-    memory_mb = int(get_env("MEMORY", "4096"))
-    cpus = int(get_env("CPUS", "2"))
-    disk_size = get_env("DISK_SIZE", "20G")
+    memory_mb = parse_int_env("MEMORY", "4096")
+    cpus = parse_int_env("CPUS", "2")
+    disk_size = validate_disk_size(get_env("DISK_SIZE", "20G") or "20G")
 
     graphics_raw = get_env("GRAPHICS", None)
     if graphics_raw is None:
@@ -1443,8 +1467,8 @@ def parse_env() -> VMConfig:
     else:
         graphics_type = display
 
-    vnc_port = int(get_env("VNC_PORT", "5900"))
-    novnc_port = int(get_env("NOVNC_PORT", "6080"))
+    vnc_port = parse_int_env("VNC_PORT", "5900", min_val=1, max_val=65535)
+    novnc_port = parse_int_env("NOVNC_PORT", "6080", min_val=1, max_val=65535)
     if novnc_enabled and graphics_type != "vnc":
         raise ManagerError("noVNC requires a VNC graphics backend")
 
@@ -1486,7 +1510,14 @@ def parse_env() -> VMConfig:
         "net": "network",
         "pxe": "network",
     }
-    boot_order = [boot_aliases.get(dev, dev) for dev in boot_order_input]
+    valid_boot_devices = {"hd", "cdrom", "network"}
+    boot_order = []
+    for dev in boot_order_input:
+        resolved = boot_aliases.get(dev)
+        if resolved is None:
+            supported = ", ".join(sorted(boot_aliases.keys()))
+            raise ManagerError(f"Unknown BOOT_ORDER device '{dev}'. Supported values: {supported}")
+        boot_order.append(resolved)
     if not boot_order:
         boot_order = ["hd"]
     if iso_requested and "cdrom" not in boot_order:
@@ -1504,7 +1535,8 @@ def parse_env() -> VMConfig:
         candidate = Path(cloud_init_user_data_env)
         if not candidate.exists():
             raise ManagerError(
-                f"CLOUD_INIT_USER_DATA file not found: {candidate}"
+                f"CLOUD_INIT_USER_DATA file not found: {candidate}\n"
+                "Ensure the file is bind-mounted into the container (e.g. -v /host/path:/container/path:ro)"
             )
         if not candidate.is_file():
             raise ManagerError(
@@ -1551,7 +1583,7 @@ def parse_env() -> VMConfig:
     extra_args = get_env("EXTRA_ARGS", "")
 
     guest_password = get_env("GUEST_PASSWORD", "password")
-    ssh_port = int(get_env("SSH_PORT", "2222"))
+    ssh_port = parse_int_env("SSH_PORT", "2222", min_val=1, max_val=65535)
 
     vm_name = derive_vm_name(distro)
 
@@ -1629,9 +1661,6 @@ def parse_env() -> VMConfig:
                 f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported models: {supported_models}"
             )
 
-        usernet_forwards = get_env_indexed("NETWORK_USERNET_FORWARDS", index)
-        forwards_clean = usernet_forwards.strip() if usernet_forwards else None
-
         nic = NicConfig(
             mode=mode_key,
             bridge_name=bridge_name,
@@ -1639,7 +1668,6 @@ def parse_env() -> VMConfig:
             mac_address=mac_address,
             model=model,
             boot=False,
-            usernet_forwards=forwards_clean,
         )
 
         boot_override = get_env_indexed("NETWORK_BOOT", index)
@@ -1716,6 +1744,11 @@ def parse_env() -> VMConfig:
                 f"Unsupported FILESYSTEM{suffix}_ACCESSMODE '{accessmode}'. "
                 "Supported values: passthrough, mapped, squash."
             )
+        if driver == "virtiofs" and accessmode != "passthrough":
+            raise ManagerError(
+                f"FILESYSTEM{suffix}_ACCESSMODE='{accessmode}' is not supported with virtiofs. "
+                "virtiofs only supports 'passthrough'. Use FILESYSTEM_DRIVER=9p for 'mapped' or 'squash'."
+            )
 
         return FilesystemConfig(
             source=source_path,
@@ -1783,7 +1816,7 @@ def parse_env() -> VMConfig:
     ssh_pubkey = get_env("SSH_PUBKEY")
     redfish_user = get_env("REDFISH_USERNAME", "admin")
     redfish_password = get_env("REDFISH_PASSWORD", "password")
-    redfish_port = int(get_env("REDFISH_PORT", "8443"))
+    redfish_port = parse_int_env("REDFISH_PORT", "8443", min_val=1, max_val=65535)
     redfish_system_id = get_env("REDFISH_SYSTEM_ID", vm_name)
     redfish_enabled = get_env_bool("REDFISH_ENABLE", False)
 
@@ -1845,16 +1878,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
     args = parser.parse_args(argv)
 
-    console_requested = not args.no_console
+    no_console = args.no_console or get_env_bool("NO_CONSOLE", False)
+    console_requested = not no_console
     if console_requested and not has_controlling_tty():
         log(
-            "WARN",
-            "No controlling TTY detected; skipping interactive console. "
-            "Set NO_CONSOLE=1 to hide this warning.",
+            "INFO",
+            "No TTY detected; running in headless mode. The serial console will not be attached.",
         )
         console_requested = False
 
-    cfg = parse_env()
+    try:
+        cfg = parse_env()
+    except ManagerError as exc:
+        log("ERROR", str(exc))
+        return 1
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
@@ -1866,8 +1903,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             message = f"{label}: user-mode networking"
             if idx == 1:
                 message += f" (SSH forward localhost:{cfg.ssh_port} -> guest:22)"
-            elif nic.usernet_forwards:
-                message += f" (forwards: {nic.usernet_forwards})"
             log("INFO", message)
         elif nic.mode == "bridge":
             bridge = nic.bridge_name or "<unspecified>"
@@ -1881,6 +1916,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         log("INFO", f"{label} MAC: {nic.mac_address or '<deterministic>'}")
         if nic.boot:
             log("INFO", f"{label} participates in boot order")
+    has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
+    if not has_user_nic and cfg.ssh_port:
+        log("WARN", f"SSH_PORT={cfg.ssh_port} is set but no user-mode NIC is configured; SSH port forwarding is not active.")
     if cfg.ipxe_enabled:
         rom_display = cfg.ipxe_rom_path or "<unspecified>"
         log("INFO", f"iPXE enabled (ROM: {rom_display})")
@@ -1893,17 +1931,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 f"Filesystem #{idx}: {fs.source} -> guest tag '{fs.target}' "
                 f"({mode}, driver={fs.driver}, accessmode={fs.accessmode}, mount={mount_dir})",
             )
+    if cfg.cloud_init_enabled:
+        log("INFO", f"Login: user='{cfg.login_user}', password='{cfg.password}' (change via GUEST_PASSWORD)")
     log("INFO", f"Display mode: {cfg.display}")
     if cfg.graphics_type != "none":
         log("INFO", f"Graphics backend: {cfg.graphics_type}")
     if cfg.novnc_enabled:
-        log("INFO", f"noVNC web: https://<host>:{cfg.novnc_port}/vnc.html")
+        log("INFO", f"noVNC web console: https://<host>:{cfg.novnc_port}/vnc.html (VNC + websocket proxy)")
     elif cfg.graphics_type == "vnc":
         log("INFO", f"VNC server: <host>:{cfg.vnc_port}")
     if cfg.redfish_enabled:
         log("INFO", f"Redfish: https://<host>:{cfg.redfish_port}/")
-    else:
-        log("INFO", "Redfish disabled (set REDFISH_ENABLE=1 to enable)")
 
     ensure_directory(STATE_DIR)
 
@@ -1925,6 +1963,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return retcode
     except ManagerError as exc:
         log("ERROR", str(exc))
+        return 1
+    except Exception as exc:
+        log("ERROR", f"Unexpected error: {exc}")
+        log("ERROR", "This is likely a bug. Please report it at https://github.com/munenick/docker-vm-runner/issues")
+        import traceback
+        traceback.print_exc()
         return 1
     finally:
         vm_mgr.cleanup()

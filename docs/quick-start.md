@@ -56,6 +56,8 @@ Container storage layout:
 - `/images/vms/<name>/seed.iso` — regenerated cloud-init seed (only when cloud-init is enabled).
 - `/var/lib/docker-vm-runner` — management state (Redfish certificates, etc.).
 
+> **Note:** When `PERSIST=1`, cloud-init only runs on the first boot (keyed by the VM name as `instance-id`). Changing `GUEST_PASSWORD` or other cloud-init settings on subsequent runs will not take effect unless you also change `GUEST_NAME` or delete the persistent disk.
+
 ## Custom cloud-init
 
 The container always injects a vendor cloud-config that creates the default login user and password. Supply a second, user-controlled stage by mounting a file and pointing `CLOUD_INIT_USER_DATA` at it:

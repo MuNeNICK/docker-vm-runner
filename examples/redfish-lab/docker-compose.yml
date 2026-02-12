@@ -1,12 +1,12 @@
 services:
-  redfish-controler:
+  redfish-controller:
     image: ${IRONIC_IMAGE:-quay.io/metal3-io/ironic:latest}
-    container_name: redfish-controler
+    container_name: redfish-controller
     restart: unless-stopped
     networks:
       redfish-net:
         aliases:
-          - redfish-controler
+          - redfish-controller
     environment:
       ISO_HTTP_PORT: ${ISO_HTTP_PORT:-8080}
       TARGET_ISO_FILENAME: ${TARGET_ISO_FILENAME:-alpine-standard-3.20.2-x86_64.iso}
@@ -27,14 +27,14 @@ services:
     container_name: redfish-provisioner
     restart: "no"
     depends_on:
-      - redfish-controler
+      - redfish-controller
     networks:
       redfish-net:
         aliases:
           - redfish-provisioner
     environment:
       OS_AUTH_TYPE: none
-      OS_ENDPOINT: http://redfish-controler:6385
+      OS_ENDPOINT: http://redfish-controller:6385
       TARGET_ISO_FILENAME: ${TARGET_ISO_FILENAME:-alpine-standard-3.20.2-x86_64.iso}
       ISO_HTTP_PORT: ${ISO_HTTP_PORT:-8080}
       KEEP_REDFISH_PROVISIONER_ALIVE: 1

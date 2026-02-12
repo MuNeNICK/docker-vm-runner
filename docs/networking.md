@@ -7,7 +7,7 @@ This project keeps QEMU’s user-mode NAT as the default because it “just work
 - Works out of the box; no host networking changes.
 - Container exposes the SSH/Redfish/VNC ports defined in `docker-compose.yml` or your `docker run` command.
 - Ideal for quick tests or development shells where port forwarding is sufficient.
-- You can append secondary NAT NICs by defining `NETWORK2_MODE=user`, `NETWORK3_MODE=user`, etc., each with optional `NETWORK{N}_MODEL`, `NETWORK{N}_MAC`, and `NETWORK{N}_USERNET_FORWARDS` to control MAC addresses and port forwarding.
+- You can append secondary NAT NICs by defining `NETWORK2_MODE=user`, `NETWORK3_MODE=user`, etc., each with optional `NETWORK{N}_MODEL` and `NETWORK{N}_MAC` to control NIC model and MAC addresses.
 
 ## Bridge Mode (libvirt bridge)
 
@@ -35,7 +35,7 @@ Bridge mode attaches the guest NIC to a pre-existing Linux bridge on the host (e
 
 ### Static addressing with cloud-init
 
-Create a `network-config.yaml` under `/images/cloud-init/` (bind-mount the directory) and reference it via `EXTRA_ARGS='--nicparm'` or render static IPs inside `user-data`—see the distribution’s cloud-init documentation for field names.
+Use `CLOUD_INIT_USER_DATA` to supply a cloud-config that sets static IPs via `network:` configuration. See the distribution's cloud-init documentation for field names and netplan/ENI syntax.
 
 ## Direct Mode (macvtap)
 

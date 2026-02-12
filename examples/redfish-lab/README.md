@@ -24,6 +24,6 @@ docker compose down
 If you change the ISO filename or URL in `.env`, recreate the stack so the new image is downloaded and served.
 
 ## What’s running
-- **redfish-controler** – Ironic API plus the HTTP server hosting the boot ISO (default: Alpine Linux `alpine-standard-3.20.2-x86_64.iso`).
+- **redfish-controller** – Ironic API plus the HTTP server hosting the boot ISO (default: Alpine Linux `alpine-standard-3.20.2-x86_64.iso`).
 - **redfish-provisioner** – runs the Ironic CLI client against `TARGET_REDFISH_NODES` (defaults: `redfish-client-1 redfish-client-2`), mirroring an OpenStack baremetal deployment workflow.
 - **redfish-client-1 / redfish-client-2** – docker-vm-runner guests with Redfish enabled.

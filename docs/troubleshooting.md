@@ -8,6 +8,9 @@
 - **Unknown distribution**  
   Verify `DISTRO` matches a key in `distros.yaml` and that the file is available inside the container at `/config/distros.yaml`.
 
+- **libvirt cgroup error on VM start**
+  If you see an error about cgroups when starting the VM, add `--cgroupns=host` to your `docker run` command (or `cgroupns_mode: host` in compose). This allows libvirt to access the host cgroup hierarchy.
+
 - **Console input not accepted**  
   Ensure the container runs with `stdin_open: true` and `tty: true` (compose already sets these). Reattach with `docker attach <container>` or use `docker compose exec <service> virsh console <guest>`.
 

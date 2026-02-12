@@ -1,6 +1,6 @@
 # iPXE Boot Guide
 
-This guide covers the optional iPXE workflow for Docker-VM-Runner. When enabled, the container injects an iPXE ROM into the virtio-net interface so the guest can chainload a remote installer or boot script.
+This guide covers the optional iPXE workflow for Docker-VM-Runner. When enabled, the container injects an iPXE ROM into the primary network interface so the guest can chainload a remote installer or boot script. The ROM is auto-selected based on the NIC model (e.g. `pxe-virtio.rom` for virtio, `pxe-e1000.rom` for e1000).
 
 ## Prerequisites
 

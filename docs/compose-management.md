@@ -7,8 +7,6 @@ Docker Compose can act as a declarative VM manager: each service corresponds to 
 The example below runs two VMs with dedicated storage trees. Each VM keeps its working disk because `PERSIST=1`. Redfish is enabled on the second VM to expose power-control APIs.
 
 ```yaml
-version: "3.9"
-
 services:
   vm1:
     image: ghcr.io/munenick/docker-vm-runner:latest
@@ -56,6 +54,7 @@ services:
 
 *Tips*
 
+- The examples above use per-VM volume mounts for isolation. The shipped `docker-compose.yml` uses a simpler layout (`./images:/images`) which also works. Mount `distros.yaml` if you want to override the built-in distribution list (`./distros.yaml:/config/distros.yaml:ro`).
 - Reuse `./images/base` to share cached cloud images across services, mount each persistent disk at `/images/vms/<guest>` (e.g., `./images/vm1:/images/vms/vm1`), and dedicate a state directory per VM (e.g., `./images/state/vm1:/var/lib/docker-vm-runner`).
 - Avoid port collisions by choosing distinct `SSH_PORT`, `VNC_PORT`, `NOVNC_PORT`, and (if enabled) `REDFISH_PORT`.
 - Redfish endpoints provide power and boot control: `curl -k https://localhost:8444/redfish/v1/Systems/vm2` or use any Redfish client with the configured credentials.

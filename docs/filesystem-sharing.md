@@ -25,7 +25,7 @@ docker run --rm -it \
   -e FILESYSTEM_SOURCE=/share \
   -e FILESYSTEM_TARGET=share \
   -e FILESYSTEM_DRIVER=virtiofs \
-  docker-vm-runner:test
+  ghcr.io/munenick/docker-vm-runner:latest
 ```
 
 > You can use a custom seccomp profile instead of `unconfined`, provided it allows `unshare`, `setns`, and related calls.
@@ -43,7 +43,7 @@ docker run --rm -it \
   -e FILESYSTEM_TARGET=share \
   -e FILESYSTEM_DRIVER=9p \
   -e FILESYSTEM_ACCESSMODE=mapped \
-  docker-vm-runner:test
+  ghcr.io/munenick/docker-vm-runner:latest
 ```
 
 > `mapped` and `squash` are only supported by 9p. Virtiofs is limited to `passthrough` by libvirt.

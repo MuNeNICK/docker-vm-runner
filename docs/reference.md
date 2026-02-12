@@ -40,7 +40,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GUEST_NAME` | container hostname | Internal VM name, used for disk paths. Set explicitly when using host networking. |
+| `GUEST_NAME` | *(auto)* | Internal VM name, used for disk paths. Fallback chain: `GUEST_NAME` -> `CONTAINER_NAME` -> container ID (first 12 chars) -> hostname -> distro key. Set explicitly when using host networking. |
 | `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
@@ -54,7 +54,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `FILESYSTEM_SOURCE` | *(unset)* | Directory inside the container to expose to the guest (bind-mount a host path here). |
 | `FILESYSTEM_TARGET` | *(unset)* | Guest-facing tag presented to the VM (mount with `mount -t virtiofs <tag> <path>`). |
 | `FILESYSTEM_DRIVER` | `virtiofs` | Filesystem driver: `virtiofs` (default) or `9p` (falls back to virtio-9p). |
-| `FILESYSTEM_ACCESSMODE` | `passthrough` | Access mode (`passthrough`, `mapped`, or `squash`). |
+| `FILESYSTEM_ACCESSMODE` | `passthrough` | Access mode (`passthrough`, `mapped`, or `squash`). Note: virtiofs only supports `passthrough`; use `9p` driver for `mapped` or `squash`. |
 | `FILESYSTEM_READONLY` | `0` | Set to `1` to present the share as read-only. |
 
 Append an index (`FILESYSTEM2_SOURCE`, `FILESYSTEM3_SOURCE`, …) to define multiple shares. Only the variables you override are required for each additional index.
@@ -68,8 +68,12 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `NETWORK_BRIDGE` | *(required for bridge)* | Name of the host bridge (e.g., `br0`) when `NETWORK_MODE=bridge`. |
 | `NETWORK_DIRECT_DEV` | *(required for direct)* | Host NIC to bind (e.g., `eth0`) when `NETWORK_MODE=direct` (requires `--volume /dev:/dev` and `--privileged`). |
 | `NETWORK_MAC` | *(auto)* | Override the guest MAC address (`aa:bb:cc:dd:ee:ff`). |
-| `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the virtio-net interface and prioritize `network` in the boot order. |
-| `IPXE_ROM_PATH` | *(auto)* | Override the ROM (`/usr/lib/ipxe/qemu/pxe-virtio.rom` on x86_64, `efi-virtio.rom` on aarch64). Provide a full path when using a custom build. |
+| `NETWORK_MODEL` | `virtio` | NIC model: `virtio`, `e1000`, `e1000e`, `rtl8139`, `ne2k`, `pcnet`, `vmxnet3`. |
+| `NETWORK_BOOT` | `0` | Set `1` to include this NIC in the boot order (useful for PXE without iPXE). |
+| `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the primary NIC and prioritize `network` in the boot order. |
+| `IPXE_ROM_PATH` | *(auto)* | Override the iPXE ROM path. Auto-selected based on `NETWORK_MODEL` (e.g. `pxe-virtio.rom` for virtio on x86_64). Provide a full path when using a custom build. |
+
+**Multi-NIC:** Append an index to define additional NICs. The index is inserted after the first word of the variable name: `NETWORK2_MODE`, `NETWORK2_BRIDGE`, `NETWORK2_MAC`, etc. The first NIC uses the base name (no index).
 
 ### Graphics & GUI
 
@@ -87,13 +91,17 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `REDFISH_PORT` | `8443` | Redfish HTTPS port. |
 | `REDFISH_USERNAME` | `admin` | Redfish username. |
 | `REDFISH_PASSWORD` | `password` | Redfish password. |
-| `REDFISH_SYSTEM_ID` | `GUEST_NAME` | Redfish system identifier. |
+| `REDFISH_SYSTEM_ID` | *(derived VM name)* | Redfish system identifier. Defaults to the resolved VM name (same as `GUEST_NAME` when set). |
 
 ### Advanced
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `LIBVIRT_URI` | `qemu:///system` | Override the libvirt URI used by the manager (uncommon). |
+| `CONTAINER_NAME` | *(unset)* | Override the VM name (alternative to `GUEST_NAME`). Falls back to container ID or hostname. |
+| `LOG_VERBOSE` | `0` | Set `1` to enable verbose debug logging (shows all subprocess commands). |
+| `REDFISH_STORAGE_POOL` | `default` | Libvirt storage pool name used by sushy-emulator. |
+| `REDFISH_STORAGE_PATH` | `/var/lib/libvirt/images` | Path for the Redfish storage pool. |
 
 ## Guest Command Execution
 

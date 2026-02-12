@@ -3,7 +3,8 @@ set -euo pipefail
 
 args=("$@")
 NO_CONSOLE=${NO_CONSOLE:-0}
-if [[ "${NO_CONSOLE}" =~ ^(1|true|TRUE|yes|YES)$ ]]; then
+NO_CONSOLE_LOWER=$(echo "${NO_CONSOLE}" | tr '[:upper:]' '[:lower:]')
+if [[ "${NO_CONSOLE_LOWER}" =~ ^(1|true|yes|on)$ ]]; then
   args=(--no-console "${args[@]}")
 fi
 
