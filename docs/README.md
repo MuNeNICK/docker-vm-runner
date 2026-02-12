@@ -8,6 +8,6 @@ This directory collects task-specific guides and reference material for Docker-V
 - [iPXE Boot](ipxe.md) — enabling network boot via injected iPXE ROMs.
 - [Networking Guide](networking.md) — choosing between NAT, bridge, and direct/macvtap modes.
 - [Filesystem Sharing](filesystem-sharing.md) — sharing host directories via virtiofs or 9p.
-- [Configuration Reference](reference.md) — supported distribution keys and environment variables.
+- [Configuration Reference](reference.md) — supported distribution keys, environment variables, and guest command execution.
 - [Troubleshooting & Operations](troubleshooting.md) — common issues, Redfish tips, networking, and compose notes.
 - [Redfish Guide](redfish.md) — enabling the Redfish API and performing power/boot actions.

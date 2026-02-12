@@ -87,6 +87,20 @@ The file can contain any cloud-init payload (`#cloud-config`, shell script, boot
 - Logs: `docker logs -f vm1` (compose: `docker compose logs vm1`).
 - Exec shell inside the container: `docker exec -it vm1 /bin/bash`.
 
+## Running Commands Inside the Guest
+
+The built-in `guest-exec` command lets you run commands inside the VM non-interactively via the QEMU Guest Agent — no SSH required:
+
+```bash
+docker exec vm1 guest-exec "uname -a"
+docker exec vm1 guest-exec "cat /etc/os-release"
+docker exec vm1 guest-exec "systemctl status nginx"
+```
+
+The command captures stdout/stderr and propagates the guest exit code. Cloud images automatically install and start `qemu-guest-agent` via cloud-init, so `guest-exec` is available once cloud-init completes (typically 1-2 minutes after boot).
+
+If the guest agent is not yet running, `guest-exec` prints a clear error message and exits with code 127.
+
 ## Custom distros.yaml
 
 Override the built-in mapping by bind-mounting your own file:

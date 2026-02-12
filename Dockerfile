@@ -73,8 +73,10 @@ RUN mkdir -p /opt/docker-vm-runner
 # Copy configuration, manager, and entrypoint
 COPY distros.yaml /config/distros.yaml
 COPY app/manager.py /opt/docker-vm-runner/manager.py
+COPY app/guest-exec /opt/docker-vm-runner/guest-exec
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh /opt/docker-vm-runner/manager.py
+RUN chmod +x /entrypoint.sh /opt/docker-vm-runner/manager.py /opt/docker-vm-runner/guest-exec \
+    && ln -s /opt/docker-vm-runner/guest-exec /usr/local/bin/guest-exec
 
 # Set working directory
 WORKDIR /

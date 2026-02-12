@@ -94,3 +94,38 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | Variable | Default | Description |
 | --- | --- | --- |
 | `LIBVIRT_URI` | `qemu:///system` | Override the libvirt URI used by the manager (uncommon). |
+
+## Guest Command Execution
+
+The `guest-exec` utility runs commands inside the VM via the QEMU Guest Agent (no SSH required).
+
+```bash
+docker exec <container> guest-exec "<command>"
+```
+
+### How It Works
+
+1. A virtio serial channel (`org.qemu.guest_agent.0`) is always configured in the VM's libvirt domain.
+2. Cloud-init installs and enables `qemu-guest-agent` inside the guest on first boot.
+3. `guest-exec` sends a `guest-exec` QMP command via `virsh qemu-agent-command`, polls `guest-exec-status` until the command completes, then outputs the decoded stdout/stderr and exits with the guest's exit code.
+
+### Examples
+
+```bash
+# Simple commands
+docker exec vm1 guest-exec "uname -a"
+docker exec vm1 guest-exec "df -h"
+docker exec vm1 guest-exec "cat /etc/os-release"
+
+# Exit code propagation
+docker exec vm1 guest-exec "exit 42"    # exits with code 42
+
+# Multi-argument form (no shell wrapping)
+docker exec vm1 guest-exec ls -la /tmp
+```
+
+### Notes
+
+- Available once cloud-init completes and `qemu-guest-agent` is running (typically 1-2 minutes after boot).
+- When the guest agent is not connected, `guest-exec` prints a descriptive error and exits with code 127.
+- Commands passed as a single string containing spaces are automatically wrapped with `/bin/sh -c`; multiple arguments are executed directly.

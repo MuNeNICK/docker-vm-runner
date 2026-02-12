@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""Execute a command inside the QEMU guest via the QEMU Guest Agent.
+
+Usage:
+    guest-exec "command args..."
+    guest-exec command arg1 arg2 ...
+
+Requires qemu-guest-agent running inside the VM and a virtio channel
+configured in the libvirt domain XML.
+"""
+
+import base64
+import json
+import subprocess
+import sys
+import time
+
+POLL_INTERVAL = 0.3  # seconds between guest-exec-status polls
+POLL_TIMEOUT = 300    # maximum seconds to wait for command completion
+
+
+def virsh_qga(domain: str, command: dict) -> dict:
+    """Send a QMP command to the QEMU Guest Agent via virsh."""
+    cmd_json = json.dumps(command)
+    result = subprocess.run(
+        ["virsh", "qemu-agent-command", domain, cmd_json],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "agent is not connected" in stderr or "not connected" in stderr.lower():
+            print(
+                "Error: QEMU Guest Agent is not running or not connected.\n"
+                "Ensure qemu-guest-agent is installed and running inside the VM.",
+                file=sys.stderr,
+            )
+            sys.exit(127)
+        print(f"Error: virsh qemu-agent-command failed:\n{stderr}", file=sys.stderr)
+        sys.exit(1)
+    return json.loads(result.stdout)
+
+
+def get_domain_name() -> str:
+    """Get the name of the running libvirt domain (expects exactly one)."""
+    result = subprocess.run(
+        ["virsh", "list", "--name", "--state-running"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("Error: failed to list running domains.", file=sys.stderr)
+        sys.exit(1)
+    names = [n for n in result.stdout.strip().splitlines() if n.strip()]
+    if not names:
+        print("Error: no running VM found.", file=sys.stderr)
+        sys.exit(1)
+    return names[0].strip()
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <command> [args...]", file=sys.stderr)
+        sys.exit(1)
+
+    # Support both: guest-exec "uname -a" and guest-exec uname -a
+    if len(sys.argv) == 2 and " " in sys.argv[1]:
+        path = "/bin/sh"
+        args = ["-c", sys.argv[1]]
+    else:
+        path = sys.argv[1]
+        args = sys.argv[2:]
+
+    domain = get_domain_name()
+
+    # Execute command via guest-exec
+    exec_cmd = {
+        "execute": "guest-exec",
+        "arguments": {
+            "path": path,
+            "arg": args,
+            "capture-output": True,
+        },
+    }
+    resp = virsh_qga(domain, exec_cmd)
+    pid = resp.get("return", {}).get("pid")
+    if pid is None:
+        print("Error: guest-exec did not return a PID.", file=sys.stderr)
+        sys.exit(1)
+
+    # Poll for completion
+    status_cmd = {
+        "execute": "guest-exec-status",
+        "arguments": {"pid": pid},
+    }
+    deadline = time.monotonic() + POLL_TIMEOUT
+    while True:
+        status = virsh_qga(domain, status_cmd)
+        ret = status.get("return", {})
+        if ret.get("exited"):
+            break
+        if time.monotonic() > deadline:
+            print(
+                f"Error: command did not complete within {POLL_TIMEOUT}s.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        time.sleep(POLL_INTERVAL)
+
+    # Decode and output stdout/stderr
+    out_b64 = ret.get("out-data", "")
+    err_b64 = ret.get("err-data", "")
+    if out_b64:
+        sys.stdout.buffer.write(base64.b64decode(out_b64))
+        sys.stdout.buffer.flush()
+    if err_b64:
+        sys.stderr.buffer.write(base64.b64decode(err_b64))
+        sys.stderr.buffer.flush()
+
+    exit_code = ret.get("exitcode", 0)
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

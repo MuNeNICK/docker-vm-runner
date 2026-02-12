@@ -998,6 +998,7 @@ class VMManager:
             passwd_hash = hash_password(self.cfg.password)
 
             cloud_cfg: Dict[str, object] = {
+                "packages": ["qemu-guest-agent"],
                 "users": [
                     {
                         "name": self.cfg.login_user,
@@ -1014,9 +1015,12 @@ class VMManager:
             if self.cfg.ssh_pubkey:
                 cloud_cfg["ssh_authorized_keys"] = [self.cfg.ssh_pubkey]
 
+            runcmd: List[List[str]] = [
+                ["systemctl", "enable", "--now", "qemu-guest-agent"],
+            ]
+
             if self.cfg.filesystems:
                 mounts = []
-                runcmd: List[List[str]] = []
                 for fs in self.cfg.filesystems:
                     tag = fs.target
                     safe_target = sanitize_mount_target(tag)
@@ -1043,8 +1047,9 @@ class VMManager:
                     mounts.append(mount_entry)
                 if mounts:
                     cloud_cfg["mounts"] = mounts
-                if runcmd:
-                    cloud_cfg["runcmd"] = runcmd
+
+            if runcmd:
+                cloud_cfg["runcmd"] = runcmd
 
             if yaml is None:
                 raise ManagerError("PyYAML is required to render cloud-init configuration")
@@ -1320,6 +1325,9 @@ class VMManager:
             {boot_iso_xml}
 {interfaces_block}
 {filesystems_block}
+            <channel type='unix'>
+              <target type='virtio' name='org.qemu.guest_agent.0'/>
+            </channel>
             <serial type='pty'>
               <target port='0'/>
             </serial>
