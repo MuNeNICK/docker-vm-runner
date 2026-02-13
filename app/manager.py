@@ -248,6 +248,9 @@ def detect_cloud_init_content_type(payload: str) -> str:
     return "text/cloud-config"
 
 
+_CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+
+
 def derive_vm_name(distro: str) -> str:
     explicit = get_env("GUEST_NAME")
     if explicit:
@@ -256,7 +259,7 @@ def derive_vm_name(distro: str) -> str:
     hostname_env = os.environ.get("HOSTNAME")
     if hostname_env:
         candidate = hostname_env.strip()
-        if candidate:
+        if candidate and not _CONTAINER_ID_RE.match(candidate):
             return candidate
 
     return distro
