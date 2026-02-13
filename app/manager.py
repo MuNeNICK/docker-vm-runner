@@ -251,7 +251,7 @@ def detect_cloud_init_content_type(payload: str) -> str:
 _CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
 
 
-def derive_vm_name(distro: str) -> str:
+def derive_vm_name(distro: str, iso_mode: bool = False) -> str:
     explicit = get_env("GUEST_NAME")
     if explicit:
         return explicit.strip()
@@ -261,6 +261,9 @@ def derive_vm_name(distro: str) -> str:
         candidate = hostname_env.strip()
         if candidate and not _CONTAINER_ID_RE.match(candidate):
             return candidate
+
+    if iso_mode:
+        return "custom-vm"
 
     return distro
 
@@ -1634,7 +1637,7 @@ def parse_env() -> VMConfig:
     guest_password = get_env("GUEST_PASSWORD", "password")
     ssh_port = parse_int_env("SSH_PORT", "2222", min_val=1, max_val=65535)
 
-    vm_name = derive_vm_name(distro)
+    vm_name = derive_vm_name(distro, iso_mode=iso_requested)
 
     network_mode_map = {
         "nat": "user",
