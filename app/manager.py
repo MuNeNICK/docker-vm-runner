@@ -300,26 +300,24 @@ def render_network_xml(
         if boot_order is not None:
             body.append(f"  <boot order='{boot_order}'/>")
         body.append(f"  <mac address='{mac}'/>")
-        body.append("  <source/>")
+        body.append("  <backend type='passt'/>")
         body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
         if ssh_port is not None:
             body.extend(
                 [
-                    "  <protocol type='tcp'>",
-                    f"    <source address='0.0.0.0' service='{ssh_port}'/>",
-                    "    <destination address='10.0.2.15' service='22'/>",
-                    "  </protocol>",
+                    "  <portForward proto='tcp'>",
+                    f"    <range start='{ssh_port}' to='22'/>",
+                    "  </portForward>",
                 ]
             )
         for pf in (port_forwards or []):
             body.extend(
                 [
-                    "  <protocol type='tcp'>",
-                    f"    <source address='0.0.0.0' service='{pf.host_port}'/>",
-                    f"    <destination address='10.0.2.15' service='{pf.guest_port}'/>",
-                    "  </protocol>",
+                    "  <portForward proto='tcp'>",
+                    f"    <range start='{pf.host_port}' to='{pf.guest_port}'/>",
+                    "  </portForward>",
                 ]
             )
         body.append("</interface>")

@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 # Run apt in non-interactive mode and ensure deterministic locale
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -27,6 +27,7 @@ RUN apt-get update \
         libvirt-daemon-driver-qemu \
         libvirt-daemon-system \
         openssl \
+        passt \
         python3 \
         python3-libvirt \
         python3-venv \
