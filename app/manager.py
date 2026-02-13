@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import errno
 import hashlib
+import json
 import os
 import random
 import re
@@ -932,6 +933,24 @@ class VMManager:
             if size > 100 * 1024 * 1024:
                 log("INFO", f"Reusing persistent disk {self.work_image}")
                 self._disk_reused = True
+                # Expand disk if DISK_SIZE is larger than current virtual size
+                if self.cfg.disk_size and self.cfg.disk_size != "0":
+                    info = subprocess.run(
+                        ["qemu-img", "info", "--output=json", str(self.work_image)],
+                        capture_output=True, text=True,
+                    )
+                    if info.returncode == 0:
+                        current_vsize = json.loads(info.stdout).get("virtual-size", 0)
+                        requested = self.cfg.disk_size
+                        # Parse requested size to bytes for comparison
+                        suffix = requested[-1].upper() if requested[-1].isalpha() else ""
+                        num = int(requested[:-1]) if suffix else int(requested)
+                        multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(suffix, 1)
+                        requested_bytes = num * multiplier
+                        if requested_bytes > current_vsize:
+                            log("INFO", f"Expanding disk from {current_vsize // (1024**3)}G to {requested}...")
+                            run(["qemu-img", "resize", str(self.work_image), requested])
+                            log("SUCCESS", f"Disk expanded to {requested}")
             else:
                 size_mb = size / (1024 * 1024)
                 log("WARN", f"Existing disk too small ({size_mb:.1f} MiB < 100 MiB threshold); recreating {self.work_image}")
