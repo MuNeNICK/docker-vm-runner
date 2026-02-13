@@ -2131,7 +2131,7 @@ def parse_env() -> VMConfig:
         image_url=distro_info["url"],
         login_user=distro_info["user"],
         image_format=distro_info.get("format", "qcow2"),
-        distro_name=distro_info["name"],
+        distro_name="Custom ISO" if iso_requested else distro_info["name"],
         memory_mb=memory_mb,
         cpus=cpus,
         disk_size=disk_size,
