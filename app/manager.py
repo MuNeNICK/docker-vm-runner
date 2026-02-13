@@ -301,6 +301,7 @@ def render_network_xml(
             body.append(f"  <boot order='{boot_order}'/>")
         body.append(f"  <mac address='{mac}'/>")
         body.append("  <backend type='passt'/>")
+        body.append("  <ip family='ipv4' address='10.0.2.15' prefix='24'/>")
         body.append(f"  <model type='{model}'/>")
         if rom_file:
             body.append(f"  <rom file='{rom_file}'/>")
