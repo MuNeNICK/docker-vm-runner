@@ -407,6 +407,7 @@ class VMConfig:
     extra_args: str
     novnc_enabled: bool
     vnc_port: int
+    vnc_keymap: str
     novnc_port: int
     base_image_path: Optional[str]
     blank_work_disk: bool
@@ -1287,13 +1288,14 @@ class VMManager:
         display_xml = ""
         graphics = self.cfg.graphics_type
         if graphics and graphics != "none":
+            keymap_attr = f" keymap='{self.cfg.vnc_keymap}'" if self.cfg.vnc_keymap else ""
             if graphics == "vnc":
                 display_xml = (
-                    f"<graphics type='{graphics}' listen='0.0.0.0' port='{self.cfg.vnc_port}' autoport='no'/>"
+                    f"<graphics type='{graphics}' listen='0.0.0.0' port='{self.cfg.vnc_port}' autoport='no'{keymap_attr}/>"
                 )
             else:
                 display_xml = (
-                    f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'/>"
+                    f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'{keymap_attr}/>"
                 )
             display_xml += "\n" + textwrap.dedent("""\
             <video>
@@ -1533,6 +1535,7 @@ def parse_env() -> VMConfig:
         graphics_type = display
 
     vnc_port = parse_int_env("VNC_PORT", "5900", min_val=1, max_val=65535)
+    vnc_keymap = (get_env("VNC_KEYMAP") or "").strip()
     novnc_port = parse_int_env("NOVNC_PORT", "6080", min_val=1, max_val=65535)
     if novnc_enabled and graphics_type != "vnc":
         raise ManagerError("noVNC requires a VNC graphics backend")
@@ -1958,6 +1961,7 @@ def parse_env() -> VMConfig:
         extra_args=extra_args,
         novnc_enabled=novnc_enabled,
         vnc_port=vnc_port,
+        vnc_keymap=vnc_keymap,
         novnc_port=novnc_port,
         base_image_path=base_image_override,
         blank_work_disk=blank_work_disk,
