@@ -50,7 +50,7 @@ DEFAULT_CONFIG_PATH = Path("/config/distros.yaml")
 # DATA_DIR provides a single mount point for all persistent data.
 # When set, base images, VM disks, and state all live under DATA_DIR.
 _DATA_DIR = os.environ.get("DATA_DIR")
-# /data にボリュームがマウントされていれば自動で DATA_DIR として使う
+# Auto-detect: if /data is a mount point, use it as DATA_DIR
 if not _DATA_DIR and os.path.ismount("/data"):
     _DATA_DIR = "/data"
 if _DATA_DIR:
