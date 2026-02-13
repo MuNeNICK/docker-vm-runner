@@ -754,7 +754,7 @@ class ServiceManager:
         self._novnc_started = True
         log(
             "INFO",
-            f"noVNC web client available at https://<host>:{self.vm_config.novnc_port}/vnc.html",
+            f"noVNC web client available at https://localhost:{self.vm_config.novnc_port}/vnc.html",
         )
 
     def stop(self) -> None:
@@ -2028,7 +2028,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         log("INFO", "--- Dry-run complete ---")
         return 0
 
-    log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
+    iso_boot = bool(cfg.boot_iso_path or cfg.boot_iso_url)
+    if iso_boot:
+        iso_display = cfg.boot_iso_path or cfg.boot_iso_url
+        log("INFO", f"Boot source: ISO ({iso_display})")
+    else:
+        log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
     log("INFO", f"VM Name: {cfg.vm_name}")
     log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
     if cfg.cloud_init_user_data_path:
@@ -2038,7 +2043,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         if nic.mode == "user":
             message = f"{label}: user-mode networking"
             if idx == 1:
-                message += f" (SSH: ssh -p {cfg.ssh_port} {cfg.login_user}@localhost — ensure -p {cfg.ssh_port}:{cfg.ssh_port} is published)"
+                if cfg.cloud_init_enabled:
+                    message += f" (SSH: ssh -p {cfg.ssh_port} {cfg.login_user}@localhost — ensure -p {cfg.ssh_port}:{cfg.ssh_port} is published)"
+                else:
+                    message += f" (SSH port {cfg.ssh_port} forwarded — ensure -p {cfg.ssh_port}:{cfg.ssh_port} is published)"
             log("INFO", message)
         elif nic.mode == "bridge":
             bridge = nic.bridge_name or "<unspecified>"
@@ -2073,11 +2081,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.graphics_type != "none":
         log("INFO", f"Graphics backend: {cfg.graphics_type}")
     if cfg.novnc_enabled:
-        log("INFO", f"noVNC web console: https://<host>:{cfg.novnc_port}/vnc.html (VNC + websocket proxy)")
+        log("INFO", f"noVNC web console: https://localhost:{cfg.novnc_port}/vnc.html")
     elif cfg.graphics_type == "vnc":
-        log("INFO", f"VNC server: <host>:{cfg.vnc_port}")
+        log("INFO", f"VNC server: localhost:{cfg.vnc_port}")
     if cfg.redfish_enabled:
-        log("INFO", f"Redfish: https://<host>:{cfg.redfish_port}/")
+        log("INFO", f"Redfish: https://localhost:{cfg.redfish_port}/")
     log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)
@@ -2087,9 +2095,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     vm_mgr = VMManager(cfg, service_manager)
     vm_mgr.connect()
+    vm_started = False
     try:
         vm_mgr.prepare()
         vm_mgr.start()
+        vm_started = True
         retcode = 0
         if not console_requested:
             vm_mgr.wait_until_stopped()
@@ -2097,8 +2107,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             retcode = run_console(cfg.vm_name)
             if retcode != 0:
                 log("WARN", f"Console exited with status {retcode}")
-        if cfg.persist:
-            vm_mgr._mark_installed()
         return retcode
     except ManagerError as exc:
         log("ERROR", str(exc))
@@ -2110,6 +2118,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         traceback.print_exc()
         return 1
     finally:
+        if vm_started and cfg.persist:
+            vm_mgr._mark_installed()
         vm_mgr.cleanup()
         vm_mgr.close()
         service_manager.stop()
