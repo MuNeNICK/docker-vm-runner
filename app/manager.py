@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlparse
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 try:
     import yaml  # type: ignore
@@ -174,6 +176,67 @@ def validate_disk_size(raw: str) -> str:
             f"Invalid DISK_SIZE '{raw}'. Use a number with optional suffix: K, M, G, T (e.g. '20G')"
         )
     return raw
+
+
+def download_file(url: str, destination: Path, label: str = "Downloading") -> None:
+    """Download a file with a progress bar using Python urllib."""
+    log("INFO", f"{label}: {url}")
+    req = Request(url, headers={"User-Agent": "docker-vm-runner/1.0"})
+    try:
+        response = urlopen(req, timeout=60)
+    except HTTPError as exc:
+        raise ManagerError(f"HTTP error downloading {url}: {exc.code} {exc.reason}")
+    except URLError as exc:
+        raise ManagerError(f"Failed to download {url}: {exc.reason}")
+
+    total = response.headers.get("Content-Length")
+    total_bytes = int(total) if total else None
+    downloaded = 0
+    start_time = time.time()
+
+    with tempfile.NamedTemporaryFile(delete=False, dir=destination.parent) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            chunk_size = 1024 * 256  # 256 KiB
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+                downloaded += len(chunk)
+
+                elapsed = time.time() - start_time
+                speed = downloaded / elapsed if elapsed > 0 else 0
+                downloaded_mb = downloaded / (1024 * 1024)
+
+                if total_bytes:
+                    total_mb = total_bytes / (1024 * 1024)
+                    pct = downloaded * 100 / total_bytes
+                    remaining = (total_bytes - downloaded) / speed if speed > 0 else 0
+                    eta_str = time.strftime("%M:%S", time.gmtime(remaining))
+                    bar_len = 30
+                    filled = int(bar_len * downloaded / total_bytes)
+                    bar = "#" * filled + "-" * (bar_len - filled)
+                    print(
+                        f"\r  [{bar}] {pct:5.1f}% {downloaded_mb:.1f}/{total_mb:.1f} MiB "
+                        f"({speed / (1024 * 1024):.1f} MiB/s, ETA {eta_str})",
+                        end="", flush=True,
+                    )
+                else:
+                    print(
+                        f"\r  {downloaded_mb:.1f} MiB downloaded "
+                        f"({speed / (1024 * 1024):.1f} MiB/s)",
+                        end="", flush=True,
+                    )
+            print(flush=True)  # newline after progress
+            tmp_path.replace(destination)
+            elapsed = time.time() - start_time
+            final_mb = downloaded / (1024 * 1024)
+            log("SUCCESS", f"Downloaded {final_mb:.1f} MiB in {elapsed:.1f}s")
+        except Exception:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
+            raise
 
 
 def kvm_available() -> bool:
@@ -556,9 +619,21 @@ class ServiceManager:
             Path("/var/run/libvirt/virtlogd-sock"),
         ]
         if not any(wait_for_path(path, timeout=15) for path in libvirt_paths):
-            raise ManagerError("libvirt socket did not appear; check container privileges")
+            raise ManagerError(
+                "libvirt socket did not appear.\n"
+                "  Possible fixes:\n"
+                "    - Run with --privileged\n"
+                "    - Or add --cgroupns=host --device /dev/kvm:/dev/kvm\n"
+                "    - Ensure the container has sufficient capabilities (SYS_ADMIN, NET_ADMIN)"
+            )
         if not any(wait_for_path(path, timeout=15) for path in virtlogd_paths):
-            raise ManagerError("virtlogd socket did not appear; check container privileges")
+            raise ManagerError(
+                "virtlogd socket did not appear.\n"
+                "  Possible fixes:\n"
+                "    - Run with --privileged\n"
+                "    - Or add --cgroupns=host\n"
+                "    - Check container logs for virtlogd errors"
+            )
 
     def _ensure_certificates(self) -> None:
         crt = self.cert_dir / "sushy.crt"
@@ -906,25 +981,7 @@ class VMManager:
             log("WARN", f"Cached image too small ({size_mb:.1f} MiB < 100 MiB threshold); re-downloading {self.base_image}")
             self.base_image.unlink()
 
-        log("INFO", f"Downloading image: {self.cfg.image_url}")
-        with tempfile.NamedTemporaryFile(delete=False, dir=BASE_IMAGES_DIR) as tmp:
-            tmp_path = Path(tmp.name)
-        try:
-            run(
-                [
-                    "wget",
-                    "--progress=bar:force:noscroll",
-                    "-O",
-                    str(tmp_path),
-                    self.cfg.image_url,
-                ],
-                check=True,
-            )
-            tmp_path.replace(self.base_image)
-        except subprocess.CalledProcessError as exc:
-            if tmp_path.exists():
-                tmp_path.unlink()
-            raise ManagerError(f"Failed to download {self.cfg.image_url}: {exc}") from exc
+        download_file(self.cfg.image_url, self.base_image, label="Downloading base image")
 
     def _prepare_work_image(self) -> None:
         self._disk_reused = False
@@ -1001,22 +1058,7 @@ class VMManager:
         if destination.exists() and destination.stat().st_size > 0:
             log("INFO", f"Using cached BOOT_ISO_URL download: {destination}")
         else:
-            log("INFO", f"Downloading boot ISO from {self.boot_iso_url}")
-            with tempfile.NamedTemporaryFile(delete=False, dir=BOOT_ISO_CACHE_DIR) as tmp:
-                tmp_path = Path(tmp.name)
-            try:
-                run([
-                    "wget",
-                    "--progress=bar:force:noscroll",
-                    "-O",
-                    str(tmp_path),
-                    self.boot_iso_url,
-                ])
-                tmp_path.replace(destination)
-            except subprocess.CalledProcessError as exc:
-                if tmp_path.exists():
-                    tmp_path.unlink(missing_ok=True)
-                raise ManagerError(f"Failed to download BOOT_ISO_URL {self.boot_iso_url}: {exc}") from exc
+            download_file(self.boot_iso_url, destination, label="Downloading boot ISO")
 
         self._boot_iso_cache_path = destination
         self.boot_iso = destination
@@ -1444,27 +1486,66 @@ class VMManager:
         if self.cfg.novnc_enabled:
             self.service_manager.start_novnc()
 
+    def wait_for_guest_ready(self, timeout: float = 120.0, interval: float = 3.0) -> bool:
+        """Poll QEMU Guest Agent until the guest OS is responsive."""
+        log("INFO", "Waiting for guest agent to become ready...")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                result = subprocess.run(
+                    ["virsh", "-c", LIBVIRT_URI, "qemu-agent-command",
+                     self.cfg.vm_name, '{"execute":"guest-ping"}'],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    log("SUCCESS", "Guest agent is ready — VM is fully booted")
+                    return True
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception:
+                pass
+            time.sleep(interval)
+        log("WARN", f"Guest agent did not respond within {int(timeout)}s (VM may still be booting)")
+        return False
+
     def wait_until_stopped(self) -> None:
         if self.domain is None:
             raise ManagerError("Domain not defined")
 
         shutdown_requested = False
+        _first_sigint_time: Optional[float] = None
+        _DOUBLE_PRESS_WINDOW = 3.0  # seconds
 
-        def _request_shutdown(signum, frame):
+        def _do_shutdown():
             nonlocal shutdown_requested
             if shutdown_requested:
                 return
             shutdown_requested = True
-            sig_name = signal.Signals(signum).name
-            log("INFO", f"{sig_name} received, shutting down VM")
+            log("INFO", "Shutting down VM...")
             try:
                 self.domain.shutdown()  # type: ignore[attr-defined]
             except libvirt.libvirtError:
                 try:
                     self.domain.destroy()  # type: ignore[attr-defined]
                 except libvirt.libvirtError:
-                    # libvirtd already exited — QEMU will terminate with the container
                     log("INFO", "libvirt connection lost; VM process will terminate with container")
+
+        def _request_shutdown(signum, frame):
+            nonlocal _first_sigint_time
+            # SIGTERM always shuts down immediately (Docker stop, orchestrators)
+            if signum == signal.SIGTERM:
+                sig_name = signal.Signals(signum).name
+                log("INFO", f"{sig_name} received, shutting down VM")
+                _do_shutdown()
+                return
+            # SIGINT (Ctrl+C) uses double-press guard
+            now = time.time()
+            if _first_sigint_time is not None and (now - _first_sigint_time) < _DOUBLE_PRESS_WINDOW:
+                log("INFO", "Second Ctrl+C received, shutting down VM")
+                _do_shutdown()
+            else:
+                _first_sigint_time = now
+                log("WARN", "Press Ctrl+C again within 3s to shutdown the VM (or Ctrl+] to detach console)")
 
         prev_sigterm = signal.signal(signal.SIGTERM, _request_shutdown)
         prev_sigint = signal.signal(signal.SIGINT, _request_shutdown)
@@ -1474,7 +1555,6 @@ class VMManager:
                 try:
                     active = self.domain.isActive()  # type: ignore[attr-defined]
                 except libvirt.libvirtError:
-                    # libvirtd is gone — QEMU is dead or dying with it
                     log("INFO", f"Domain {self.cfg.vm_name} is no longer active")
                     return
                 if not active:
@@ -1484,6 +1564,7 @@ class VMManager:
         finally:
             signal.signal(signal.SIGTERM, prev_sigterm)
             signal.signal(signal.SIGINT, prev_sigint)
+
     def cleanup(self) -> None:
         if self.domain is not None:
             try:
@@ -1533,8 +1614,14 @@ def load_distro_config(distro: str, config_path: Path = DEFAULT_CONFIG_PATH) -> 
     data = yaml.safe_load(config_path.read_text())
     distros = data.get("distributions", {})
     if distro not in distros:
-        available = ", ".join(sorted(distros.keys()))
-        raise ManagerError(f"Unknown distro '{distro}'. Available: {available}")
+        available = sorted(distros.keys())
+        available_list = "\n    ".join(available)
+        raise ManagerError(
+            f"Unknown distro '{distro}'.\n"
+            f"  Available distributions:\n"
+            f"    {available_list}\n"
+            f"  Use --list-distros to see details."
+        )
     return distros[distro]
 
 
@@ -2027,8 +2114,8 @@ def run_console(vm_name: str) -> int:
         signal.signal(signal.SIGTERM, prev_sigterm)
 
 
-def list_distros(config_path: Path = DEFAULT_CONFIG_PATH) -> None:
-    """Print available distributions and exit."""
+def list_distros(config_path: Path = DEFAULT_CONFIG_PATH, arch_filter: Optional[str] = None) -> None:
+    """Print available distributions and exit, optionally filtered by arch."""
     if not config_path.exists():
         log("ERROR", f"Distribution config missing: {config_path}")
         return
@@ -2037,6 +2124,18 @@ def list_distros(config_path: Path = DEFAULT_CONFIG_PATH) -> None:
     if not distros:
         log("WARN", "No distributions found")
         return
+
+    if arch_filter:
+        arch_filter_norm = ARCH_ALIASES.get(arch_filter.lower(), arch_filter.lower())
+        distros = {
+            k: v for k, v in distros.items()
+            if ARCH_ALIASES.get(v.get("arch", "x86_64").lower(), v.get("arch", "x86_64").lower()) == arch_filter_norm
+        }
+        if not distros:
+            log("WARN", f"No distributions found for arch '{arch_filter}'")
+            return
+        log("INFO", f"Showing distributions for arch: {arch_filter_norm}")
+
     max_key = max(len(k) for k in distros)
     for key in sorted(distros):
         info = distros[key]
@@ -2046,24 +2145,87 @@ def list_distros(config_path: Path = DEFAULT_CONFIG_PATH) -> None:
         print(f"  {key:<{max_key}}  {name}  (arch={arch}, user={user})")
 
 
+_SENSITIVE_FIELDS = {"password", "redfish_password"}
+
+
 def show_config(cfg: VMConfig) -> None:
     """Print the resolved VM configuration and exit."""
     import dataclasses
+
     for field in dataclasses.fields(cfg):
         value = getattr(cfg, field.name)
-        print(f"  {field.name}: {value}")
+        if field.name in _SENSITIVE_FIELDS:
+            print(f"  {field.name}: ********")
+        elif isinstance(value, list) and value and hasattr(value[0], "__dataclass_fields__"):
+            print(f"  {field.name}:")
+            for i, item in enumerate(value):
+                print(f"    [{i}]:")
+                for sub_field in dataclasses.fields(item):
+                    sub_value = getattr(item, sub_field.name)
+                    print(f"      {sub_field.name}: {sub_value}")
+        else:
+            print(f"  {field.name}: {value}")
+
+
+def print_startup_banner(cfg: VMConfig) -> None:
+    """Print a visually distinct access-info banner after VM starts."""
+    lines: List[str] = []
+    lines.append(f"  VM: {cfg.vm_name} ({cfg.distro_name})")
+    lines.append(f"  Arch: {cfg.arch} | Memory: {cfg.memory_mb} MiB | CPUs: {cfg.cpus}")
+
+    has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
+    ports_to_publish: List[str] = []
+
+    if has_user_nic and cfg.ssh_port:
+        if cfg.cloud_init_enabled:
+            lines.append(f"  SSH:  ssh -p {cfg.ssh_port} {cfg.login_user}@localhost")
+        else:
+            lines.append(f"  SSH:  port {cfg.ssh_port} -> guest:22")
+        ports_to_publish.append(f"-p {cfg.ssh_port}:{cfg.ssh_port}")
+    if cfg.cloud_init_enabled:
+        lines.append(f"  User: {cfg.login_user}  Pass: {cfg.password}")
+    if cfg.novnc_enabled:
+        lines.append(f"  VNC:  https://localhost:{cfg.novnc_port}/vnc.html")
+        ports_to_publish.append(f"-p {cfg.novnc_port}:{cfg.novnc_port}")
+    elif cfg.graphics_type == "vnc":
+        lines.append(f"  VNC:  localhost:{cfg.vnc_port}")
+        ports_to_publish.append(f"-p {cfg.vnc_port}:{cfg.vnc_port}")
+    if cfg.redfish_enabled:
+        lines.append(f"  Redfish: https://localhost:{cfg.redfish_port}/")
+        ports_to_publish.append(f"-p {cfg.redfish_port}:{cfg.redfish_port}")
+    if cfg.port_forwards and has_user_nic:
+        fwd_strs = [f"{pf.host_port}->{pf.guest_port}" for pf in cfg.port_forwards]
+        lines.append(f"  Ports: {', '.join(fwd_strs)}")
+        for pf in cfg.port_forwards:
+            ports_to_publish.append(f"-p {pf.host_port}:{pf.host_port}")
+
+    if ports_to_publish:
+        lines.append("")
+        lines.append(f"  Ensure docker ports are published:")
+        lines.append(f"    {' '.join(ports_to_publish)}")
+
+    max_len = max(len(line) for line in lines)
+    border_len = max_len + 2
+    banner_colour = "\033[0;36m"
+    reset = "\033[0m"
+    print(f"{banner_colour}{'=' * border_len}{reset}", flush=True)
+    for line in lines:
+        print(f"{banner_colour}{line}{reset}", flush=True)
+    print(f"{banner_colour}{'=' * border_len}{reset}", flush=True)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Docker-VM-Runner libvirt manager")
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
-    parser.add_argument("--list-distros", action="store_true", help="List available distributions and exit")
+    parser.add_argument("--list-distros", nargs="?", const="", default=None, metavar="ARCH",
+                        help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)")
     parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and environment, then exit")
     args = parser.parse_args(argv)
 
-    if args.list_distros:
-        list_distros()
+    if args.list_distros is not None:
+        arch_filter = args.list_distros if args.list_distros else None
+        list_distros(arch_filter=arch_filter)
         return 0
 
     no_console_explicit = get_env("NO_CONSOLE")
@@ -2092,99 +2254,69 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.dry_run:
+        log("INFO", "=== Configuration ===")
         show_config(cfg)
-        log("INFO", "--- Dry-run checks ---")
+        log("INFO", "=== Environment Checks ===")
         # KVM check
         if kvm_available():
-            log("INFO", "KVM: available (/dev/kvm)")
+            log("SUCCESS", "KVM:         available (/dev/kvm)")
         else:
             if get_env_bool("REQUIRE_KVM", False):
-                log("ERROR", "KVM: NOT available and REQUIRE_KVM=1 is set")
+                log("ERROR", "KVM:         NOT available (REQUIRE_KVM=1 is set — will fail)")
             else:
-                log("WARN", "KVM: NOT available; will use TCG (slow)")
+                log("WARN", "KVM:         NOT available (will use TCG — 10-50x slower)")
         # Boot order
-        log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
+        log("INFO", f"Boot order:  {', '.join(cfg.boot_order)}")
         # Persist
         if cfg.persist:
             log("INFO", f"Persistence: enabled (data dir: {IMAGES_DIR})")
         else:
             log("INFO", "Persistence: disabled (ephemeral)")
+        # Cloud-init
+        if cfg.cloud_init_enabled:
+            log("INFO", f"Cloud-init:  enabled (user={cfg.login_user})")
+        else:
+            log("INFO", "Cloud-init:  disabled")
         # ISO
         if cfg.boot_iso_path:
             iso_path = Path(cfg.boot_iso_path)
             if iso_path.exists():
-                log("INFO", f"Boot ISO: {iso_path} (found)")
+                log("SUCCESS", f"Boot ISO:    {iso_path} (found)")
             else:
-                log("ERROR", f"Boot ISO: {iso_path} (NOT FOUND)")
+                log("ERROR", f"Boot ISO:    {iso_path} (NOT FOUND)")
         elif cfg.boot_iso_url:
-            log("INFO", f"Boot ISO URL: {cfg.boot_iso_url} (will download)")
-        log("INFO", "--- Dry-run complete ---")
+            log("INFO", f"Boot ISO:    {cfg.boot_iso_url} (will download)")
+        # Network
+        for idx, nic in enumerate(cfg.nics, start=1):
+            label = f"NIC #{idx}"
+            log("INFO", f"{label}:       mode={nic.mode}, model={nic.model}, mac={nic.mac_address or 'auto'}")
+        log("INFO", "=== Dry-run complete (no VM started) ===")
+        print_startup_banner(cfg)
         return 0
 
+    # Compact startup log
     iso_boot = bool(cfg.boot_iso_path or cfg.boot_iso_url)
     if iso_boot:
         iso_display = cfg.boot_iso_path or cfg.boot_iso_url
         log("INFO", f"Boot source: ISO ({iso_display})")
     else:
         log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
-    log("INFO", f"VM Name: {cfg.vm_name}")
-    log("INFO", f"Memory: {cfg.memory_mb} MiB, CPUs: {cfg.cpus}")
-    if cfg.cloud_init_user_data_path:
-        log("INFO", f"CLOUD_INIT_USER_DATA: {cfg.cloud_init_user_data_path}")
+    log("INFO", f"VM: {cfg.vm_name} | Memory: {cfg.memory_mb} MiB | CPUs: {cfg.cpus} | Disk: {cfg.disk_size}")
+
+    has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
     for idx, nic in enumerate(cfg.nics, start=1):
         label = "Primary NIC" if idx == 1 else f"NIC #{idx}"
-        if nic.mode == "user":
-            message = f"{label}: user-mode networking"
-            if idx == 1:
-                if cfg.cloud_init_enabled:
-                    message += f" (SSH: ssh -p {cfg.ssh_port} {cfg.login_user}@localhost — ensure -p {cfg.ssh_port}:{cfg.ssh_port} is published)"
-                else:
-                    message += f" (SSH port {cfg.ssh_port} forwarded — ensure -p {cfg.ssh_port}:{cfg.ssh_port} is published)"
-            log("INFO", message)
-        elif nic.mode == "bridge":
-            bridge = nic.bridge_name or "<unspecified>"
-            log("INFO", f"{label}: bridge networking via {bridge}")
-        elif nic.mode == "direct":
-            dev = nic.direct_device or "<unspecified>"
-            log("INFO", f"{label}: direct/macvtap via {dev}")
-        else:
-            log("INFO", f"{label}: mode={nic.mode}")
-        log("INFO", f"{label} model: {nic.model}")
-        log("INFO", f"{label} MAC: {nic.mac_address or '<deterministic>'}")
-        if nic.boot:
-            log("INFO", f"{label} participates in boot order")
-    has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
+        log("INFO", f"{label}: mode={nic.mode}, model={nic.model}")
     if not has_user_nic and cfg.ssh_port:
-        log("WARN", f"SSH_PORT={cfg.ssh_port} is set but no user-mode NIC is configured; SSH port forwarding is not active.")
-    if cfg.port_forwards:
-        if has_user_nic:
-            fwd_strs = [f"{pf.host_port}->{pf.guest_port}" for pf in cfg.port_forwards]
-            log("INFO", f"Port forwards (PORT_FWD): {', '.join(fwd_strs)}")
-        else:
-            log("WARN", "PORT_FWD is set but no user-mode NIC is configured; port forwarding is not active.")
+        log("WARN", f"SSH_PORT={cfg.ssh_port} is set but no user-mode NIC; SSH port forwarding not active")
+    if cfg.port_forwards and not has_user_nic:
+        log("WARN", "PORT_FWD is set but no user-mode NIC; port forwarding not active")
     if cfg.ipxe_enabled:
-        rom_display = cfg.ipxe_rom_path or "<unspecified>"
-        log("INFO", f"iPXE enabled (ROM: {rom_display})")
+        log("INFO", f"iPXE enabled (ROM: {cfg.ipxe_rom_path or '<default>'})")
     if cfg.filesystems:
         for idx, fs in enumerate(cfg.filesystems, start=1):
-            mode = "read-only" if fs.readonly else "read-write"
-            mount_dir = Path("/mnt") / sanitize_mount_target(fs.target)
-            log(
-                "INFO",
-                f"Filesystem #{idx}: {fs.source} -> guest tag '{fs.target}' "
-                f"({mode}, driver={fs.driver}, accessmode={fs.accessmode}, mount={mount_dir})",
-            )
-    if cfg.cloud_init_enabled:
-        log("INFO", f"Login: user='{cfg.login_user}', password='{cfg.password}' (change via GUEST_PASSWORD)")
-    log("INFO", f"Display mode: {cfg.display}")
-    if cfg.graphics_type != "none":
-        log("INFO", f"Graphics backend: {cfg.graphics_type}")
-    if cfg.novnc_enabled:
-        log("INFO", f"noVNC web console: https://localhost:{cfg.novnc_port}/vnc.html")
-    elif cfg.graphics_type == "vnc":
-        log("INFO", f"VNC server: localhost:{cfg.vnc_port}")
-    if cfg.redfish_enabled:
-        log("INFO", f"Redfish: https://localhost:{cfg.redfish_port}/")
+            mode = "ro" if fs.readonly else "rw"
+            log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{sanitize_mount_target(fs.target)} ({fs.driver}, {mode})")
     log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)
@@ -2199,6 +2331,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         vm_mgr.prepare()
         vm_mgr.start()
         vm_started = True
+        print_startup_banner(cfg)
+        # Background guest-agent readiness check (non-blocking for console mode)
+        if not console_requested:
+            vm_mgr.wait_for_guest_ready(timeout=120)
         retcode = 0
         if not console_requested:
             vm_mgr.wait_until_stopped()

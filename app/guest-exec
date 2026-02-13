@@ -2,8 +2,12 @@
 """Execute a command inside the QEMU guest via the QEMU Guest Agent.
 
 Usage:
-    guest-exec "command args..."
-    guest-exec command arg1 arg2 ...
+    guest-exec [--wait] "command args..."
+    guest-exec [--wait] command arg1 arg2 ...
+
+Options:
+    --wait    Wait for guest agent to become available (retries for up to 60s).
+              Useful when running immediately after VM boot.
 
 Requires qemu-guest-agent running inside the VM and a virtio channel
 configured in the libvirt domain XML.
@@ -15,8 +19,14 @@ import subprocess
 import sys
 import time
 
-POLL_INTERVAL = 0.3  # seconds between guest-exec-status polls
-POLL_TIMEOUT = 300    # maximum seconds to wait for command completion
+POLL_INTERVAL = 0.3   # seconds between guest-exec-status polls
+POLL_TIMEOUT = 300     # maximum seconds to wait for command completion
+AGENT_WAIT_TIMEOUT = 60   # seconds to wait for guest agent when --wait is used
+AGENT_WAIT_INTERVAL = 2   # seconds between agent connection retries
+
+
+class AgentNotConnectedError(Exception):
+    """Raised when the guest agent is not connected."""
 
 
 def virsh_qga(domain: str, command: dict) -> dict:
@@ -30,15 +40,39 @@ def virsh_qga(domain: str, command: dict) -> dict:
     if result.returncode != 0:
         stderr = result.stderr.strip()
         if "agent is not connected" in stderr or "not connected" in stderr.lower():
-            print(
-                "Error: QEMU Guest Agent is not running or not connected.\n"
-                "Ensure qemu-guest-agent is installed and running inside the VM.",
-                file=sys.stderr,
-            )
-            sys.exit(127)
+            raise AgentNotConnectedError(stderr)
         print(f"Error: virsh qemu-agent-command failed:\n{stderr}", file=sys.stderr)
         sys.exit(1)
     return json.loads(result.stdout)
+
+
+def wait_for_agent(domain: str, timeout: float = AGENT_WAIT_TIMEOUT) -> None:
+    """Poll until the guest agent responds to a ping."""
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    while time.monotonic() < deadline:
+        attempt += 1
+        remaining = int(deadline - time.monotonic())
+        try:
+            virsh_qga(domain, {"execute": "guest-ping"})
+            return
+        except AgentNotConnectedError:
+            print(
+                f"\r  Waiting for guest agent... ({remaining}s remaining)",
+                end="", file=sys.stderr, flush=True,
+            )
+            time.sleep(AGENT_WAIT_INTERVAL)
+    print("", file=sys.stderr)  # newline after progress
+    print(
+        "Error: QEMU Guest Agent did not become available within "
+        f"{int(timeout)}s.\n"
+        "  Possible causes:\n"
+        "    - The VM is still booting (try increasing --wait timeout)\n"
+        "    - qemu-guest-agent is not installed inside the VM\n"
+        "    - The virtio channel is not configured",
+        file=sys.stderr,
+    )
+    sys.exit(127)
 
 
 def get_domain_name() -> str:
@@ -59,19 +93,34 @@ def get_domain_name() -> str:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <command> [args...]", file=sys.stderr)
+    wait_mode = False
+    argv = sys.argv[1:]
+    if argv and argv[0] == "--wait":
+        wait_mode = True
+        argv = argv[1:]
+
+    if not argv:
+        print(
+            f"Usage: {sys.argv[0]} [--wait] <command> [args...]\n"
+            "\n"
+            "Options:\n"
+            "  --wait  Wait for guest agent to become available (up to 60s)",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Support both: guest-exec "uname -a" and guest-exec uname -a
-    if len(sys.argv) == 2 and " " in sys.argv[1]:
+    if len(argv) == 1 and " " in argv[0]:
         path = "/bin/sh"
-        args = ["-c", sys.argv[1]]
+        args = ["-c", argv[0]]
     else:
-        path = sys.argv[1]
-        args = sys.argv[2:]
+        path = argv[0]
+        args = argv[1:]
 
     domain = get_domain_name()
+
+    if wait_mode:
+        wait_for_agent(domain)
 
     # Execute command via guest-exec
     exec_cmd = {
@@ -82,7 +131,19 @@ def main() -> None:
             "capture-output": True,
         },
     }
-    resp = virsh_qga(domain, exec_cmd)
+    try:
+        resp = virsh_qga(domain, exec_cmd)
+    except AgentNotConnectedError:
+        print(
+            "Error: QEMU Guest Agent is not running or not connected.\n"
+            "  Hint: If the VM just started, wait a few seconds and retry.\n"
+            "        Or use --wait to auto-retry:\n"
+            f"          {sys.argv[0]} --wait <command>\n"
+            "  Ensure qemu-guest-agent is installed and running inside the VM.",
+            file=sys.stderr,
+        )
+        sys.exit(127)
+
     pid = resp.get("return", {}).get("pid")
     if pid is None:
         print("Error: guest-exec did not return a PID.", file=sys.stderr)
@@ -95,7 +156,14 @@ def main() -> None:
     }
     deadline = time.monotonic() + POLL_TIMEOUT
     while True:
-        status = virsh_qga(domain, status_cmd)
+        try:
+            status = virsh_qga(domain, status_cmd)
+        except AgentNotConnectedError:
+            print(
+                "Error: Guest agent disconnected while waiting for command result.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         ret = status.get("return", {})
         if ret.get("exited"):
             break
