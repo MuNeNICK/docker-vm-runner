@@ -1294,6 +1294,20 @@ class VMManager:
                 display_xml = (
                     f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'/>"
                 )
+            display_xml += "\n" + textwrap.dedent("""\
+            <video>
+              <model type='virtio' heads='1' primary='yes'>
+                <resolution x='1920' y='1080'/>
+              </model>
+            </video>""")
+            display_xml += "\n" + textwrap.dedent("""\
+            <channel type='qemu-vdagent'>
+              <source>
+                <clipboard copypaste='yes'/>
+                <mouse mode='client'/>
+              </source>
+              <target type='virtio' name='com.redhat.spice.0'/>
+            </channel>""")
 
         seed_iso_xml = ""
         if self.seed_iso:
