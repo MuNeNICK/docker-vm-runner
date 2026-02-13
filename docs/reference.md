@@ -88,6 +88,7 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `PORT_FWD` | *(unset)* | Forward additional TCP ports from the host to the guest. Comma-separated `host_port:guest_port` pairs (e.g., `5901:5901,8080:80`). Only applies to the first user-mode (NAT) NIC. Host ports must not collide with `SSH_PORT`, `VNC_PORT`, `NOVNC_PORT`, or `REDFISH_PORT`. |
 | `NETWORK_MODE` | `nat` | `nat` (QEMU user-mode), `bridge` (libvirt bridge), or `direct` (macvtap). |
 | `NETWORK_BRIDGE` | *(required for bridge)* | Name of the host bridge (e.g., `br0`) when `NETWORK_MODE=bridge`. |
 | `NETWORK_DIRECT_DEV` | *(required for direct)* | Host NIC to bind (e.g., `eth0`) when `NETWORK_MODE=direct` (requires `--volume /dev:/dev` and `--privileged`). |

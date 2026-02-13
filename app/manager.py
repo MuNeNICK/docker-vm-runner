@@ -26,7 +26,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 from urllib.parse import urlparse
 
 try:
@@ -289,6 +289,7 @@ def render_network_xml(
     mac_address: Optional[str] = None,
     boot_order: Optional[int] = None,
     rom_file: Optional[str] = None,
+    port_forwards: Optional[List[PortForward]] = None,
 ) -> Tuple[str, str]:
     """Render a libvirt interface definition based on the requested network mode."""
     mac = (mac_address or config.mac_address or random_mac()).lower()
@@ -309,6 +310,15 @@ def render_network_xml(
                     "  <protocol type='tcp'>",
                     f"    <source address='0.0.0.0' service='{ssh_port}'/>",
                     "    <destination address='10.0.2.15' service='22'/>",
+                    "  </protocol>",
+                ]
+            )
+        for pf in (port_forwards or []):
+            body.extend(
+                [
+                    "  <protocol type='tcp'>",
+                    f"    <source address='0.0.0.0' service='{pf.host_port}'/>",
+                    f"    <destination address='10.0.2.15' service='{pf.guest_port}'/>",
                     "  </protocol>",
                 ]
             )
@@ -355,6 +365,11 @@ def run(cmd: List[str], check: bool = True, **kwargs) -> subprocess.CompletedPro
     log("DEBUG", f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=check, text=True, **kwargs)
     return result
+
+
+class PortForward(NamedTuple):
+    host_port: int
+    guest_port: int
 
 
 @dataclass
@@ -416,6 +431,7 @@ class VMConfig:
     ipxe_enabled: bool
     ipxe_rom_path: Optional[str]
     filesystems: List[FilesystemConfig]
+    port_forwards: List[PortForward]
 
 
 class ServiceManager:
@@ -1231,6 +1247,7 @@ class VMManager:
             if self._ipxe_rom_path is not None:
                 rom_file = str(self._ipxe_rom_path)
             ssh_forward = self.cfg.ssh_port if idx == 0 and nic.mode == "user" else None
+            pf_list = self.cfg.port_forwards if idx == 0 and nic.mode == "user" else None
             mac_seed = self._network_macs.get(idx)
             nic_xml, resolved_mac = render_network_xml(
                 nic,
@@ -1238,6 +1255,7 @@ class VMManager:
                 mac_address=mac_seed,
                 boot_order=nic_boot_order,
                 rom_file=rom_file,
+                port_forwards=pf_list,
             )
             self._network_macs[idx] = resolved_mac
             interfaces_xml.append(textwrap.indent(nic_xml, "            "))
@@ -1862,6 +1880,36 @@ def parse_env() -> VMConfig:
     redfish_system_id = get_env("REDFISH_SYSTEM_ID", vm_name)
     redfish_enabled = get_env_bool("REDFISH_ENABLE", False)
 
+    # --- PORT_FWD parsing ---
+    port_forwards: List[PortForward] = []
+    port_fwd_raw = get_env("PORT_FWD")
+    if port_fwd_raw:
+        for entry in port_fwd_raw.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            parts = entry.split(":")
+            if len(parts) != 2:
+                raise ManagerError(
+                    f"Invalid PORT_FWD entry '{entry}': expected format host_port:guest_port"
+                )
+            try:
+                host_port = int(parts[0])
+                guest_port = int(parts[1])
+            except ValueError:
+                raise ManagerError(
+                    f"Invalid PORT_FWD entry '{entry}': ports must be integers"
+                )
+            if not (1 <= host_port <= 65535):
+                raise ManagerError(
+                    f"Invalid PORT_FWD entry '{entry}': host port {host_port} out of range (1-65535)"
+                )
+            if not (1 <= guest_port <= 65535):
+                raise ManagerError(
+                    f"Invalid PORT_FWD entry '{entry}': guest port {guest_port} out of range (1-65535)"
+                )
+            port_forwards.append(PortForward(host_port=host_port, guest_port=guest_port))
+
     active_ports = {"SSH_PORT": ssh_port}
     if graphics_type == "vnc" or novnc_enabled:
         active_ports["VNC_PORT"] = vnc_port
@@ -1869,6 +1917,8 @@ def parse_env() -> VMConfig:
         active_ports["NOVNC_PORT"] = novnc_port
     if redfish_enabled:
         active_ports["REDFISH_PORT"] = redfish_port
+    for pf in port_forwards:
+        active_ports[f"PORT_FWD({pf.host_port}:{pf.guest_port})"] = pf.host_port
 
     seen: Dict[int, str] = {}
     for label, port in active_ports.items():
@@ -1918,6 +1968,7 @@ def parse_env() -> VMConfig:
         ipxe_enabled=ipxe_enabled,
         ipxe_rom_path=ipxe_rom_path,
         filesystems=filesystems,
+        port_forwards=port_forwards,
     )
 
 
@@ -2069,6 +2120,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
     if not has_user_nic and cfg.ssh_port:
         log("WARN", f"SSH_PORT={cfg.ssh_port} is set but no user-mode NIC is configured; SSH port forwarding is not active.")
+    if cfg.port_forwards:
+        if has_user_nic:
+            fwd_strs = [f"{pf.host_port}->{pf.guest_port}" for pf in cfg.port_forwards]
+            log("INFO", f"Port forwards (PORT_FWD): {', '.join(fwd_strs)}")
+        else:
+            log("WARN", "PORT_FWD is set but no user-mode NIC is configured; port forwarding is not active.")
     if cfg.ipxe_enabled:
         rom_display = cfg.ipxe_rom_path or "<unspecified>"
         log("INFO", f"iPXE enabled (ROM: {rom_display})")
