@@ -1402,11 +1402,11 @@ class VMManager:
             try:
                 self.domain.shutdown()  # type: ignore[attr-defined]
             except libvirt.libvirtError:
-                log("WARN", "Graceful shutdown failed; forcing destroy")
                 try:
                     self.domain.destroy()  # type: ignore[attr-defined]
                 except libvirt.libvirtError:
-                    log("WARN", "Failed to force destroy domain")
+                    # libvirtd already exited — QEMU will terminate with the container
+                    log("INFO", "libvirt connection lost; VM process will terminate with container")
 
         prev_sigterm = signal.signal(signal.SIGTERM, _request_shutdown)
         prev_sigint = signal.signal(signal.SIGINT, _request_shutdown)
@@ -1415,8 +1415,10 @@ class VMManager:
             while True:
                 try:
                     active = self.domain.isActive()  # type: ignore[attr-defined]
-                except libvirt.libvirtError as exc:
-                    raise ManagerError(f"Failed to query domain state: {exc}") from exc
+                except libvirt.libvirtError:
+                    # libvirtd is gone — QEMU is dead or dying with it
+                    log("INFO", f"Domain {self.cfg.vm_name} is no longer active")
+                    return
                 if not active:
                     log("INFO", f"Domain {self.cfg.vm_name} is no longer active")
                     return
@@ -1431,12 +1433,11 @@ class VMManager:
                     log("INFO", f"Shutting down domain {self.cfg.vm_name}")
                     self.domain.destroy()  # type: ignore[attr-defined]
             except libvirt.libvirtError:
-                log("WARN", f"Failed to destroy domain {self.cfg.vm_name}")
+                log("DEBUG", f"Could not destroy domain {self.cfg.vm_name} (libvirt connection lost)")
             try:
-                log("INFO", f"Undefining domain {self.cfg.vm_name}")
                 self.domain.undefine()
             except libvirt.libvirtError:
-                log("WARN", f"Failed to undefine domain {self.cfg.vm_name}")
+                log("DEBUG", f"Could not undefine domain {self.cfg.vm_name} (libvirt connection lost)")
 
         # Safety net: kill any remaining qemu processes to prevent orphans
         self._kill_remaining_qemu()
@@ -1568,6 +1569,30 @@ def parse_env() -> VMConfig:
                 f"CLOUD_INIT_USER_DATA must point to a regular file: {candidate}"
             )
         cloud_init_user_data_path = candidate
+
+    CLOUD_INIT_HEADERS = {"#cloud-config", "#!", "#cloud-boothook", "#include", "#part-handler"}
+
+    if cloud_init_user_data_path:
+        try:
+            first_line = cloud_init_user_data_path.read_text().split("\n", 1)[0].strip()
+        except OSError as exc:
+            raise ManagerError(f"Cannot read CLOUD_INIT_USER_DATA: {exc}")
+        if not any(first_line.startswith(h) for h in CLOUD_INIT_HEADERS):
+            log(
+                "WARN",
+                f"CLOUD_INIT_USER_DATA does not start with a recognized cloud-init header "
+                f"(got: '{first_line[:60]}'). "
+                "Expected: #cloud-config, #!/bin/bash, #cloud-boothook, #include, or #part-handler"
+            )
+        if first_line == "#cloud-config":
+            try:
+                content = cloud_init_user_data_path.read_text()
+                parsed = yaml.safe_load(content)
+                if not isinstance(parsed, dict):
+                    log("WARN", "CLOUD_INIT_USER_DATA: #cloud-config should contain a YAML mapping, got " + type(parsed).__name__)
+            except yaml.YAMLError as exc:
+                raise ManagerError(f"CLOUD_INIT_USER_DATA contains invalid YAML: {exc}")
+
     ipxe_enabled = get_env_bool("IPXE_ENABLE", False)
     ipxe_rom_override = (get_env("IPXE_ROM_PATH") or "").strip() or None
 
@@ -1831,6 +1856,23 @@ def parse_env() -> VMConfig:
     redfish_system_id = get_env("REDFISH_SYSTEM_ID", vm_name)
     redfish_enabled = get_env_bool("REDFISH_ENABLE", False)
 
+    active_ports = {"SSH_PORT": ssh_port}
+    if graphics_type == "vnc" or novnc_enabled:
+        active_ports["VNC_PORT"] = vnc_port
+    if novnc_enabled:
+        active_ports["NOVNC_PORT"] = novnc_port
+    if redfish_enabled:
+        active_ports["REDFISH_PORT"] = redfish_port
+
+    seen: Dict[int, str] = {}
+    for label, port in active_ports.items():
+        if port in seen:
+            raise ManagerError(
+                f"Port conflict: {label}={port} collides with {seen[port]}={port}. "
+                "Each service needs a unique port."
+            )
+        seen[port] = label
+
     return VMConfig(
         distro=distro,
         image_url=distro_info["url"],
@@ -1924,6 +1966,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
     parser.add_argument("--list-distros", action="store_true", help="List available distributions and exit")
     parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
+    parser.add_argument("--dry-run", action="store_true", help="Validate config and environment, then exit")
     args = parser.parse_args(argv)
 
     if args.list_distros:
@@ -1953,6 +1996,36 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.show_config:
         show_config(cfg)
+        return 0
+
+    if args.dry_run:
+        show_config(cfg)
+        log("INFO", "--- Dry-run checks ---")
+        # KVM check
+        if kvm_available():
+            log("INFO", "KVM: available (/dev/kvm)")
+        else:
+            if get_env_bool("REQUIRE_KVM", False):
+                log("ERROR", "KVM: NOT available and REQUIRE_KVM=1 is set")
+            else:
+                log("WARN", "KVM: NOT available; will use TCG (slow)")
+        # Boot order
+        log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
+        # Persist
+        if cfg.persist:
+            log("INFO", f"Persistence: enabled (data dir: {IMAGES_DIR})")
+        else:
+            log("INFO", "Persistence: disabled (ephemeral)")
+        # ISO
+        if cfg.boot_iso_path:
+            iso_path = Path(cfg.boot_iso_path)
+            if iso_path.exists():
+                log("INFO", f"Boot ISO: {iso_path} (found)")
+            else:
+                log("ERROR", f"Boot ISO: {iso_path} (NOT FOUND)")
+        elif cfg.boot_iso_url:
+            log("INFO", f"Boot ISO URL: {cfg.boot_iso_url} (will download)")
+        log("INFO", "--- Dry-run complete ---")
         return 0
 
     log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
@@ -2005,6 +2078,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         log("INFO", f"VNC server: <host>:{cfg.vnc_port}")
     if cfg.redfish_enabled:
         log("INFO", f"Redfish: https://<host>:{cfg.redfish_port}/")
+    log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)
 

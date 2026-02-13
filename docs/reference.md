@@ -136,6 +136,7 @@ The manager script accepts these flags (passed as container command arguments):
 | --- | --- |
 | `--list-distros` | Print available distributions from `distros.yaml` and exit. |
 | `--show-config` | Parse environment variables, print the resolved configuration, and exit. |
+| `--dry-run` | Validate configuration and environment (KVM, ports, boot ISO) without starting the VM. |
 | `--no-console` | Do not attach to the serial console (same as `NO_CONSOLE=1`). |
 
 ## Guest Command Execution
