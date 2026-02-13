@@ -15,7 +15,7 @@
   Ensure the container runs with `stdin_open: true` and `tty: true` (compose already sets these). Reattach with `docker attach <container>` or use `docker compose exec <service> virsh console <guest>`.
 
 - **Redfish HTTPS warnings / failures**  
-  Redfish is disabled unless `REDFISH_ENABLE=1`. When enabled, the manager generates a self-signed certificate under `/var/lib/docker-vm-runner/certs`. Bind-mount that directory to persist or replace it. Override credentials via `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
+  Redfish is disabled unless `REDFISH_ENABLE=1`. When enabled, the manager generates a self-signed certificate under the state directory. Use `-v myvm:/data` for automatic persistence, or set `DATA_DIR` explicitly. Override credentials via `REDFISH_USERNAME` / `REDFISH_PASSWORD`.
 
 For detailed Redfish enablement and workflows, see the [Redfish Guide](redfish.md).
 

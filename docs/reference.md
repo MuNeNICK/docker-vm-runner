@@ -11,9 +11,9 @@ docker run --rm -it --device /dev/kvm:/dev/kvm \
 docker run --rm -it --device /dev/kvm:/dev/kvm -p 6080:6080 \
   -e BOOT_ISO=https://example.com/install.iso -e GRAPHICS=novnc ...
 
-# Persistent VM with DATA_DIR
+# Persistent VM (auto-detected /data volume)
 docker run --rm -it --device /dev/kvm:/dev/kvm \
-  -v ./data:/data -e DATA_DIR=/data -e PERSIST=1 ...
+  -v myvm:/data ...
 
 # Share a host directory into the guest
 docker run --rm -it --device /dev/kvm:/dev/kvm \
@@ -50,7 +50,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `DISK_SIZE` | `20G` | Working disk size; resized on first boot. |
 | `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. |
 | `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
-| `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM. Accepts a local path or an HTTP(S) URL (URLs are auto-detected and downloaded). When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set. |
+| `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM. Accepts a local path or an HTTP(S) URL (URLs are auto-detected and downloaded). When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set. Automatically skipped on subsequent boots when a prior installation is detected on a persistent disk (override with `FORCE_ISO=1`). |
 | `BOOT_ISO_URL` | *(unset)* | Explicit URL form (same as setting `BOOT_ISO` to a URL). |
 | `BOOT_ORDER` | `hd` | Comma-separated boot device order: `hd`, `cdrom`, `network`. |
 | `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. Auto-disabled when `BOOT_ISO` is set. |
@@ -67,7 +67,8 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
-| `PERSIST` | `0` | Keep the work disk and libvirt domain after shutdown. |
+| `PERSIST` | `0` (`1` when `/data` mounted) | Keep the work disk and libvirt domain after shutdown. Automatically enabled when a volume is mounted at `/data`. |
+| `FORCE_ISO` | `0` | Force `BOOT_ISO` to attach even when a prior installation is detected on a persistent disk. |
 | `NO_CONSOLE` | `0` | Skip attaching `virsh console` (`1`, `true`, `yes`, `on`). |
 
 ### Filesystem Sharing
@@ -120,7 +121,7 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DATA_DIR` | *(unset)* | Single volume mount for all persistent data. When set, `base/`, `vms/`, and `state/` subdirectories are created under this path. Replaces the need for separate `/images` and `/var/lib/docker-vm-runner` mounts. |
+| `DATA_DIR` | *(auto: `/data` if mounted)* | Single volume mount for all persistent data. Automatically set to `/data` when that path is a mount point. When set, `base/`, `vms/`, and `state/` subdirectories are created under this path. Replaces the need for separate `/images` and `/var/lib/docker-vm-runner` mounts. |
 | `REQUIRE_KVM` | `0` | Set `1` to abort if `/dev/kvm` is not available (instead of falling back to TCG). |
 | `LIBVIRT_URI` | `qemu:///system` | Override the libvirt URI used by the manager (uncommon). |
 | `LOG_VERBOSE` | `0` | Set `1` to enable verbose debug logging (shows all subprocess commands). |

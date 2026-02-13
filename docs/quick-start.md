@@ -33,26 +33,25 @@ docker run --rm -it \
 
 ## Persisting Disks & Certificates
 
-Use `DATA_DIR` to keep everything in a single volume:
+Mount a Docker volume (or host directory) at `/data` and persistence is enabled automatically:
 
 ```bash
-mkdir -p ./data
-
 docker run --rm -it \
   --name vm1 \
   -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
-  -v "$PWD/data:/data" \
-  -e DATA_DIR=/data \
-  -e PERSIST=1 \
+  -v myvm:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
+
+When `/data` is mounted, Docker-VM-Runner automatically sets `DATA_DIR=/data` and `PERSIST=1`. Override with `-e PERSIST=0` if you want ephemeral behavior on a mounted volume. You can also set `DATA_DIR` explicitly with `-v ./data:/data -e DATA_DIR=/data` for the same effect.
 
 Storage layout under `DATA_DIR`:
 
 - `base/<distro>.qcow2` — cached cloud images per distro.
 - `vms/<name>/disk.qcow2` — working disk (retained when `PERSIST=1`).
 - `vms/<name>/seed.iso` — regenerated cloud-init seed (only when cloud-init is enabled).
+- `vms/<name>/.installed` — marker written after the first successful run (used for smart ISO skip).
 - `state/` — management state (Redfish certificates, boot ISO cache, etc.).
 
 > **Note:** When `PERSIST=1`, cloud-init only runs on the first boot (keyed by the VM name as `instance-id`). Changing `GUEST_PASSWORD` or other cloud-init settings on subsequent runs will not take effect unless you also change `GUEST_NAME` or delete the persistent disk.

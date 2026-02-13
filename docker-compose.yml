@@ -7,9 +7,8 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./data/vm1:/data
+      - vm1-data:/data
     environment:
-      DATA_DIR: /data
       DISTRO: ${VM1_DISTRO:-ubuntu-2404}
       GUEST_NAME: ${VM1_GUEST_NAME:-vm1}
       ARCH: ${VM1_ARCH:-x86_64}
@@ -28,7 +27,6 @@ services:
       GUEST_PASSWORD: ${VM1_GUEST_PASSWORD:-password}
       SSH_PORT: ${VM1_SSH_PORT:-2222}
       SSH_PUBKEY: ${VM1_SSH_PUBKEY:-}
-      PERSIST: ${VM1_PERSIST:-1}
       EXTRA_ARGS: ${VM1_EXTRA_ARGS:-}
       REDFISH_ENABLE: ${VM1_REDFISH_ENABLE:-0}
       REDFISH_USERNAME: ${VM1_REDFISH_USERNAME:-admin}
@@ -46,3 +44,6 @@ services:
 
   # Duplicate this block (vm2, vm3, ...) for additional VMs.
   # Change VM1_ prefix to VM2_, adjust ports to avoid collisions.
+
+volumes:
+  vm1-data:

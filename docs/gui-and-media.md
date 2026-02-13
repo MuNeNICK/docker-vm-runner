@@ -63,15 +63,14 @@ For a local ISO, specify the in-container path:
 -e BOOT_ISO=/images/ubuntu-desktop.iso
 ```
 
-For a URL, the ISO is downloaded and cached inside the container. To persist the cache, use `DATA_DIR`:
+For a URL, the ISO is downloaded and cached inside the container. To persist the cache, mount a volume at `/data`:
 
 ```bash
--v ./data:/data \
--e DATA_DIR=/data \
+-v myvm:/data \
 -e BOOT_ISO=https://releases.ubuntu.com/24.04/ubuntu-24.04.3-desktop-amd64.iso
 ```
 
-After installation, remove `BOOT_ISO` and set `BOOT_ORDER=hd` to boot from disk.
+When using a persistent volume (`-v myvm:/data`), you can keep the same `docker run` command for both initial installation and later boots. The ISO is automatically skipped on subsequent boots once the VM has been installed. To force the ISO to attach again, set `FORCE_ISO=1`.
 
 ### Display Resolution
 

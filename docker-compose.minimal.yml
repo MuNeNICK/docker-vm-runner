@@ -7,10 +7,11 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ./data:/data
-    environment:
-      DATA_DIR: /data
+      - vm-data:/data
     ports:
       - "2222:2222"
     stdin_open: true
     tty: true
+
+volumes:
+  vm-data:

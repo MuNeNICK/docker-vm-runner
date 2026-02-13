@@ -50,6 +50,9 @@ DEFAULT_CONFIG_PATH = Path("/config/distros.yaml")
 # DATA_DIR provides a single mount point for all persistent data.
 # When set, base images, VM disks, and state all live under DATA_DIR.
 _DATA_DIR = os.environ.get("DATA_DIR")
+# /data にボリュームがマウントされていれば自動で DATA_DIR として使う
+if not _DATA_DIR and os.path.ismount("/data"):
+    _DATA_DIR = "/data"
 if _DATA_DIR:
     _data = Path(_DATA_DIR)
     IMAGES_DIR = _data
@@ -61,6 +64,7 @@ else:
     BASE_IMAGES_DIR = IMAGES_DIR / "base"
     VM_IMAGES_DIR = IMAGES_DIR / "vms"
     STATE_DIR = Path("/var/lib/docker-vm-runner")
+INSTALLED_MARKER_NAME = ".installed"
 BOOT_ISO_CACHE_DIR = STATE_DIR / "boot-isos"
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
@@ -395,6 +399,7 @@ class VMConfig:
     ssh_port: int
     vm_name: str
     persist: bool
+    force_iso: bool
     ssh_pubkey: Optional[str]
     redfish_user: str
     redfish_password: str
@@ -842,6 +847,21 @@ class VMManager:
         if not self.cfg.blank_work_disk:
             self._ensure_base_image()
         self._prepare_work_image()
+        # Smart ISO skip: if disk was reused from a prior install, skip ISO boot
+        iso_requested = bool(self.boot_iso or self.boot_iso_url)
+        if (
+            iso_requested
+            and self._disk_reused
+            and self._is_installed()
+            and not self.cfg.force_iso
+        ):
+            log("INFO", "Persistent disk with prior install found; skipping ISO boot (set FORCE_ISO=1 to override)")
+            self.boot_iso = None
+            self.boot_iso_url = None
+            if "cdrom" in self.cfg.boot_order:
+                self.cfg.boot_order = [d for d in self.cfg.boot_order if d != "cdrom"]
+            if "hd" not in self.cfg.boot_order:
+                self.cfg.boot_order = ["hd"] + self.cfg.boot_order
         self._prepare_boot_iso()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
@@ -959,6 +979,15 @@ class VMManager:
 
         self._boot_iso_cache_path = destination
         self.boot_iso = destination
+
+    def _is_installed(self) -> bool:
+        return (self.vm_dir / INSTALLED_MARKER_NAME).exists()
+
+    def _mark_installed(self) -> None:
+        marker = self.vm_dir / INSTALLED_MARKER_NAME
+        if not marker.exists():
+            marker.write_text(f"Installed on {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
+            log("INFO", f"Marked VM as installed ({marker})")
 
     def _prepare_firmware(self) -> None:
         firmware_cfg = self._arch_profile.get("firmware")
@@ -1790,7 +1819,11 @@ def parse_env() -> VMConfig:
                 "For real PXE environments prefer bridge or direct networking.",
             )
 
-    persist = get_env_bool("PERSIST", False)
+    persist_default = bool(_DATA_DIR)
+    persist = get_env_bool("PERSIST", persist_default)
+    if _DATA_DIR and os.environ.get("PERSIST") is None:
+        log("INFO", "Data volume detected; defaulting PERSIST=1 (override with PERSIST=0)")
+    force_iso = get_env_bool("FORCE_ISO", False)
     ssh_pubkey = get_env("SSH_PUBKEY")
     redfish_user = get_env("REDFISH_USERNAME", "admin")
     redfish_password = get_env("REDFISH_PASSWORD", "password")
@@ -1826,6 +1859,7 @@ def parse_env() -> VMConfig:
         ssh_port=ssh_port,
         vm_name=vm_name,
         persist=persist,
+        force_iso=force_iso,
         ssh_pubkey=ssh_pubkey,
         redfish_user=redfish_user,
         redfish_password=redfish_password,
@@ -1989,6 +2023,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             retcode = run_console(cfg.vm_name)
             if retcode != 0:
                 log("WARN", f"Console exited with status {retcode}")
+        if cfg.persist:
+            vm_mgr._mark_installed()
         return retcode
     except ManagerError as exc:
         log("ERROR", str(exc))
