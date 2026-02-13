@@ -6,8 +6,8 @@ This guide covers the optional iPXE workflow for Docker-VM-Runner. When enabled,
 
 - `IPXE_ENABLE=1` must be set when starting the container.
 - The image ships with iPXE ROMs via `ipxe-qemu`:  
-  - `x86_64` → `/usr/lib/ipxe/qemu/pxe-virtio.rom`  
-  - `aarch64` → `/usr/lib/ipxe/qemu/efi-virtio.rom`
+  - `x86_64` → `/usr/share/qemu/pxe-virtio.rom`
+  - `aarch64` → `/usr/share/qemu/efi-virtio.rom`
 - For realistic PXE/iPXE environments, prefer `NETWORK_MODE=bridge` or `NETWORK_MODE=direct` so the guest reaches your upstream DHCP/TFTP/HTTP services. User-mode NAT exposes only QEMU’s built-in DHCP/TFTP service.
 
 ## Basic Usage

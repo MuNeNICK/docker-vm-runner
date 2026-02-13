@@ -88,33 +88,52 @@ SUPPORTED_ARCHES = {
             "vars_template": Path("/usr/share/AAVMF/AAVMF_VARS.fd"),
         },
     },
+    "ppc64": {
+        "machine": "pseries",
+        "features": (),
+        "tcg_fallback": "power8",
+    },
+    "s390x": {
+        "machine": "s390-ccw-virtio",
+        "features": (),
+        "tcg_fallback": "qemu",
+    },
+    "riscv64": {
+        "machine": "virt",
+        "features": (),
+        "tcg_fallback": "rv64",
+    },
 }
 
 ARCH_ALIASES = {
     "amd64": "x86_64",
     "arm64": "aarch64",
+    "ppc64le": "ppc64",
+    "ppc64el": "ppc64",
+    "powerpc64": "ppc64",
+    "riscv": "riscv64",
 }
 
 SUPPORTED_NETWORK_MODELS = {"virtio", "e1000", "e1000e", "rtl8139", "ne2k_pci", "pcnet", "vmxnet3"}
 
 IPXE_DEFAULT_ROMS = {
     "x86_64": {
-        "virtio": Path("/usr/lib/ipxe/qemu/pxe-virtio.rom"),
-        "e1000": Path("/usr/lib/ipxe/qemu/pxe-e1000.rom"),
-        "e1000e": Path("/usr/lib/ipxe/qemu/pxe-e1000e.rom"),
-        "rtl8139": Path("/usr/lib/ipxe/qemu/pxe-rtl8139.rom"),
-        "ne2k_pci": Path("/usr/lib/ipxe/qemu/pxe-ne2k_pci.rom"),
-        "pcnet": Path("/usr/lib/ipxe/qemu/pxe-pcnet.rom"),
-        "vmxnet3": Path("/usr/lib/ipxe/qemu/pxe-vmxnet3.rom"),
+        "virtio": Path("/usr/share/qemu/pxe-virtio.rom"),
+        "e1000": Path("/usr/share/qemu/pxe-e1000.rom"),
+        "e1000e": Path("/usr/share/qemu/pxe-e1000e.rom"),
+        "rtl8139": Path("/usr/share/qemu/pxe-rtl8139.rom"),
+        "ne2k_pci": Path("/usr/share/qemu/pxe-ne2k_pci.rom"),
+        "pcnet": Path("/usr/share/qemu/pxe-pcnet.rom"),
+        "vmxnet3": Path("/usr/share/qemu/pxe-vmxnet3.rom"),
     },
     "aarch64": {
-        "virtio": Path("/usr/lib/ipxe/qemu/efi-virtio.rom"),
-        "e1000": Path("/usr/lib/ipxe/qemu/efi-e1000.rom"),
-        "e1000e": Path("/usr/lib/ipxe/qemu/efi-e1000e.rom"),
-        "rtl8139": Path("/usr/lib/ipxe/qemu/efi-rtl8139.rom"),
-        "ne2k_pci": Path("/usr/lib/ipxe/qemu/efi-ne2k_pci.rom"),
-        "pcnet": Path("/usr/lib/ipxe/qemu/efi-pcnet.rom"),
-        "vmxnet3": Path("/usr/lib/ipxe/qemu/efi-vmxnet3.rom"),
+        "virtio": Path("/usr/share/qemu/efi-virtio.rom"),
+        "e1000": Path("/usr/share/qemu/efi-e1000.rom"),
+        "e1000e": Path("/usr/share/qemu/efi-e1000e.rom"),
+        "rtl8139": Path("/usr/share/qemu/efi-rtl8139.rom"),
+        "ne2k_pci": Path("/usr/share/qemu/efi-ne2k_pci.rom"),
+        "pcnet": Path("/usr/share/qemu/efi-pcnet.rom"),
+        "vmxnet3": Path("/usr/share/qemu/efi-vmxnet3.rom"),
     },
 }
 
@@ -963,6 +982,7 @@ class VMManager:
         self._prepare_boot_iso()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
+        self._extract_qemu_binary()
         self._prepare_firmware()
         self._generate_cloud_init()
         self._define_domain()
@@ -1072,6 +1092,58 @@ class VMManager:
             marker.write_text(f"Installed on {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}\n")
             log("INFO", f"Marked VM as installed ({marker})")
 
+    _QEMU_DEBS = {
+        "x86_64": Path("/opt/qemu-x86.deb"),
+        "aarch64": Path("/opt/qemu-arm.deb"),
+        "ppc64": Path("/opt/qemu-ppc.deb"),
+        "s390x": Path("/opt/qemu-s390x.deb"),
+        "riscv64": Path("/opt/qemu-riscv.deb"),
+    }
+    _QEMU_EMULATORS = {
+        "x86_64": "qemu-system-x86_64",
+        "aarch64": "qemu-system-aarch64",
+        "ppc64": "qemu-system-ppc64",
+        "s390x": "qemu-system-s390x",
+        "riscv64": "qemu-system-riscv64",
+    }
+
+    def _extract_qemu_binary(self) -> None:
+        """Extract QEMU binary from the bundled .deb for the target architecture."""
+        arch = self.cfg.arch
+        deb = self._QEMU_DEBS.get(arch)
+        if not deb or not deb.exists():
+            return  # binaries already installed or unknown arch
+        emulator = self._QEMU_EMULATORS.get(arch, "")
+        if Path(f"/usr/bin/{emulator}").exists():
+            return  # already extracted
+        log("INFO", f"Extracting QEMU binaries for {arch}...")
+        subprocess.run(["dpkg-deb", "-x", str(deb), "/"], check=True)
+        log("SUCCESS", f"QEMU binaries for {arch} extracted.")
+
+    @staticmethod
+    def _extract_aavmf_deb() -> None:
+        """Extract AAVMF firmware from the bundled .deb package on demand."""
+        deb_path = Path("/opt/aavmf.deb")
+        if not deb_path.exists():
+            raise ManagerError(
+                "AAVMF firmware .deb not found at /opt/aavmf.deb. "
+                "Rebuild the container image or install qemu-efi-aarch64 manually."
+            )
+        log("INFO", "Extracting AAVMF firmware from .deb package...")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                ["dpkg-deb", "-x", str(deb_path), tmpdir],
+                check=True,
+            )
+            src_dir = Path(tmpdir) / "usr" / "share" / "AAVMF"
+            if not src_dir.is_dir():
+                raise ManagerError(f"Expected AAVMF directory not found in .deb: {src_dir}")
+            dst_dir = Path("/usr/share/AAVMF")
+            ensure_directory(dst_dir)
+            for f in src_dir.iterdir():
+                shutil.copy2(f, dst_dir / f.name)
+        log("SUCCESS", "AAVMF firmware extracted successfully.")
+
     def _prepare_firmware(self) -> None:
         firmware_cfg = self._arch_profile.get("firmware")
         if not firmware_cfg:
@@ -1080,14 +1152,17 @@ class VMManager:
         loader_path = Path(firmware_cfg["loader"])
         vars_template_path = Path(firmware_cfg["vars_template"])
 
+        # Extract AAVMF from .deb on demand if firmware files are missing
+        if not loader_path.exists() or not vars_template_path.exists():
+            self._extract_aavmf_deb()
+
         if not loader_path.exists():
             raise ManagerError(
-                f"Firmware loader not found at {loader_path} for arch {self.cfg.arch}. Install qemu-efi-aarch64."
+                f"Firmware loader not found at {loader_path} for arch {self.cfg.arch}."
             )
         if not vars_template_path.exists():
             raise ManagerError(
-                f"Firmware variable template not found at {vars_template_path} for arch {self.cfg.arch}. "
-                "Install qemu-efi-aarch64."
+                f"Firmware variable template not found at {vars_template_path} for arch {self.cfg.arch}."
             )
 
         firmware_dir = STATE_DIR / "firmware"
@@ -1981,7 +2056,7 @@ def parse_env() -> VMConfig:
         rom_candidate = Path(ipxe_rom_path)
         if not rom_candidate.exists():
             raise ManagerError(
-                f"iPXE ROM not found at {rom_candidate}. Install ipxe-qemu inside the image or override IPXE_ROM_PATH."
+                f"iPXE ROM not found at {rom_candidate}. Override with IPXE_ROM_PATH or ensure QEMU packages include the ROMs."
             )
         if primary_nic.mode == "user":
             log(

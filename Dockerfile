@@ -1,14 +1,59 @@
+FROM debian:trixie-slim AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ARG NOVNC_VERSION=1.4.0
+
+# Builder: install only sushy-tools via pip (all other deps via apt in runtime),
+#          download noVNC and QEMU .deb files
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3 \
+        python3-venv \
+        wget \
+    && python3 -m venv --system-site-packages /opt/docker-vm-runner/.venv \
+    && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir sushy-tools \
+    && find /opt/docker-vm-runner/.venv/lib/*/site-packages/ \
+        -mindepth 1 -maxdepth 1 \
+        ! -name 'sushy_tools' ! -name 'sushy_tools-*' \
+        ! -name '_distutils_hack' ! -name 'distutils-precedence.pth' \
+        -exec rm -rf {} + \
+    && mkdir -p /usr/share/novnc \
+    && wget -qO- "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
+        | tar -xz --strip-components=1 -C /usr/share/novnc \
+    && rm -rf /usr/share/novnc/docs /usr/share/novnc/tests /usr/share/novnc/snap \
+              /usr/share/novnc/utils /usr/share/novnc/.github \
+    && apt-get download \
+        qemu-efi-aarch64 \
+        qemu-system-x86 \
+        qemu-system-arm \
+        qemu-system-ppc \
+        qemu-system-s390x \
+        qemu-system-riscv \
+    && mv qemu-efi-aarch64_*.deb /opt/aavmf.deb \
+    && mv qemu-system-x86_*.deb /opt/qemu-x86.deb \
+    && mv qemu-system-arm_*.deb /opt/qemu-arm.deb \
+    && mv qemu-system-ppc_*.deb /opt/qemu-ppc.deb \
+    && mv qemu-system-s390x_*.deb /opt/qemu-s390x.deb \
+    && mv qemu-system-riscv_*.deb /opt/qemu-riscv.deb \
+    && rm -rf /var/lib/apt/lists/* /root/.cache
+
+# ── Runtime stage ─────────────────────────────────────────────
 FROM debian:trixie-slim
 
-# Run apt in non-interactive mode and ensure deterministic locale
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     PATH="/opt/docker-vm-runner/.venv/bin:${PATH}"
 
-ARG NOVNC_VERSION=1.4.0
+# Exclude docs, man pages, locale, info to reduce installed size
+RUN echo 'path-exclude /usr/share/doc/*' > /etc/dpkg/dpkg.cfg.d/excludes \
+    && echo 'path-exclude /usr/share/man/*' >> /etc/dpkg/dpkg.cfg.d/excludes \
+    && echo 'path-exclude /usr/share/locale/*' >> /etc/dpkg/dpkg.cfg.d/excludes \
+    && echo 'path-exclude /usr/share/info/*' >> /etc/dpkg/dpkg.cfg.d/excludes
 
-# Install virtualization stack, Python runtime, and helper tools
+# Install runtime packages (shared libs resolved via apt), then remove QEMU binaries
+# Actual QEMU binaries are extracted on demand from .deb files at runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bridge-utils \
@@ -29,25 +74,45 @@ RUN apt-get update \
         openssl \
         passt \
         python3 \
+        python3-bcrypt \
+        python3-cryptography \
+        python3-flask \
         python3-libvirt \
-        python3-venv \
+        python3-pbr \
+        python3-tenacity \
+        python3-webob \
+        python3-websockify \
+        python3-yaml \
         qemu-system-x86 \
         qemu-system-arm \
-        qemu-efi-aarch64 \
+        qemu-system-ppc \
+        qemu-system-s390x \
+        qemu-system-riscv \
         qemu-utils \
         tini \
-        wget \
-    && python3 -m venv --system-site-packages /opt/docker-vm-runner/.venv \
-    && /opt/docker-vm-runner/.venv/bin/pip install --upgrade --no-cache-dir pip \
-    && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir \
-        bcrypt \
-        PyYAML \
-        sushy-tools \
-        websockify \
-    && mkdir -p /usr/share/novnc \
-    && wget -qO- "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
-        | tar -xz --strip-components=1 -C /usr/share/novnc \
-    && rm -rf /var/lib/apt/lists/* /root/.cache
+    && rm -rf /usr/lib/python3/dist-packages/setuptools \
+              /usr/lib/python3/dist-packages/pkg_resources \
+    && rm -f /usr/bin/qemu-system-x86_64 \
+             /usr/bin/qemu-system-i386 \
+             /usr/bin/qemu-system-x86_64-microvm \
+             /usr/bin/qemu-system-aarch64 \
+             /usr/bin/qemu-system-arm \
+             /usr/bin/qemu-system-ppc \
+             /usr/bin/qemu-system-ppc64 \
+             /usr/bin/qemu-system-s390x \
+             /usr/bin/qemu-system-riscv32 \
+             /usr/bin/qemu-system-riscv64 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy pre-built venv, noVNC, and AAVMF .deb from builder
+COPY --from=builder /opt/docker-vm-runner/.venv /opt/docker-vm-runner/.venv
+COPY --from=builder /usr/share/novnc /usr/share/novnc
+COPY --from=builder /opt/aavmf.deb /opt/aavmf.deb
+COPY --from=builder /opt/qemu-x86.deb /opt/qemu-x86.deb
+COPY --from=builder /opt/qemu-arm.deb /opt/qemu-arm.deb
+COPY --from=builder /opt/qemu-ppc.deb /opt/qemu-ppc.deb
+COPY --from=builder /opt/qemu-s390x.deb /opt/qemu-s390x.deb
+COPY --from=builder /opt/qemu-riscv.deb /opt/qemu-riscv.deb
 
 # Replace libvirt qemu.conf with container-friendly settings
 RUN mkdir -p /etc/libvirt /var/log/libvirt /run/libvirt /var/lib/libvirt/images \
@@ -68,8 +133,7 @@ cgroup_device_acl = [
 EOF
 
 # Create directories for images and configuration
-RUN mkdir -p /images /config
-RUN mkdir -p /opt/docker-vm-runner
+RUN mkdir -p /images /config /opt/docker-vm-runner
 
 # Copy configuration, manager, and entrypoint
 COPY distros.yaml /config/distros.yaml
