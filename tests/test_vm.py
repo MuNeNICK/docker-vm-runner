@@ -22,8 +22,18 @@ def mock_service_manager():
     return MagicMock()
 
 
-def _make_mgr(vm_config, *, kvm=False, cpu_model="qemu64", arch_profile=None, tmp_path=None,
-              firmware_loader=None, firmware_vars=None, seed_iso=None, boot_iso=None):
+def _make_mgr(
+    vm_config,
+    *,
+    kvm=False,
+    cpu_model="qemu64",
+    arch_profile=None,
+    tmp_path=None,
+    firmware_loader=None,
+    firmware_vars=None,
+    seed_iso=None,
+    boot_iso=None,
+):
     """Create a VMManager instance with mocked __init__ for XML generation tests."""
     if arch_profile is None:
         arch_profile = {
@@ -56,7 +66,7 @@ class TestRenderDomainXml:
         mgr = _make_mgr(vm_config_for_xml, tmp_path=tmp_path)
         xml = mgr._render_domain_xml()
 
-        assert '<domain' in xml
+        assert "<domain" in xml
         assert 'type="qemu"' in xml
         assert "<name>test-xml-vm</name>" in xml
         assert '<memory unit="MiB">4096</memory>' in xml
@@ -159,8 +169,11 @@ class TestRenderDomainXml:
         nvram = tmp_path / "test-vm-vars.fd"
 
         mgr = _make_mgr(
-            vm_config_for_xml, cpu_model="cortex-a72", tmp_path=tmp_path,
-            firmware_loader=loader, firmware_vars=nvram,
+            vm_config_for_xml,
+            cpu_model="cortex-a72",
+            tmp_path=tmp_path,
+            firmware_loader=loader,
+            firmware_vars=nvram,
             arch_profile={
                 "machine": "virt",
                 "features": ("acpi",),

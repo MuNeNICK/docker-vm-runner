@@ -72,7 +72,8 @@ def list_distros(config_path: Optional[Path] = None, arch_filter: Optional[str] 
     if arch_filter:
         arch_filter_norm = ARCH_ALIASES.get(arch_filter.lower(), arch_filter.lower())
         distros = {
-            k: v for k, v in distros.items()
+            k: v
+            for k, v in distros.items()
             if ARCH_ALIASES.get(v.get("arch", "x86_64").lower(), v.get("arch", "x86_64").lower()) == arch_filter_norm
         }
         if not distros:
@@ -159,7 +160,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Docker-VM-Runner libvirt manager")
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
     parser.add_argument(
-        "--list-distros", nargs="?", const="", default=None, metavar="ARCH",
+        "--list-distros",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="ARCH",
         help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)",
     )
     parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
@@ -294,6 +299,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         log("ERROR", f"Unexpected error: {exc}")
         log("ERROR", "This is likely a bug. Please report it at https://github.com/munenick/docker-vm-runner/issues")
         import traceback
+
         traceback.print_exc()
         return 1
     finally:

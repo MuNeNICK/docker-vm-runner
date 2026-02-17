@@ -43,7 +43,7 @@ def render_network_xml(
         if ssh_port is not None:
             pf_el = SubElement(iface, "portForward", proto="tcp")
             SubElement(pf_el, "range", start=str(ssh_port), to="22")
-        for pf in (port_forwards or []):
+        for pf in port_forwards or []:
             pf_el = SubElement(iface, "portForward", proto="tcp")
             SubElement(pf_el, "range", start=str(pf.host_port), to=str(pf.guest_port))
         return _element_to_str(iface), mac

@@ -41,9 +41,7 @@ class ServiceManager:
         ensure_directory(self.config_dir)
         self._novnc_started = False
         self._storage_pool_name = os.environ.get("REDFISH_STORAGE_POOL", "default")
-        self._storage_pool_path = Path(
-            os.environ.get("REDFISH_STORAGE_PATH", "/var/lib/libvirt/images")
-        )
+        self._storage_pool_path = Path(os.environ.get("REDFISH_STORAGE_PATH", "/var/lib/libvirt/images"))
 
     def start(self) -> None:
         self._start_libvirt()
@@ -192,9 +190,7 @@ class ServiceManager:
 
     def _write_auth_file(self) -> Path:
         auth_path = self.config_dir / "htpasswd"
-        hashed = bcrypt.hashpw(
-            self.vm_config.redfish_password.encode("utf-8"), bcrypt.gensalt()
-        ).decode("utf-8")
+        hashed = bcrypt.hashpw(self.vm_config.redfish_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         auth_path.write_text(f"{self.vm_config.redfish_user}:{hashed}\n")
         return auth_path
 
@@ -241,8 +237,7 @@ class ServiceManager:
             if conn is None:
                 log(
                     "WARN",
-                    f"Failed to open libvirt connection at {LIBVIRT_URI}; "
-                    "virtual media may be unavailable",
+                    f"Failed to open libvirt connection at {LIBVIRT_URI}; virtual media may be unavailable",
                 )
                 return
             try:
@@ -271,9 +266,7 @@ class ServiceManager:
                 else:
                     log(
                         "INFO",
-                        f"Created libvirt storage pool "
-                        f"'{self._storage_pool_name}' "
-                        f"({self._storage_pool_path})",
+                        f"Created libvirt storage pool '{self._storage_pool_name}' ({self._storage_pool_path})",
                     )
             if pool.isActive() == 0:
                 pool.create(0)

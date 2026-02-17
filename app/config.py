@@ -146,9 +146,7 @@ def parse_env() -> VMConfig:
                 "Ensure the file is bind-mounted into the container (e.g. -v /host/path:/container/path:ro)"
             )
         if not candidate.is_file():
-            raise ManagerError(
-                f"CLOUD_INIT_USER_DATA must point to a regular file: {candidate}"
-            )
+            raise ManagerError(f"CLOUD_INIT_USER_DATA must point to a regular file: {candidate}")
         cloud_init_user_data_path = candidate
 
     CLOUD_INIT_HEADERS = {"#cloud-config", "#!", "#cloud-boothook", "#include", "#part-handler"}
@@ -163,7 +161,7 @@ def parse_env() -> VMConfig:
                 "WARN",
                 f"CLOUD_INIT_USER_DATA does not start with a recognized cloud-init header "
                 f"(got: '{first_line[:60]}'). "
-                "Expected: #cloud-config, #!/bin/bash, #cloud-boothook, #include, or #part-handler"
+                "Expected: #cloud-config, #!/bin/bash, #cloud-boothook, #include, or #part-handler",
             )
         if first_line == "#cloud-config":
             try:
@@ -200,9 +198,7 @@ def parse_env() -> VMConfig:
         distro_arch_lower = str(distro_arch_raw).strip().lower()
         distro_arch_key = ARCH_ALIASES.get(distro_arch_lower, distro_arch_lower)
         if distro_arch_key not in SUPPORTED_ARCHES:
-            raise ManagerError(
-                f"Distribution '{distro}' declares unsupported arch '{distro_arch_raw}'."
-            )
+            raise ManagerError(f"Distribution '{distro}' declares unsupported arch '{distro_arch_raw}'.")
         if arch_env is not None and distro_arch_key != arch_key:
             raise ManagerError(
                 f"ARCH='{arch_candidate}' does not match distribution '{distro}' arch '{distro_arch_raw}'."
@@ -246,9 +242,7 @@ def parse_env() -> VMConfig:
         mode_key = network_mode_map.get(mode_raw.strip().lower())
         if mode_key is None:
             suffix = "" if index == 1 else str(index)
-            raise ManagerError(
-                f"Unsupported NETWORK{suffix}_MODE '{mode_raw}'. Expected one of nat, bridge, direct."
-            )
+            raise ManagerError(f"Unsupported NETWORK{suffix}_MODE '{mode_raw}'. Expected one of nat, bridge, direct.")
 
         bridge_name = None
         direct_device = None
@@ -256,37 +250,29 @@ def parse_env() -> VMConfig:
             bridge_name = get_env_indexed("NETWORK_BRIDGE", index)
             if not bridge_name:
                 suffix = "" if index == 1 else str(index)
-                raise ManagerError(
-                    f"NETWORK{suffix}_BRIDGE is required when NETWORK{suffix}_MODE=bridge"
-                )
+                raise ManagerError(f"NETWORK{suffix}_BRIDGE is required when NETWORK{suffix}_MODE=bridge")
             bridge_name = bridge_name.strip()
         elif mode_key == "direct":
             direct_device = get_env_indexed("NETWORK_DIRECT_DEV", index)
             if not direct_device:
                 suffix = "" if index == 1 else str(index)
-                raise ManagerError(
-                    f"NETWORK{suffix}_DIRECT_DEV is required when NETWORK{suffix}_MODE=direct"
-                )
+                raise ManagerError(f"NETWORK{suffix}_DIRECT_DEV is required when NETWORK{suffix}_MODE=direct")
             direct_device = direct_device.strip()
 
         mac_raw = get_env_indexed("NETWORK_MAC", index)
         mac_address = mac_raw.strip().lower() if mac_raw else None
         if mac_address and not MAC_ADDRESS_RE.match(mac_address):
             suffix = "" if index == 1 else str(index)
-            raise ManagerError(
-                f"Invalid NETWORK{suffix}_MAC '{mac_raw}'. Use format aa:bb:cc:dd:ee:ff"
-            )
+            raise ManagerError(f"Invalid NETWORK{suffix}_MAC '{mac_raw}'. Use format aa:bb:cc:dd:ee:ff")
         if not mac_address:
             mac_address = deterministic_mac(f"{vm_name}:{index}")
 
         model_raw = get_env_indexed("NETWORK_MODEL", index)
-        model = (model_raw.strip().lower() if model_raw else "virtio")
+        model = model_raw.strip().lower() if model_raw else "virtio"
         if model not in SUPPORTED_NETWORK_MODELS:
             supported_models = ", ".join(sorted(SUPPORTED_NETWORK_MODELS))
             suffix = "" if index == 1 else str(index)
-            raise ManagerError(
-                f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported: {supported_models}"
-            )
+            raise ManagerError(f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported: {supported_models}")
 
         nic = NicConfig(
             mode=mode_key,
@@ -310,9 +296,7 @@ def parse_env() -> VMConfig:
         readonly_raw = get_env_indexed("FILESYSTEM_READONLY", index)
 
         trigger_values = [source_raw, target_raw, driver_raw, accessmode_raw]
-        has_value = any(
-            value is not None and value.strip() for value in trigger_values if isinstance(value, str)
-        )
+        has_value = any(value is not None and value.strip() for value in trigger_values if isinstance(value, str))
         if not has_value and readonly_raw is not None:
             if readonly_raw.strip().lower() in TRUTHY:
                 has_value = True
@@ -356,9 +340,7 @@ def parse_env() -> VMConfig:
 
         driver = (driver_raw or "virtiofs").strip().lower()
         if driver not in ("virtiofs", "9p"):
-            raise ManagerError(
-                f"Unsupported FILESYSTEM{suffix}_DRIVER '{driver}'. Supported: virtiofs, 9p"
-            )
+            raise ManagerError(f"Unsupported FILESYSTEM{suffix}_DRIVER '{driver}'. Supported: virtiofs, 9p")
 
         accessmode = (accessmode_raw or "passthrough").strip().lower()
         if accessmode not in {"passthrough", "mapped", "squash"}:
@@ -461,24 +443,16 @@ def parse_env() -> VMConfig:
                 continue
             parts = entry.split(":")
             if len(parts) != 2:
-                raise ManagerError(
-                    f"Invalid PORT_FWD entry '{entry}': expected format host_port:guest_port"
-                )
+                raise ManagerError(f"Invalid PORT_FWD entry '{entry}': expected format host_port:guest_port")
             try:
                 host_port = int(parts[0])
                 guest_port = int(parts[1])
             except ValueError:
-                raise ManagerError(
-                    f"Invalid PORT_FWD entry '{entry}': ports must be integers"
-                )
+                raise ManagerError(f"Invalid PORT_FWD entry '{entry}': ports must be integers")
             if not (1 <= host_port <= 65535):
-                raise ManagerError(
-                    f"Invalid PORT_FWD entry '{entry}': host port {host_port} out of range (1-65535)"
-                )
+                raise ManagerError(f"Invalid PORT_FWD entry '{entry}': host port {host_port} out of range (1-65535)")
             if not (1 <= guest_port <= 65535):
-                raise ManagerError(
-                    f"Invalid PORT_FWD entry '{entry}': guest port {guest_port} out of range (1-65535)"
-                )
+                raise ManagerError(f"Invalid PORT_FWD entry '{entry}': guest port {guest_port} out of range (1-65535)")
             port_forwards.append(PortForward(host_port=host_port, guest_port=guest_port))
 
     active_ports = {"SSH_PORT": ssh_port}
@@ -495,8 +469,7 @@ def parse_env() -> VMConfig:
     for label, port in active_ports.items():
         if port in seen:
             raise ManagerError(
-                f"Port conflict: {label}={port} collides with {seen[port]}={port}. "
-                "Each service needs a unique port."
+                f"Port conflict: {label}={port} collides with {seen[port]}={port}. Each service needs a unique port."
             )
         seen[port] = label
 

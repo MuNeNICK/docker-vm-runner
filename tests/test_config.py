@@ -44,6 +44,7 @@ def distro_config_file(tmp_path):
 def patched_config(monkeypatch, distro_config_file):
     """Point parse_env() at the temporary distro config file."""
     import app.config as config_module
+
     monkeypatch.setattr(config_module, "DEFAULT_CONFIG_PATH", distro_config_file)
 
 

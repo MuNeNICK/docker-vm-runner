@@ -73,9 +73,7 @@ def parse_int_env(name: str, default: str, min_val: int = 1, max_val: Optional[i
 
 def validate_disk_size(raw: str) -> str:
     if not DISK_SIZE_RE.match(raw):
-        raise ManagerError(
-            f"Invalid DISK_SIZE '{raw}'. Use a number with optional suffix: K, M, G, T (e.g. '20G')"
-        )
+        raise ManagerError(f"Invalid DISK_SIZE '{raw}'. Use a number with optional suffix: K, M, G, T (e.g. '20G')")
     return raw
 
 
@@ -121,13 +119,14 @@ def download_file(url: str, destination: Path, label: str = "Downloading") -> No
                     print(
                         f"\r  [{bar}] {pct:5.1f}% {downloaded_mb:.1f}/{total_mb:.1f} MiB "
                         f"({speed / (1024 * 1024):.1f} MiB/s, ETA {eta_str})",
-                        end="", flush=True,
+                        end="",
+                        flush=True,
                     )
                 else:
                     print(
-                        f"\r  {downloaded_mb:.1f} MiB downloaded "
-                        f"({speed / (1024 * 1024):.1f} MiB/s)",
-                        end="", flush=True,
+                        f"\r  {downloaded_mb:.1f} MiB downloaded ({speed / (1024 * 1024):.1f} MiB/s)",
+                        end="",
+                        flush=True,
                     )
             print(flush=True)  # newline after progress
             tmp_path.replace(destination)

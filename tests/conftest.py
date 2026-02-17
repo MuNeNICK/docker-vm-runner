@@ -14,6 +14,7 @@ def _install_libvirt_stub():
 
     try:
         import libvirt  # noqa: F401
+
         return  # real library available
     except (ImportError, SystemExit):
         pass
@@ -91,30 +92,62 @@ def default_vm_config() -> VMConfig:
 @pytest.fixture
 def mock_env(monkeypatch):
     """Helper to set environment variables for tests."""
+
     def _set(**kwargs):
         for key, value in kwargs.items():
             if value is None:
                 monkeypatch.delenv(key, raising=False)
             else:
                 monkeypatch.setenv(key, str(value))
+
     return _set
 
 
 # All environment variables that parse_env() reads — used to ensure a clean slate.
 _PARSE_ENV_VARS = [
-    "DISTRO", "MEMORY", "CPUS", "DISK_SIZE", "GRAPHICS",
-    "ARCH", "CPU_MODEL", "EXTRA_ARGS", "GUEST_PASSWORD",
-    "SSH_PORT", "GUEST_NAME", "HOSTNAME", "NETWORK_MODE",
-    "PERSIST", "BOOT_ISO", "BOOT_ISO_URL", "CLOUD_INIT",
-    "CLOUD_INIT_USER_DATA", "BOOT_ORDER", "BASE_IMAGE",
-    "BLANK_DISK", "VNC_PORT", "VNC_KEYMAP", "NOVNC_PORT",
-    "NO_CONSOLE", "IPXE_ENABLE", "IPXE_ROM_PATH",
-    "SSH_PUBKEY", "REDFISH_ENABLE", "REDFISH_USERNAME",
-    "REDFISH_PASSWORD", "REDFISH_PORT", "REDFISH_SYSTEM_ID",
-    "FORCE_ISO", "PORT_FWD", "DATA_DIR",
-    "NETWORK_BRIDGE", "NETWORK_DIRECT_DEV", "NETWORK_MAC",
-    "NETWORK_MODEL", "NETWORK_BOOT",
-    "FILESYSTEM_SOURCE", "FILESYSTEM_TARGET",
+    "DISTRO",
+    "MEMORY",
+    "CPUS",
+    "DISK_SIZE",
+    "GRAPHICS",
+    "ARCH",
+    "CPU_MODEL",
+    "EXTRA_ARGS",
+    "GUEST_PASSWORD",
+    "SSH_PORT",
+    "GUEST_NAME",
+    "HOSTNAME",
+    "NETWORK_MODE",
+    "PERSIST",
+    "BOOT_ISO",
+    "BOOT_ISO_URL",
+    "CLOUD_INIT",
+    "CLOUD_INIT_USER_DATA",
+    "BOOT_ORDER",
+    "BASE_IMAGE",
+    "BLANK_DISK",
+    "VNC_PORT",
+    "VNC_KEYMAP",
+    "NOVNC_PORT",
+    "NO_CONSOLE",
+    "IPXE_ENABLE",
+    "IPXE_ROM_PATH",
+    "SSH_PUBKEY",
+    "REDFISH_ENABLE",
+    "REDFISH_USERNAME",
+    "REDFISH_PASSWORD",
+    "REDFISH_PORT",
+    "REDFISH_SYSTEM_ID",
+    "FORCE_ISO",
+    "PORT_FWD",
+    "DATA_DIR",
+    "NETWORK_BRIDGE",
+    "NETWORK_DIRECT_DEV",
+    "NETWORK_MAC",
+    "NETWORK_MODEL",
+    "NETWORK_BOOT",
+    "FILESYSTEM_SOURCE",
+    "FILESYSTEM_TARGET",
 ]
 
 

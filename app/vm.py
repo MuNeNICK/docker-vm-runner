@@ -120,9 +120,7 @@ class VMManager:
             if cpu_lower in {"host", "host-passthrough"}:
                 fallback = self._arch_profile.get("tcg_fallback")
                 if not fallback:
-                    raise ManagerError(
-                        f"CPU_MODEL={self.cfg.cpu_model} requires KVM for architecture {self.cfg.arch}."
-                    )
+                    raise ManagerError(f"CPU_MODEL={self.cfg.cpu_model} requires KVM for architecture {self.cfg.arch}.")
                 self._effective_cpu_model = fallback
                 log(
                     "WARN",
@@ -133,12 +131,7 @@ class VMManager:
         self._prepare_work_image()
         # Smart ISO skip: if disk was reused from a prior install, skip ISO boot
         iso_requested = bool(self.boot_iso or self.boot_iso_url)
-        if (
-            iso_requested
-            and self._disk_reused
-            and self._is_installed()
-            and not self.cfg.force_iso
-        ):
+        if iso_requested and self._disk_reused and self._is_installed() and not self.cfg.force_iso:
             log("INFO", "Persistent disk with prior install found; skipping ISO boot (set FORCE_ISO=1 to override)")
             self.boot_iso = None
             self.boot_iso_url = None
@@ -184,7 +177,8 @@ class VMManager:
                 if self.cfg.disk_size and self.cfg.disk_size != "0":
                     info = subprocess.run(
                         ["qemu-img", "info", "--output=json", str(self.work_image)],
-                        capture_output=True, text=True,
+                        capture_output=True,
+                        text=True,
                     )
                     if info.returncode == 0:
                         current_vsize = json.loads(info.stdout).get("virtual-size", 0)
@@ -330,9 +324,7 @@ class VMManager:
             self._extract_aavmf_deb()
 
         if not loader_path.exists():
-            raise ManagerError(
-                f"Firmware loader not found at {loader_path} for arch {self.cfg.arch}."
-            )
+            raise ManagerError(f"Firmware loader not found at {loader_path} for arch {self.cfg.arch}.")
         if not vars_template_path.exists():
             raise ManagerError(
                 f"Firmware variable template not found at {vars_template_path} for arch {self.cfg.arch}."
@@ -409,9 +401,7 @@ class VMManager:
             if runcmd:
                 cloud_cfg["runcmd"] = runcmd
 
-            vendor_user_data = "#cloud-config\n" + yaml.safe_dump(
-                cloud_cfg, sort_keys=False, default_flow_style=False
-            )
+            vendor_user_data = "#cloud-config\n" + yaml.safe_dump(cloud_cfg, sort_keys=False, default_flow_style=False)
 
             user_data_payload = vendor_user_data
             override_path = self.cfg.cloud_init_user_data_path
@@ -458,12 +448,15 @@ class VMManager:
                     )
 
             (tmp / "user-data").write_text(user_data_payload, encoding="utf-8")
-            meta_data = textwrap.dedent(
-                f"""
+            meta_data = (
+                textwrap.dedent(
+                    f"""
                 instance-id: iid-{self.cfg.vm_name}
                 local-hostname: {self.cfg.vm_name}
                 """
-            ).strip() + "\n"
+                ).strip()
+                + "\n"
+            )
             (tmp / "meta-data").write_text(meta_data, encoding="utf-8")
 
             cmd = [
@@ -687,9 +680,10 @@ class VMManager:
         while time.time() < deadline:
             try:
                 result = subprocess.run(
-                    ["virsh", "-c", LIBVIRT_URI, "qemu-agent-command",
-                     self.cfg.vm_name, '{"execute":"guest-ping"}'],
-                    capture_output=True, text=True, timeout=5,
+                    ["virsh", "-c", LIBVIRT_URI, "qemu-agent-command", self.cfg.vm_name, '{"execute":"guest-ping"}'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if result.returncode == 0:
                     log("SUCCESS", "Guest agent is ready — VM is fully booted")
@@ -786,7 +780,9 @@ class VMManager:
         try:
             result = subprocess.run(
                 ["pgrep", "-f", "qemu-system"],
-                capture_output=True, text=True, check=False,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if result.returncode != 0:
                 return
