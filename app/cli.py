@@ -111,56 +111,130 @@ def show_config(cfg: VMConfig) -> None:
             print(f"  {field.name}: {value}")
 
 
-def print_startup_banner(cfg: VMConfig) -> None:
-    """Print a visually distinct access-info banner after VM starts."""
-    lines: List[str] = []
-    lines.append(f"  VM: {cfg.vm_name} ({cfg.distro_name})")
-    boot_info = f"  Arch: {cfg.arch} | Memory: {cfg.memory_mb} MiB | CPUs: {cfg.cpus}"
-    if cfg.boot_mode != "legacy":
-        boot_info += f" | Boot: {cfg.boot_mode.upper()}"
-    if cfg.tpm_enabled:
-        boot_info += " | TPM"
-    lines.append(boot_info)
+def _print_block(title: str, lines: List[str], colour: str = "\033[0;36m") -> None:
+    """Print a titled block with a border."""
+    reset = "\033[0m"
+    dim = "\033[0;90m"
+    all_lines = [f"  {title}"] + [f"    {l}" for l in lines]
+    width = max(len(l) for l in all_lines) + 2
+    print(f"{dim}{'─' * width}{reset}", flush=True)
+    for line in all_lines:
+        print(f"{colour}{line}{reset}", flush=True)
+    print(f"{dim}{'─' * width}{reset}", flush=True)
 
+
+def print_host_info(cfg: VMConfig) -> None:
+    """Print host system information block at startup."""
+    from app.utils import get_available_disk_space, get_host_info
+
+    host = get_host_info()
+    lines: List[str] = []
+
+    cpu = host.get("cpu_model", "unknown")
+    cores = host.get("cpu_count", "?")
+    lines.append(f"CPU:     {cpu} ({cores} cores)")
+
+    mem_total = host.get("mem_total", 0) / (1024**3)
+    mem_avail = host.get("mem_available", 0) / (1024**3)
+    lines.append(f"Memory:  {mem_avail:.1f} GiB free / {mem_total:.1f} GiB total")
+
+    disk_avail = get_available_disk_space(IMAGES_DIR if IMAGES_DIR.exists() else Path("/"))
+    lines.append(f"Storage: {disk_avail / (1024**3):.1f} GiB free at {IMAGES_DIR}")
+
+    kvm_status = "available" if kvm_available() else "NOT available (TCG fallback)"
+    lines.append(f"KVM:     {kvm_status}")
+    lines.append(f"Kernel:  {host.get('kernel', 'unknown')}")
+
+    _print_block("Host", lines, colour="\033[0;90m")
+
+
+def print_vm_summary(cfg: VMConfig) -> None:
+    """Print a compact VM configuration summary."""
+    lines: List[str] = []
+
+    # Resources
+    boot_mode = cfg.boot_mode.upper()
+    machine = cfg.machine_type
+    lines.append(f"{cfg.cpus} vCPU | {cfg.memory_mb} MiB RAM | {cfg.disk_size} disk")
+    lines.append(f"{boot_mode} boot ({machine}) | {cfg.disk_controller} bus")
+
+    # Features
+    features: List[str] = []
+    if cfg.tpm_enabled:
+        features.append("TPM")
+    if cfg.hyperv_enabled:
+        features.append("Hyper-V")
+    if cfg.io_thread:
+        features.append("IOThread")
+    if cfg.balloon_enabled:
+        features.append("Balloon")
+    if cfg.rng_enabled:
+        features.append("RNG")
+    if cfg.gpu_passthrough != "off":
+        features.append(f"GPU:{cfg.gpu_passthrough}")
+    if features:
+        lines.append(" | ".join(features))
+
+    # Extra disks
+    if cfg.extra_disks:
+        disk_strs = [f"disk{d.index}={d.size}" for d in cfg.extra_disks]
+        lines.append(f"Extra disks: {', '.join(disk_strs)}")
+    if cfg.block_devices:
+        blk_strs = [f"{b.path}" for b in cfg.block_devices]
+        lines.append(f"Block devices: {', '.join(blk_strs)}")
+
+    # Networking
+    for idx, nic in enumerate(cfg.nics, start=1):
+        prefix = "NIC" if len(cfg.nics) == 1 else f"NIC{idx}"
+        lines.append(f"{prefix}: {nic.mode} ({nic.model})")
+
+    # Filesystems
+    if cfg.filesystems:
+        for fs in cfg.filesystems:
+            mode = "ro" if fs.readonly else "rw"
+            mount = sanitize_mount_target(fs.target)
+            lines.append(f"Share: {fs.source} -> /mnt/{mount} ({fs.driver}, {mode})")
+
+    # Boot order
+    lines.append(f"Boot: {', '.join(cfg.boot_order)}")
+
+    _print_block(f"{cfg.vm_name} ({cfg.distro_name})", lines, colour="\033[0;34m")
+
+
+def print_startup_banner(cfg: VMConfig) -> None:
+    """Print access info banner after VM starts."""
+    lines: List[str] = []
     has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
     ports_to_publish: List[str] = []
 
     if has_user_nic and cfg.ssh_port:
         if cfg.cloud_init_enabled:
-            lines.append(f"  SSH:  ssh -p {cfg.ssh_port} {cfg.login_user}@localhost")
+            lines.append(f"SSH:     ssh -p {cfg.ssh_port} {cfg.login_user}@localhost")
         else:
-            lines.append(f"  SSH:  port {cfg.ssh_port} -> guest:22")
+            lines.append(f"SSH:     port {cfg.ssh_port} -> guest:22")
         ports_to_publish.append(f"-p {cfg.ssh_port}:{cfg.ssh_port}")
     if cfg.cloud_init_enabled:
-        lines.append(f"  User: {cfg.login_user}  Pass: {cfg.password}")
+        lines.append(f"Login:   {cfg.login_user} / {cfg.password}")
     if cfg.novnc_enabled:
-        lines.append(f"  VNC:  https://localhost:{cfg.novnc_port}/vnc.html")
+        lines.append(f"Console: https://localhost:{cfg.novnc_port}/vnc.html")
         ports_to_publish.append(f"-p {cfg.novnc_port}:{cfg.novnc_port}")
     elif cfg.graphics_type == "vnc":
-        lines.append(f"  VNC:  localhost:{cfg.vnc_port}")
+        lines.append(f"VNC:     localhost:{cfg.vnc_port}")
         ports_to_publish.append(f"-p {cfg.vnc_port}:{cfg.vnc_port}")
     if cfg.redfish_enabled:
-        lines.append(f"  Redfish: https://localhost:{cfg.redfish_port}/")
+        lines.append(f"Redfish: https://localhost:{cfg.redfish_port}/")
         ports_to_publish.append(f"-p {cfg.redfish_port}:{cfg.redfish_port}")
     if cfg.port_forwards and has_user_nic:
         fwd_strs = [f"{pf.host_port}->{pf.guest_port}" for pf in cfg.port_forwards]
-        lines.append(f"  Ports: {', '.join(fwd_strs)}")
+        lines.append(f"Ports:   {', '.join(fwd_strs)}")
         for pf in cfg.port_forwards:
             ports_to_publish.append(f"-p {pf.host_port}:{pf.host_port}")
 
     if ports_to_publish:
         lines.append("")
-        lines.append("  Ensure docker ports are published:")
-        lines.append(f"    {' '.join(ports_to_publish)}")
+        lines.append(f"Publish: {' '.join(ports_to_publish)}")
 
-    max_len = max(len(line) for line in lines)
-    border_len = max_len + 2
-    banner_colour = "\033[0;36m"
-    reset = "\033[0m"
-    print(f"{banner_colour}{'=' * border_len}{reset}", flush=True)
-    for line in lines:
-        print(f"{banner_colour}{line}{reset}", flush=True)
-    print(f"{banner_colour}{'=' * border_len}{reset}", flush=True)
+    _print_block("Access", lines, colour="\033[0;32m")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -249,61 +323,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         print_startup_banner(cfg)
         return 0
 
-    # Display host system info
-    host_info = get_host_info()
-    log("INFO", f"Host: {host_info.get('cpu_model', 'unknown')} ({host_info.get('cpu_count', '?')} cores)")
-    mem_total_gb = host_info.get("mem_total", 0) / (1024**3)
-    mem_avail_gb = host_info.get("mem_available", 0) / (1024**3)
-    log("INFO", f"Memory: {mem_avail_gb:.1f}G available / {mem_total_gb:.1f}G total")
-    disk_avail = get_available_disk_space(IMAGES_DIR if IMAGES_DIR.exists() else Path("/"))
-    disk_avail_gb = disk_avail / (1024**3)
-    log("INFO", f"Storage: {disk_avail_gb:.1f}G available at {IMAGES_DIR}")
-    if kvm_available():
-        log("INFO", f"KVM: available | Kernel: {host_info.get('kernel', 'unknown')}")
-    else:
-        log("WARN", f"KVM: NOT available (TCG mode) | Kernel: {host_info.get('kernel', 'unknown')}")
-
-    # Compact startup log
-    iso_boot = bool(cfg.boot_iso_path or cfg.boot_iso_url)
-    if iso_boot:
-        iso_display = cfg.boot_iso_path or cfg.boot_iso_url
-        log("INFO", f"Boot source: ISO ({iso_display})")
-    else:
-        log("INFO", f"Distribution: {cfg.distro} ({cfg.distro_name})")
-    log("INFO", f"VM: {cfg.vm_name} | Memory: {cfg.memory_mb} MiB | CPUs: {cfg.cpus} | Disk: {cfg.disk_size}")
+    print_host_info(cfg)
+    print_vm_summary(cfg)
 
     has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
-    for idx, nic in enumerate(cfg.nics, start=1):
-        label = "Primary NIC" if idx == 1 else f"NIC #{idx}"
-        log("INFO", f"{label}: mode={nic.mode}, model={nic.model}")
     if not has_user_nic and cfg.ssh_port:
         log("WARN", f"SSH_PORT={cfg.ssh_port} is set but no user-mode NIC; SSH port forwarding not active")
     if cfg.port_forwards and not has_user_nic:
         log("WARN", "PORT_FWD is set but no user-mode NIC; port forwarding not active")
-    if cfg.ipxe_enabled:
-        log("INFO", f"iPXE enabled (ROM: {cfg.ipxe_rom_path or '<default>'})")
-    if cfg.filesystems:
-        for idx, fs in enumerate(cfg.filesystems, start=1):
-            mode = "ro" if fs.readonly else "rw"
-            mount = sanitize_mount_target(fs.target)
-            log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{mount} ({fs.driver}, {mode})")
-    if cfg.boot_mode != "legacy":
-        log("INFO", f"Boot mode: {cfg.boot_mode}")
-    if cfg.tpm_enabled:
-        log("INFO", "TPM: enabled")
-    if cfg.extra_disks:
-        for ed in cfg.extra_disks:
-            log("INFO", f"Extra disk {ed.index}: {ed.size}")
-    if cfg.block_devices:
-        for bd in cfg.block_devices:
-            log("INFO", f"Block device {bd.index}: {bd.path}")
-    if cfg.disk_controller != "virtio":
-        log("INFO", f"Disk controller: {cfg.disk_controller}")
-    if cfg.hyperv_enabled:
-        log("INFO", "Hyper-V enlightenments: enabled")
-    if cfg.gpu_passthrough != "off":
-        log("INFO", f"GPU passthrough: {cfg.gpu_passthrough}")
-    log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)
 
