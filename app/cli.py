@@ -13,19 +13,18 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("PyYAML is required but not installed") from exc
 
+from app.config import parse_env
 from app.constants import (
+    _SENSITIVE_FIELDS,
     ARCH_ALIASES,
     DEFAULT_CONFIG_PATH,
     IMAGES_DIR,
     LIBVIRT_URI,
     STATE_DIR,
-    _SENSITIVE_FIELDS,
 )
 from app.exceptions import ManagerError
 from app.models import VMConfig
-from app.config import parse_env
 from app.services import ServiceManager
-from app.vm import VMManager
 from app.utils import (
     ensure_directory,
     get_env,
@@ -35,6 +34,7 @@ from app.utils import (
     log,
     sanitize_mount_target,
 )
+from app.vm import VMManager
 
 
 def run_console(vm_name: str) -> int:
@@ -142,7 +142,7 @@ def print_startup_banner(cfg: VMConfig) -> None:
 
     if ports_to_publish:
         lines.append("")
-        lines.append(f"  Ensure docker ports are published:")
+        lines.append("  Ensure docker ports are published:")
         lines.append(f"    {' '.join(ports_to_publish)}")
 
     max_len = max(len(line) for line in lines)
@@ -158,8 +158,10 @@ def print_startup_banner(cfg: VMConfig) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Docker-VM-Runner libvirt manager")
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
-    parser.add_argument("--list-distros", nargs="?", const="", default=None, metavar="ARCH",
-                        help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)")
+    parser.add_argument(
+        "--list-distros", nargs="?", const="", default=None, metavar="ARCH",
+        help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)",
+    )
     parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and environment, then exit")
     args = parser.parse_args(argv)
@@ -257,7 +259,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.filesystems:
         for idx, fs in enumerate(cfg.filesystems, start=1):
             mode = "ro" if fs.readonly else "rw"
-            log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{sanitize_mount_target(fs.target)} ({fs.driver}, {mode})")
+            mount = sanitize_mount_target(fs.target)
+            log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{mount} ({fs.driver}, {mode})")
     log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)

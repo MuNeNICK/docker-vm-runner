@@ -42,11 +42,11 @@ from app.exceptions import ManagerError
 from app.models import VMConfig
 from app.network import render_network_xml
 from app.utils import (
+    detect_cloud_init_content_type,
     download_file,
     ensure_directory,
     get_env_bool,
     hash_password,
-    detect_cloud_init_content_type,
     kvm_available,
     log,
     run,
@@ -164,7 +164,10 @@ class VMManager:
             return
         if self.base_image.exists():
             size_mb = self.base_image.stat().st_size / (1024 * 1024)
-            log("WARN", f"Cached image too small ({size_mb:.1f} MiB < 100 MiB threshold); re-downloading {self.base_image}")
+            log(
+                "WARN",
+                f"Cached image too small ({size_mb:.1f} MiB < 100 MiB threshold); re-downloading {self.base_image}",
+            )
             self.base_image.unlink()
 
         download_file(self.cfg.image_url, self.base_image, label="Downloading base image")
@@ -196,7 +199,10 @@ class VMManager:
                             log("SUCCESS", f"Disk expanded to {requested}")
             else:
                 size_mb = size / (1024 * 1024)
-                log("WARN", f"Existing disk too small ({size_mb:.1f} MiB < 100 MiB threshold); recreating {self.work_image}")
+                log(
+                    "WARN",
+                    f"Existing disk too small ({size_mb:.1f} MiB < 100 MiB threshold); recreating {self.work_image}",
+                )
                 self.work_image.unlink(missing_ok=True)
 
         if not self._disk_reused:
@@ -446,7 +452,8 @@ class VMManager:
                 else:
                     log(
                         "WARN",
-                        f"CLOUD_INIT_USER_DATA file {override_path} is empty; only vendor cloud-config will be applied.",
+                        f"CLOUD_INIT_USER_DATA file {override_path} is empty; "
+                        "only vendor cloud-config will be applied.",
                     )
 
             (tmp / "user-data").write_text(user_data_payload, encoding="utf-8")
@@ -593,7 +600,8 @@ class VMManager:
             keymap_attr = f" keymap='{self.cfg.vnc_keymap}'" if self.cfg.vnc_keymap else ""
             if graphics == "vnc":
                 display_xml = (
-                    f"<graphics type='{graphics}' listen='0.0.0.0' port='{self.cfg.vnc_port}' autoport='no'{keymap_attr}/>"
+                    f"<graphics type='{graphics}' listen='0.0.0.0' "
+                    f"port='{self.cfg.vnc_port}' autoport='no'{keymap_attr}/>"
                 )
             else:
                 display_xml = (

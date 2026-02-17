@@ -169,7 +169,11 @@ def parse_env() -> VMConfig:
                 content = cloud_init_user_data_path.read_text()
                 parsed = yaml.safe_load(content)
                 if not isinstance(parsed, dict):
-                    log("WARN", "CLOUD_INIT_USER_DATA: #cloud-config should contain a YAML mapping, got " + type(parsed).__name__)
+                    log(
+                        "WARN",
+                        "CLOUD_INIT_USER_DATA: #cloud-config should contain a YAML mapping, got "
+                        + type(parsed).__name__,
+                    )
             except yaml.YAMLError as exc:
                 raise ManagerError(f"CLOUD_INIT_USER_DATA contains invalid YAML: {exc}")
 
@@ -415,7 +419,8 @@ def parse_env() -> VMConfig:
         rom_candidate = Path(ipxe_rom_path)
         if not rom_candidate.exists():
             raise ManagerError(
-                f"iPXE ROM not found at {rom_candidate}. Override with IPXE_ROM_PATH or ensure QEMU packages include the ROMs."
+                f"iPXE ROM not found at {rom_candidate}. "
+                "Override with IPXE_ROM_PATH or ensure QEMU packages include the ROMs."
             )
         if primary_nic.mode == "user":
             log(

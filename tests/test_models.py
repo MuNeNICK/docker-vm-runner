@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from app.models import FilesystemConfig, NicConfig, PortForward, VMConfig
+from app.models import FilesystemConfig, NicConfig, PortForward
 
 
 class TestPortForward:

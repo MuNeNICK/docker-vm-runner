@@ -23,14 +23,14 @@ import sys
 import tempfile
 import textwrap
 import time
+from dataclasses import dataclass
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import urlopen, Request
-from urllib.error import URLError, HTTPError
+from urllib.request import Request, urlopen
 
 try:
     import yaml  # type: ignore
@@ -998,7 +998,10 @@ class VMManager:
             return
         if self.base_image.exists():
             size_mb = self.base_image.stat().st_size / (1024 * 1024)
-            log("WARN", f"Cached image too small ({size_mb:.1f} MiB < 100 MiB threshold); re-downloading {self.base_image}")
+            log(
+                "WARN",
+                f"Cached image too small ({size_mb:.1f} MiB < 100 MiB threshold); re-downloading {self.base_image}",
+            )
             self.base_image.unlink()
 
         download_file(self.cfg.image_url, self.base_image, label="Downloading base image")
@@ -1030,7 +1033,10 @@ class VMManager:
                             log("SUCCESS", f"Disk expanded to {requested}")
             else:
                 size_mb = size / (1024 * 1024)
-                log("WARN", f"Existing disk too small ({size_mb:.1f} MiB < 100 MiB threshold); recreating {self.work_image}")
+                log(
+                    "WARN",
+                    f"Existing disk too small ({size_mb:.1f} MiB < 100 MiB threshold); recreating {self.work_image}",
+                )
                 self.work_image.unlink(missing_ok=True)
 
         if not self._disk_reused:
@@ -1280,7 +1286,8 @@ class VMManager:
                 else:
                     log(
                         "WARN",
-                        f"CLOUD_INIT_USER_DATA file {override_path} is empty; only vendor cloud-config will be applied.",
+                        f"CLOUD_INIT_USER_DATA file {override_path} is empty; "
+                        "only vendor cloud-config will be applied.",
                     )
 
             (tmp / "user-data").write_text(user_data_payload, encoding="utf-8")
@@ -1427,7 +1434,8 @@ class VMManager:
             keymap_attr = f" keymap='{self.cfg.vnc_keymap}'" if self.cfg.vnc_keymap else ""
             if graphics == "vnc":
                 display_xml = (
-                    f"<graphics type='{graphics}' listen='0.0.0.0' port='{self.cfg.vnc_port}' autoport='no'{keymap_attr}/>"
+                    f"<graphics type='{graphics}' listen='0.0.0.0' "
+                    f"port='{self.cfg.vnc_port}' autoport='no'{keymap_attr}/>"
                 )
             else:
                 display_xml = (
@@ -1810,7 +1818,11 @@ def parse_env() -> VMConfig:
                 content = cloud_init_user_data_path.read_text()
                 parsed = yaml.safe_load(content)
                 if not isinstance(parsed, dict):
-                    log("WARN", "CLOUD_INIT_USER_DATA: #cloud-config should contain a YAML mapping, got " + type(parsed).__name__)
+                    log(
+                        "WARN",
+                        "CLOUD_INIT_USER_DATA: #cloud-config should contain a YAML mapping, got "
+                        + type(parsed).__name__,
+                    )
             except yaml.YAMLError as exc:
                 raise ManagerError(f"CLOUD_INIT_USER_DATA contains invalid YAML: {exc}")
 
@@ -2056,7 +2068,8 @@ def parse_env() -> VMConfig:
         rom_candidate = Path(ipxe_rom_path)
         if not rom_candidate.exists():
             raise ManagerError(
-                f"iPXE ROM not found at {rom_candidate}. Override with IPXE_ROM_PATH or ensure QEMU packages include the ROMs."
+                f"iPXE ROM not found at {rom_candidate}. "
+                "Override with IPXE_ROM_PATH or ensure QEMU packages include the ROMs."
             )
         if primary_nic.mode == "user":
             log(
@@ -2276,7 +2289,7 @@ def print_startup_banner(cfg: VMConfig) -> None:
 
     if ports_to_publish:
         lines.append("")
-        lines.append(f"  Ensure docker ports are published:")
+        lines.append("  Ensure docker ports are published:")
         lines.append(f"    {' '.join(ports_to_publish)}")
 
     max_len = max(len(line) for line in lines)
@@ -2292,8 +2305,10 @@ def print_startup_banner(cfg: VMConfig) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Docker-VM-Runner libvirt manager")
     parser.add_argument("--no-console", action="store_true", help="Do not attach to console")
-    parser.add_argument("--list-distros", nargs="?", const="", default=None, metavar="ARCH",
-                        help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)")
+    parser.add_argument(
+        "--list-distros", nargs="?", const="", default=None, metavar="ARCH",
+        help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)",
+    )
     parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and environment, then exit")
     args = parser.parse_args(argv)
@@ -2391,7 +2406,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cfg.filesystems:
         for idx, fs in enumerate(cfg.filesystems, start=1):
             mode = "ro" if fs.readonly else "rw"
-            log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{sanitize_mount_target(fs.target)} ({fs.driver}, {mode})")
+            mount = sanitize_mount_target(fs.target)
+            log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{mount} ({fs.driver}, {mode})")
     log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)

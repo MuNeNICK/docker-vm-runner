@@ -3,6 +3,8 @@
 from pathlib import Path
 
 from app.constants import (
+    _CONTAINER_ID_RE,
+    _SENSITIVE_FIELDS,
     ARCH_ALIASES,
     DEFAULT_CONFIG_PATH,
     DISK_SIZE_RE,
@@ -11,8 +13,6 @@ from app.constants import (
     SUPPORTED_ARCHES,
     SUPPORTED_NETWORK_MODELS,
     TRUTHY,
-    _CONTAINER_ID_RE,
-    _SENSITIVE_FIELDS,
 )
 
 

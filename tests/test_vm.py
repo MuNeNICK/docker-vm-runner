@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models import FilesystemConfig, NicConfig, PortForward, VMConfig
+from app.models import FilesystemConfig, NicConfig, PortForward
 from app.vm import VMManager
 
 
