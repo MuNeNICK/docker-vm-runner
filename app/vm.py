@@ -48,7 +48,7 @@ from app.utils import (
     check_filesystem_compatibility,
     convert_disk_image,
     detect_filesystem,
-    download_file,
+    detect_image_format,
     download_file_with_retry,
     ensure_directory,
     extract_compressed,
@@ -85,20 +85,13 @@ class VMManager:
             if self.vm_dir.exists():
                 shutil.rmtree(self.vm_dir, ignore_errors=True)
             ensure_directory(self.vm_dir)
-        self._external_base_image = False
-        if self.cfg.base_image_path:
-            self.base_image = Path(self.cfg.base_image_path)
-            self._external_base_image = True
-        else:
-            self.base_image = BASE_IMAGES_DIR / f"{self.cfg.distro}.{self.cfg.image_format}"
+        self.base_image = BASE_IMAGES_DIR / f"{self.cfg.distro}.{self.cfg.image_format}"
         self.work_image = self.vm_dir / f"disk.{self.cfg.image_format}"
-        self.boot_iso = Path(self.cfg.boot_iso_path) if self.cfg.boot_iso_path else None
-        self.boot_iso_url = self.cfg.boot_iso_url
+        self.boot_iso: Optional[Path] = None
         self.seed_iso = self.vm_dir / "seed.iso" if self.cfg.cloud_init_enabled else None
         self._disk_reused = False
         self._network_macs: Dict[int, str] = {}
         self._ipxe_rom_path: Optional[Path] = None
-        self._boot_iso_cache_path: Optional[Path] = None
         if self.cfg.ipxe_enabled and self.cfg.ipxe_rom_path:
             self._ipxe_rom_path = Path(self.cfg.ipxe_rom_path)
         self._tpm_process: Optional[subprocess.Popen] = None
@@ -136,22 +129,21 @@ class VMManager:
                     "WARN",
                     f"CPU_MODEL=host is not compatible with TCG on {self.cfg.arch}. Using {fallback} instead.",
                 )
+        self._resolve_boot_from()
+
         if not self.cfg.blank_work_disk:
             self._ensure_base_image()
 
         self._prepare_work_image()
         # Smart ISO skip: if disk was reused from a prior install, skip ISO boot
-        iso_requested = bool(self.boot_iso or self.boot_iso_url)
-        if iso_requested and self._disk_reused and self._is_installed() and not self.cfg.force_iso:
+        if self.boot_iso and self._disk_reused and self._is_installed() and not self.cfg.force_iso:
             log("INFO", "Persistent disk with prior install found; skipping ISO boot (set FORCE_ISO=1 to override)")
             self.boot_iso = None
-            self.boot_iso_url = None
             if "cdrom" in self.cfg.boot_order:
                 self.cfg.boot_order = [d for d in self.cfg.boot_order if d != "cdrom"]
             if "hd" not in self.cfg.boot_order:
                 self.cfg.boot_order = ["hd"] + self.cfg.boot_order
 
-        self._prepare_boot_iso()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
 
@@ -164,13 +156,48 @@ class VMManager:
 
         self._define_domain()
 
-    def _ensure_base_image(self) -> None:
-        if self._external_base_image:
-            if not self.base_image.exists():
-                raise ManagerError(f"Base image not found: {self.base_image}")
-            log("INFO", f"Using external base image: {self.base_image}")
-            self._post_process_image(self.base_image)
+    def _resolve_boot_from(self) -> None:
+        """Resolve BOOT_FROM: download if URL, detect type (ISO vs disk image)."""
+        boot_from = self.cfg.boot_from
+        if not boot_from:
             return
+
+        is_url = boot_from.startswith(("http://", "https://"))
+
+        if is_url:
+            ensure_directory(BOOT_ISO_CACHE_DIR)
+            digest = hashlib.sha256(boot_from.encode("utf-8")).hexdigest()[:12]
+            parsed = urlparse(boot_from)
+            filename = Path(parsed.path or "").name or "boot_from"
+            safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", filename) or "boot_from"
+            destination = BOOT_ISO_CACHE_DIR / f"{digest}-{safe_name}"
+            if destination.exists() and destination.stat().st_size > 0:
+                log("INFO", f"Using cached download: {destination}")
+            else:
+                download_file_with_retry(
+                    boot_from,
+                    destination,
+                    label="Downloading boot source",
+                    retries=self.cfg.download_retries,
+                )
+            resolved = destination
+        else:
+            resolved = Path(boot_from)
+            if not resolved.exists():
+                raise ManagerError(f"BOOT_FROM path not found: {resolved}")
+
+        # Detect type by extension (strip compression layers)
+        check = resolved.name.lower()
+        is_iso = check.endswith(".iso")
+
+        if is_iso:
+            self.boot_iso = resolved
+        else:
+            # Disk image (OVA, qcow2, vmdk, raw, etc.) — use as base image
+            self.base_image = resolved
+            self._post_process_image(resolved)
+
+    def _ensure_base_image(self) -> None:
         if self.base_image.exists() and self.base_image.stat().st_size > 100 * 1024 * 1024:
             log("INFO", f"Using cached image: {self.base_image}")
             return
@@ -182,38 +209,59 @@ class VMManager:
             )
             self.base_image.unlink()
 
+        # Download to a temp name that preserves the URL extensions so that
+        # _post_process_image can detect compressed/archive layers (e.g. .tar.xz)
+        url_path = urlparse(self.cfg.image_url).path
+        url_filename = Path(url_path).name or self.base_image.name
+        download_path = self.base_image.parent / url_filename
         download_file_with_retry(
             self.cfg.image_url,
-            self.base_image,
+            download_path,
             label="Downloading base image",
             retries=self.cfg.download_retries,
         )
-        self._post_process_image(self.base_image)
+        self._post_process_image(download_path)
 
     def _post_process_image(self, image_path: Path) -> None:
-        """Handle compressed extraction and disk format conversion after download."""
-        # Compressed image auto-extraction
-        suffix = image_path.suffix.lower()
-        if suffix in COMPRESSED_EXTENSIONS:
+        """Handle compressed/archive extraction and format conversion.
+
+        After processing, the final disk image is placed at ``self.base_image``
+        and ``self.work_image`` / ``self.cfg.image_format`` are updated.
+        """
+        # Compressed/archive extraction (may loop for layered formats like .tar.xz)
+        current = image_path
+        while current.suffix.lower() in COMPRESSED_EXTENSIONS:
+            suffix = current.suffix.lower()
             log("INFO", f"Extracting compressed image ({suffix})...")
-            extracted = extract_compressed(image_path, image_path.parent)
-            # Replace the compressed file with the extracted one
-            if extracted != image_path:
-                image_path.unlink(missing_ok=True)
-                extracted.rename(image_path)
+            extracted = extract_compressed(current, current.parent)
+            if extracted != current:
+                current.unlink(missing_ok=True)
+            current = extracted
             log("SUCCESS", "Image extracted")
 
-        # Disk format conversion (check the actual file or inner extension)
-        # Re-check suffix after extraction (the inner extension may differ)
-        inner_suffix = image_path.stem.rsplit(".", 1)[-1].lower() if "." in image_path.stem else ""
-        if inner_suffix in CONVERTIBLE_FORMATS or image_path.suffix.lstrip(".").lower() in CONVERTIBLE_FORMATS:
-            converted = image_path.with_suffix(".qcow2")
-            if converted == image_path:
-                converted = image_path.with_name(image_path.stem + ".converted.qcow2")
-            convert_disk_image(image_path, converted)
+        # Detect actual disk format after all extraction layers
+        actual_format = detect_image_format(current)
+
+        # Convert foreign or raw formats to qcow2
+        if actual_format in CONVERTIBLE_FORMATS or actual_format == "raw":
+            converted = current.with_name(current.stem + ".converted.qcow2")
+            convert_disk_image(current, converted)
+            current.unlink(missing_ok=True)
+            current = converted
+            actual_format = "qcow2"
+
+        # Place the final image at self.base_image and update paths
+        if actual_format != self.cfg.image_format:
+            self.cfg.image_format = actual_format
+            self.base_image = self.base_image.with_suffix(f".{actual_format}")
+            self.work_image = self.vm_dir / f"disk.{actual_format}"
+        if current != self.base_image:
+            self.base_image.parent.mkdir(parents=True, exist_ok=True)
+            current.rename(self.base_image)
+
+        # Clean up original download file if it still exists and differs
+        if image_path != self.base_image and image_path.exists():
             image_path.unlink(missing_ok=True)
-            converted.rename(image_path)
-            self.cfg.image_format = "qcow2"
 
     def _prepare_work_image(self) -> None:
         # Filesystem compatibility check
@@ -277,13 +325,31 @@ class VMManager:
                 log("INFO", f"Creating working disk {self.work_image}")
                 if self.base_image.suffix.lower() == ".iso":
                     raise ManagerError(
-                        f"BASE_IMAGE points to an ISO ({self.base_image}). "
-                        f"Try: BOOT_ISO={self.base_image} (and optionally BLANK_DISK=1)"
+                        f"Base image is an ISO ({self.base_image}). "
+                        f"Try: BOOT_FROM={self.base_image} (and optionally BLANK_DISK=1)"
                     )
                 shutil.copy2(self.base_image, self.work_image)
                 if self.cfg.disk_size and self.cfg.disk_size != "0":
-                    log("INFO", f"Resizing disk to {self.cfg.disk_size}...")
-                    run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
+                    # Only expand, never shrink
+                    info = subprocess.run(
+                        ["qemu-img", "info", "--output=json", str(self.work_image)],
+                        capture_output=True,
+                        text=True,
+                    )
+                    current_vsize = 0
+                    if info.returncode == 0:
+                        current_vsize = json.loads(info.stdout).get("virtual-size", 0)
+                    req = self.cfg.disk_size
+                    req_suffix = req[-1].upper() if req[-1].isalpha() else ""
+                    req_num = int(req[:-1]) if req_suffix else int(req)
+                    req_mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(req_suffix, 1)
+                    requested_bytes = req_num * req_mult
+                    if requested_bytes > current_vsize:
+                        log("INFO", f"Resizing disk to {self.cfg.disk_size}...")
+                        run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
+                    elif current_vsize > requested_bytes:
+                        cur_gb = current_vsize // (1024**3)
+                        log("INFO", f"Base image already {cur_gb}G (>= {self.cfg.disk_size}); skip resize")
         else:
             log("INFO", f"Persistent disk retained at {self.work_image}")
 
@@ -308,29 +374,6 @@ class VMManager:
                 create_cmd.extend(["-o", "preallocation=falloc"])
             create_cmd.extend([str(disk_path), disk_cfg.size])
             run(create_cmd)
-
-    def _prepare_boot_iso(self) -> None:
-        if self.boot_iso:
-            return
-        if not self.boot_iso_url:
-            return
-
-        ensure_directory(BOOT_ISO_CACHE_DIR)
-        digest = hashlib.sha256(self.boot_iso_url.encode("utf-8")).hexdigest()
-        parsed = urlparse(self.boot_iso_url)
-        base_name = Path(parsed.path or "").name or "boot.iso"
-        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", base_name) or "boot.iso"
-        if not Path(safe_name).suffix:
-            safe_name = f"{safe_name}.iso"
-        destination = BOOT_ISO_CACHE_DIR / f"{digest[:12]}-{safe_name}"
-
-        if destination.exists() and destination.stat().st_size > 0:
-            log("INFO", f"Using cached BOOT_ISO_URL download: {destination}")
-        else:
-            download_file(self.boot_iso_url, destination, label="Downloading boot ISO")
-
-        self._boot_iso_cache_path = destination
-        self.boot_iso = destination
 
     def _is_installed(self) -> bool:
         return (self.vm_dir / INSTALLED_MARKER_NAME).exists()
@@ -492,8 +535,42 @@ class VMManager:
                 ],
                 "chpasswd": {"expire": False},
                 "ssh_pwauth": True,
+                "write_files": [
+                    # RHEL/Rocky/Alma blocklist guest-exec by default
+                    {
+                        "path": "/etc/sysconfig/qemu-ga",
+                        "content": "# Managed by docker-vm-runner\nBLACKLIST_RPC=\n",
+                    },
+                    # Alpine: no udev so /dev/virtio-ports/ symlink is missing;
+                    # auto-detect the correct vport device at boot
+                    {
+                        "path": "/etc/conf.d/qemu-guest-agent",
+                        "content": (
+                            "# Managed by docker-vm-runner\n"
+                            "# Auto-detect virtio guest agent port\n"
+                            "GA_PATH=\"$(find /dev -name 'vport*p1' 2>/dev/null | head -1)\"\n"
+                        ),
+                    },
+                ],
                 "runcmd": [
-                    ["systemctl", "enable", "--now", "qemu-guest-agent"],
+                    # systemd distros (Debian, RHEL, SUSE, Arch, Kali …)
+                    [
+                        "sh",
+                        "-c",
+                        "command -v systemctl >/dev/null 2>&1"
+                        " && systemctl enable qemu-guest-agent"
+                        " && systemctl restart qemu-guest-agent"
+                        " || true",
+                    ],
+                    # OpenRC distros (Alpine)
+                    [
+                        "sh",
+                        "-c",
+                        "command -v rc-update >/dev/null 2>&1"
+                        " && rc-update add qemu-guest-agent default"
+                        " && rc-service qemu-guest-agent restart"
+                        " || true",
+                    ],
                 ],
             }
 
@@ -519,9 +596,7 @@ class VMManager:
                 if mounts:
                     vendor_cfg["mounts"] = mounts
 
-            vendor_data = "#cloud-config\n" + yaml.safe_dump(
-                vendor_cfg, sort_keys=False, default_flow_style=False
-            )
+            vendor_data = "#cloud-config\n" + yaml.safe_dump(vendor_cfg, sort_keys=False, default_flow_style=False)
             (tmp / "vendor-data").write_text(vendor_data, encoding="utf-8")
 
             # user-data: user's custom payload only (no vendor content mixed in)

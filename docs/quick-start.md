@@ -131,7 +131,7 @@ For Windows guests, enable Hyper-V enlightenments and use UEFI:
 docker run --rm -it \
   --device /dev/kvm:/dev/kvm \
   -p 6080:6080 \
-  -e BOOT_ISO=https://example.com/windows.iso \
+  -e BOOT_FROM=https://example.com/windows.iso \
   -e BOOT_MODE=uefi \
   -e HYPERV=1 \
   -e DISK_SIZE=64G \

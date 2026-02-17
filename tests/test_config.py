@@ -18,19 +18,16 @@ def distro_config_file(tmp_path):
                 "name": "Ubuntu 24.04",
                 "url": "https://example.com/ubuntu.qcow2",
                 "user": "user",
-                "format": "qcow2",
             },
             "debian-12": {
                 "name": "Debian 12",
                 "url": "https://example.com/debian.qcow2",
                 "user": "user",
-                "format": "qcow2",
             },
             "alma-aarch64": {
                 "name": "AlmaLinux 9 (aarch64)",
                 "url": "https://example.com/alma-aarch64.qcow2",
                 "user": "user",
-                "format": "qcow2",
                 "arch": "aarch64",
             },
         }

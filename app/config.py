@@ -114,37 +114,24 @@ def parse_env() -> VMConfig:
     if novnc_enabled and graphics_type != "vnc":
         raise ManagerError("noVNC requires a VNC graphics backend")
 
-    base_image_override = get_env("BASE_IMAGE")
-    if base_image_override is not None:
-        base_image_override = base_image_override.strip()
-        if not base_image_override:
-            base_image_override = None
+    boot_from = get_env("BOOT_FROM")
+    if boot_from is not None:
+        boot_from = boot_from.strip() or None
 
     blank_disk_explicit = get_env("BLANK_DISK") is not None
     blank_work_disk = get_env_bool("BLANK_DISK", False)
-    if base_image_override and base_image_override.lower() == "blank":
+    if boot_from and boot_from.lower() == "blank":
         blank_work_disk = True
-        base_image_override = None
+        boot_from = None
 
-    boot_iso = get_env("BOOT_ISO")
-    if boot_iso is not None:
-        boot_iso = boot_iso.strip() or None
+    # Auto-detect ISO by extension
+    boot_from_is_iso = False
+    if boot_from:
+        # Strip URL query params for extension check
+        check_path = boot_from.split("?")[0].split("#")[0]
+        boot_from_is_iso = check_path.lower().endswith(".iso")
 
-    boot_iso_url = get_env("BOOT_ISO_URL")
-    if boot_iso_url is not None:
-        boot_iso_url = boot_iso_url.strip() or None
-
-    # Auto-detect: if BOOT_ISO looks like a URL, treat it as BOOT_ISO_URL
-    if boot_iso and boot_iso.startswith(("http://", "https://")):
-        if boot_iso_url:
-            raise ManagerError("Set only one of BOOT_ISO or BOOT_ISO_URL, not both.")
-        boot_iso_url = boot_iso
-        boot_iso = None
-
-    if boot_iso and boot_iso_url:
-        raise ManagerError("Set only one of BOOT_ISO or BOOT_ISO_URL, not both.")
-
-    iso_requested = bool(boot_iso or boot_iso_url)
+    iso_requested = boot_from_is_iso
 
     boot_order_raw = get_env("BOOT_ORDER", "hd")
     boot_order_input = [item.strip().lower() for item in boot_order_raw.split(",") if item.strip()]
@@ -158,15 +145,14 @@ def parse_env() -> VMConfig:
         boot_order = ["hd"]
     if iso_requested and "cdrom" not in boot_order:
         boot_order = ["cdrom"] + boot_order
-    if iso_requested and base_image_override is None and not blank_disk_explicit:
-        # Installing from ISO without an explicit base image -> default to a blank disk.
+    if iso_requested and not blank_disk_explicit:
         blank_work_disk = True
     cloud_init_raw = get_env("CLOUD_INIT")
     if cloud_init_raw is not None:
         cloud_init_enabled = cloud_init_raw.lower() in TRUTHY
     elif iso_requested:
         cloud_init_enabled = False
-        log("INFO", "BOOT_ISO detected; auto-disabling cloud-init (set CLOUD_INIT=1 to override)")
+        log("INFO", "BOOT_FROM ISO detected; auto-disabling cloud-init (set CLOUD_INIT=1 to override)")
     else:
         cloud_init_enabled = True
     cloud_init_user_data_env = get_env("CLOUD_INIT_USER_DATA")
@@ -606,7 +592,7 @@ def parse_env() -> VMConfig:
         distro=distro,
         image_url=distro_info["url"],
         login_user=distro_info.get("user", "user"),
-        image_format=distro_info.get("format", "qcow2"),
+        image_format="qcow2",
         distro_name="Custom ISO" if iso_requested else distro_info["name"],
         memory_mb=memory_mb,
         cpus=cpus,
@@ -620,10 +606,8 @@ def parse_env() -> VMConfig:
         vnc_port=vnc_port,
         vnc_keymap=vnc_keymap,
         novnc_port=novnc_port,
-        base_image_path=base_image_override,
+        boot_from=boot_from,
         blank_work_disk=blank_work_disk,
-        boot_iso_path=boot_iso,
-        boot_iso_url=boot_iso_url,
         boot_order=boot_order,
         cloud_init_enabled=cloud_init_enabled,
         cloud_init_user_data_path=cloud_init_user_data_path,

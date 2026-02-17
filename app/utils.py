@@ -397,6 +397,23 @@ def detect_filesystem(path: Path) -> str:
         return "unknown"
 
 
+def detect_image_format(path: Path) -> str:
+    """Detect disk image format using qemu-img info. Returns e.g. 'qcow2', 'raw', 'vmdk'."""
+    try:
+        result = subprocess.run(
+            ["qemu-img", "info", "--output=json", str(path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        import json
+
+        info = json.loads(result.stdout)
+        return info.get("format", "unknown")
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return "unknown"
+
+
 def convert_disk_image(source: Path, dest: Path, target_format: str = "qcow2") -> None:
     """Convert VHD/VMDK/VDI/VHDX to qcow2 using qemu-img convert."""
     log("INFO", f"Converting {source.name} to {target_format}...")
@@ -471,6 +488,18 @@ def extract_compressed(source: Path, dest_dir: Path) -> Path:
         if not extracted:
             raise ManagerError(f"No files extracted from {source}")
         return max(extracted, key=lambda f: f.stat().st_size)
+
+    if suffix in (".tar", ".ova"):
+        import tarfile
+
+        with tarfile.open(source, "r:") as tf:
+            members = tf.getmembers()
+            if not members:
+                raise ManagerError(f"Empty tar archive: {source}")
+            # Extract the largest file (likely the disk image)
+            largest = max((m for m in members if m.isfile()), key=lambda m: m.size)
+            tf.extract(largest, dest_dir, filter="data")
+            return dest_dir / largest.name
 
     raise ManagerError(f"Unsupported compressed format: {suffix}")
 

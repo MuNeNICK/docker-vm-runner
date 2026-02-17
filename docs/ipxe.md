@@ -49,7 +49,7 @@ You can mix iPXE with cloud-init for post-boot configuration:
 
 1. Host an iPXE script on your infrastructure.
 2. Use an `#!ipxe` script to chainload a kernel, or to fetch installation media.
-3. Provide cloud-init metadata (e.g., via `BOOT_ISO` or a blank disk with `cloud-init`) to finish provisioning once the OS installer completes.
+3. Provide cloud-init metadata (e.g., via `BOOT_FROM` pointing to an ISO, or a blank disk with `cloud-init`) to finish provisioning once the OS installer completes.
 
 Example iPXE script snippet:
 

@@ -316,15 +316,15 @@ def main(argv: Optional[List[str]] = None) -> int:
             log("INFO", f"Cloud-init:  enabled (user={cfg.login_user})")
         else:
             log("INFO", "Cloud-init:  disabled")
-        # ISO
-        if cfg.boot_iso_path:
-            iso_path = Path(cfg.boot_iso_path)
-            if iso_path.exists():
-                log("SUCCESS", f"Boot ISO:    {iso_path} (found)")
+        # BOOT_FROM
+        if cfg.boot_from:
+            is_url = cfg.boot_from.startswith(("http://", "https://"))
+            if is_url:
+                log("INFO", f"BOOT_FROM:   {cfg.boot_from} (will download)")
             else:
-                log("ERROR", f"Boot ISO:    {iso_path} (NOT FOUND)")
-        elif cfg.boot_iso_url:
-            log("INFO", f"Boot ISO:    {cfg.boot_iso_url} (will download)")
+                bf = Path(cfg.boot_from)
+                status = "found" if bf.exists() else "NOT FOUND"
+                log("INFO" if bf.exists() else "ERROR", f"BOOT_FROM:   {bf} ({status})")
         # Network
         for idx, nic in enumerate(cfg.nics, start=1):
             label = f"NIC #{idx}"

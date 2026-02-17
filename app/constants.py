@@ -125,4 +125,4 @@ DISK_IO_MODES = {"native", "threads", "io_uring"}
 DISK_CACHE_MODES = {"none", "writeback", "writethrough", "directsync", "unsafe"}
 
 CONVERTIBLE_FORMATS = {"vhd", "vhdx", "vmdk", "vdi"}
-COMPRESSED_EXTENSIONS = {".gz", ".xz", ".7z", ".zip", ".bz2", ".rar"}
+COMPRESSED_EXTENSIONS = {".gz", ".xz", ".7z", ".zip", ".bz2", ".rar", ".tar", ".ova"}

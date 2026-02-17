@@ -64,10 +64,8 @@ class VMConfig:
     vnc_port: int
     vnc_keymap: str
     novnc_port: int
-    base_image_path: Optional[str]
+    boot_from: Optional[str]
     blank_work_disk: bool
-    boot_iso_path: Optional[str]
-    boot_iso_url: Optional[str]
     boot_order: List[str]
     cloud_init_enabled: bool
     cloud_init_user_data_path: Optional[Path]

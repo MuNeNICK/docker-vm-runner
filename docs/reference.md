@@ -9,7 +9,7 @@ docker run --rm -it --device /dev/kvm:/dev/kvm \
 
 # Boot from ISO with GUI
 docker run --rm -it --device /dev/kvm:/dev/kvm -p 6080:6080 \
-  -e BOOT_ISO=https://example.com/install.iso -e GRAPHICS=novnc ...
+  -e BOOT_FROM=https://example.com/install.iso -e GRAPHICS=novnc ...
 
 # Persistent VM (auto-detected /data volume)
 docker run --rm -it --device /dev/kvm:/dev/kvm \
@@ -33,7 +33,7 @@ docker run --rm -it --device /dev/kvm:/dev/kvm \
 
 # Windows with Hyper-V enlightenments
 docker run --rm -it --device /dev/kvm:/dev/kvm -p 6080:6080 \
-  -e BOOT_ISO=/path/to/windows.iso -e BOOT_MODE=uefi -e HYPERV=1 \
+  -e BOOT_FROM=/path/to/windows.iso -e BOOT_MODE=uefi -e HYPERV=1 \
   -e DISK_SIZE=64G -e MEMORY=8192 -e GRAPHICS=novnc ...
 
 # List available distributions
@@ -72,12 +72,10 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `DEVICE2` … `DEVICE6` | *(unset)* | Additional block device passthrough paths. |
 | `DISK_TYPE` | `virtio` | Disk bus controller: `virtio`, `scsi`, `nvme`, `ide`, or `usb`. |
 | `ALLOCATE` | `0` | Set `1` to preallocate disk space with `fallocate` (better I/O, uses more space upfront). |
-| `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. Compressed images (`.gz`, `.xz`, `.7z`, `.zip`, `.bz2`) are auto-extracted. Foreign formats (`.vhd`, `.vhdx`, `.vmdk`, `.vdi`) are auto-converted to qcow2. |
+| `BOOT_FROM` | *(unset)* | Boot source override. Accepts a local path or an HTTP(S) URL (auto-downloaded). Auto-detects the source type by extension: `.iso` files are attached as CD-ROM; disk images (`.qcow2`, `.raw`, `.vmdk`, `.vdi`, `.vhd`, `.vhdx`) replace the base image; compressed/archive files (`.gz`, `.xz`, `.7z`, `.zip`, `.bz2`, `.tar`, `.ova`) are auto-extracted (including layered formats like `.tar.xz`); foreign formats are auto-converted to qcow2. Use `blank` to create a fresh disk. When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BLANK_DISK` is explicitly set. On persistent volumes, the ISO is automatically skipped on subsequent boots (override with `FORCE_ISO=1`). |
 | `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
-| `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM. Accepts a local path or an HTTP(S) URL (URLs are auto-detected and downloaded). When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set. Automatically skipped on subsequent boots when a prior installation is detected on a persistent disk (override with `FORCE_ISO=1`). |
-| `BOOT_ISO_URL` | *(unset)* | Explicit URL form (same as setting `BOOT_ISO` to a URL). |
 | `BOOT_ORDER` | `hd` | Comma-separated boot device order: `hd`, `cdrom`, `network`. |
-| `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. Auto-disabled when `BOOT_ISO` is set. |
+| `CLOUD_INIT` | `1` | Enable/disable cloud-init seed generation. Auto-disabled when `BOOT_FROM` points to an ISO. |
 | `CLOUD_INIT_USER_DATA` | *(unset)* | Path to an additional cloud-init payload file. Added as a second multipart section after the built-in configuration. |
 | `ARCH` | `x86_64` | Guest architecture. Accepts `x86_64` (alias `amd64`) or `aarch64` (alias `arm64`). Defaults to the distribution's declared `arch` or `x86_64`. |
 | `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
@@ -114,7 +112,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
 | `PERSIST` | `0` (`1` when `/data` mounted) | Keep the work disk and libvirt domain after shutdown. Automatically enabled when a volume is mounted at `/data`. |
-| `FORCE_ISO` | `0` | Force `BOOT_ISO` to attach even when a prior installation is detected on a persistent disk. |
+| `FORCE_ISO` | `0` | Force the ISO from `BOOT_FROM` to attach even when a prior installation is detected on a persistent disk. |
 | `NO_CONSOLE` | `0` | Skip attaching `virsh console` (`1`, `true`, `yes`, `on`). |
 
 ### Filesystem Sharing
