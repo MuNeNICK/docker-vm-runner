@@ -327,6 +327,62 @@ def get_cpu_count() -> int:
     return os.cpu_count() or 1
 
 
+def get_cpu_vendor() -> str:
+    """Return CPU vendor: 'amd', 'intel', or 'unknown'."""
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("vendor_id"):
+                    vendor = line.split(":", 1)[1].strip().lower()
+                    if "amd" in vendor:
+                        return "amd"
+                    if "intel" in vendor:
+                        return "intel"
+                    return vendor
+    except OSError:
+        pass
+    return "unknown"
+
+
+def get_cpu_flags() -> set:
+    """Return the set of CPU flags from /proc/cpuinfo."""
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("flags"):
+                    return set(line.split(":", 1)[1].strip().split())
+    except OSError:
+        pass
+    return set()
+
+
+def detect_host_mtu() -> int:
+    """Detect the MTU of the default network interface."""
+    try:
+        result = subprocess.run(
+            ["ip", "-o", "route", "show", "default"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # Parse default route to find interface: "default via X.X.X.X dev ethN ..."
+        tokens = result.stdout.split()
+        for i, token in enumerate(tokens):
+            if token == "dev" and i + 1 < len(tokens):
+                iface = tokens[i + 1]
+                mtu_path = Path(f"/sys/class/net/{iface}/mtu")
+                if mtu_path.exists():
+                    return int(mtu_path.read_text().strip())
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError, OSError):
+        pass
+    return 1500
+
+
+def has_ipv6() -> bool:
+    """Check if IPv6 is available on the host."""
+    return Path("/proc/net/if_inet6").exists()
+
+
 def detect_filesystem(path: Path) -> str:
     """Detect filesystem type at the given path."""
     try:

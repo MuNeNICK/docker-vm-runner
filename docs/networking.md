@@ -82,6 +82,20 @@ A common pattern is bridge + NAT fallback (bridge for LAN access, NAT for intern
 
 Use `CLOUD_INIT_USER_DATA` to supply a cloud-config with static networking. See the distribution's cloud-init documentation for netplan/ENI syntax.
 
+### MTU Auto-Detection
+
+The host's default interface MTU is automatically detected. If it differs from 1500 (e.g. jumbo frames at 9000), the detected MTU is applied to the guest NIC. Override with `NETWORK_MTU`:
+
+```bash
+-e NETWORK_MTU=9000
+```
+
+Per-NIC override is supported with indexed variables: `NETWORK2_MTU`, `NETWORK3_MTU`, etc.
+
+### IPv6
+
+IPv6 is automatically enabled in user-mode (NAT) networking when the host has IPv6 support (detected via `/proc/net/if_inet6`). The guest receives a link-local IPv6 address (`fec0::2/64`) in addition to the IPv4 address.
+
 ### Direct mode caveats
 
 - macvtap traffic is not visible to the host IP stack. Add `NETWORK2_MODE=nat` if you need host-to-guest connectivity via forwarded ports.

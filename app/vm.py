@@ -50,11 +50,15 @@ from app.utils import (
     check_filesystem_compatibility,
     convert_disk_image,
     detect_cloud_init_content_type,
+    detect_filesystem,
     download_file,
     download_file_with_retry,
     ensure_directory,
     extract_compressed,
+    get_cpu_flags,
+    get_cpu_vendor,
     get_env_bool,
+    has_ipv6,
     hash_password,
     kvm_available,
     log,
@@ -64,9 +68,10 @@ from app.utils import (
 
 
 class VMManager:
-    def __init__(self, vm_config: VMConfig, service_manager) -> None:
+    def __init__(self, vm_config: VMConfig, service_manager, status=None) -> None:
         self.cfg = vm_config
         self.service_manager = service_manager
+        self.status = status
         self.conn: Optional[libvirt.virConnect] = None
         self.domain: Optional[libvirt.virDomain] = None
         self._kvm_available = kvm_available()
@@ -112,7 +117,13 @@ class VMManager:
             self.conn.close()
             self.conn = None
 
+    def _status_update(self, msg: str) -> None:
+        """Send a status update if StatusBroadcaster is available."""
+        if self.status is not None:
+            self.status.update(msg)
+
     def prepare(self) -> None:
+        self._status_update("Checking KVM availability...")
         if not self._kvm_available:
             log("WARN", "=" * 60)
             log("WARN", "  /dev/kvm not found!")
@@ -136,7 +147,9 @@ class VMManager:
                     f"CPU_MODEL=host is not compatible with TCG on {self.cfg.arch}. Using {fallback} instead.",
                 )
         if not self.cfg.blank_work_disk:
+            self._status_update("Downloading base image...")
             self._ensure_base_image()
+        self._status_update("Preparing work disk...")
         self._prepare_work_image()
         # Smart ISO skip: if disk was reused from a prior install, skip ISO boot
         iso_requested = bool(self.boot_iso or self.boot_iso_url)
@@ -148,13 +161,18 @@ class VMManager:
                 self.cfg.boot_order = [d for d in self.cfg.boot_order if d != "cdrom"]
             if "hd" not in self.cfg.boot_order:
                 self.cfg.boot_order = ["hd"] + self.cfg.boot_order
+        self._status_update("Preparing boot media...")
         self._prepare_boot_iso()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
+        self._status_update("Extracting QEMU binaries...")
         self._extract_qemu_binary()
+        self._status_update("Preparing firmware...")
         self._prepare_firmware()
         self._start_tpm()
+        self._status_update("Generating cloud-init...")
         self._generate_cloud_init()
+        self._status_update("Defining VM domain...")
         self._define_domain()
 
     def _ensure_base_image(self) -> None:
@@ -685,6 +703,18 @@ class VMManager:
                 SubElement(hyperv, "stimer", state="on")
                 SubElement(hyperv, "frequencies", state="on")
 
+                # Per-vendor optimizations
+                cpu_vendor = get_cpu_vendor()
+                cpu_flags = get_cpu_flags()
+                if cpu_vendor == "amd":
+                    SubElement(hyperv, "evmcs", state="off")
+                    if "avic" not in cpu_flags:
+                        SubElement(hyperv, "avic", state="off")
+                elif cpu_vendor == "intel":
+                    if "apicv" not in cpu_flags:
+                        SubElement(hyperv, "apicv", state="off")
+                    SubElement(hyperv, "evmcs", state="off")
+
         # <clock> for Hyper-V
         if self.cfg.hyperv_enabled:
             clock = SubElement(domain, "clock", offset="localtime")
@@ -716,8 +746,22 @@ class VMManager:
         if self.cfg.disk_controller == "scsi":
             SubElement(devices, "controller", type="scsi", model="virtio-scsi-pci")
 
+        # Disk I/O mode — detect filesystem and fallback if needed
+        effective_disk_io = self.cfg.disk_io
+        effective_disk_cache = self.cfg.disk_cache
+        fs_type = detect_filesystem(self.work_image.parent).lower()
+        if effective_disk_io != "threads" and ("ecryptfs" in fs_type or "tmpfs" in fs_type):
+            log("WARN", f"Storage on {fs_type} — falling back to io=threads, cache=writeback")
+            effective_disk_io = "threads"
+            effective_disk_cache = "writeback"
+
         # Primary disk
-        disk_driver_attrs = {"name": "qemu", "type": self.cfg.image_format, "cache": "none"}
+        disk_driver_attrs = {
+            "name": "qemu",
+            "type": self.cfg.image_format,
+            "cache": effective_disk_cache,
+            "io": effective_disk_io,
+        }
         if self.cfg.io_thread and disk_bus == "virtio":
             disk_driver_attrs["iothread"] = "1"
 
@@ -734,7 +778,12 @@ class VMManager:
         for disk_cfg in self.cfg.extra_disks:
             extra_disk_path = self.vm_dir / f"disk{disk_cfg.index}.{self.cfg.image_format}"
             extra_disk = SubElement(devices, "disk", type="file", device="disk")
-            extra_driver_attrs = {"name": "qemu", "type": self.cfg.image_format, "cache": "none"}
+            extra_driver_attrs = {
+                "name": "qemu",
+                "type": self.cfg.image_format,
+                "cache": effective_disk_cache,
+                "io": effective_disk_io,
+            }
             if self.cfg.io_thread and disk_bus == "virtio":
                 extra_driver_attrs["iothread"] = "1"
             SubElement(extra_disk, "driver", **extra_driver_attrs)
@@ -788,6 +837,7 @@ class VMManager:
 
         # Network interfaces
         network_order = boot_order_priority.get("network")
+        ipv6_enabled = has_ipv6()
         for idx, nic in enumerate(self.cfg.nics):
             nic_boot_order = network_order if nic.boot else None
             rom_file = str(self._ipxe_rom_path) if self._ipxe_rom_path is not None else None
@@ -801,6 +851,7 @@ class VMManager:
                 boot_order=nic_boot_order,
                 rom_file=rom_file,
                 port_forwards=pf_list,
+                ipv6_enabled=ipv6_enabled,
             )
             self._network_macs[idx] = resolved_mac
             devices.append(fromstring(nic_xml))
@@ -897,6 +948,7 @@ class VMManager:
     def start(self) -> None:
         if self.domain is None:
             raise ManagerError("Domain not defined")
+        self._status_update("Starting VM...")
         if self.domain.isActive():  # type: ignore[attr-defined]
             log("INFO", f"Domain {self.cfg.vm_name} already running")
         else:
@@ -912,6 +964,9 @@ class VMManager:
                 # Network fallback: if passt fails, try slirp
                 if "passt" in message.lower() or "backend" in message.lower():
                     log("WARN", f"Network backend failed: {message}")
+                    runtime = getattr(self.service_manager, "runtime", None)
+                    if runtime and runtime.rootless:
+                        log("WARN", "Rootless container — network backend errors are expected")
                     log("INFO", "Attempting fallback to slirp network backend...")
                     if self._try_network_fallback():
                         log("SUCCESS", f"Domain {self.cfg.vm_name} started (with slirp fallback)")
@@ -920,6 +975,8 @@ class VMManager:
                         return
                 raise ManagerError(f"Failed to start domain: {message}") from exc
             log("SUCCESS", f"Domain {self.cfg.vm_name} started")
+        if self.status is not None:
+            self.status.ready()
         if self.cfg.novnc_enabled:
             self.service_manager.start_novnc()
 

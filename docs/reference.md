@@ -52,6 +52,8 @@ These map to entries in `distros.yaml` (bind-mount your own file to `/config/dis
 - `rocky-linux-9`, `rocky-linux-9-arm64`, `rocky-linux-8`
 - `almalinux-9`, `almalinux-9-arm64`, `almalinux-8`
 - `archlinux`
+- `alpine-3`
+- `kali`
 
 Each entry can declare an `arch` field to set the default architecture for that image. If omitted it defaults to `x86_64`.
 
@@ -94,11 +96,13 @@ Each entry can declare an `arch` field to set the default architecture for that 
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `DISK_IO` | `native` | Disk I/O mode: `native`, `threads`, or `io_uring`. Auto-falls back to `threads` on ecryptfs/tmpfs. |
+| `DISK_CACHE` | `none` | Disk cache mode: `none`, `writeback`, `writethrough`, `directsync`, or `unsafe`. Auto-falls back to `writeback` on ecryptfs/tmpfs. |
 | `IO_THREAD` | `1` | Enable IOThread for disk I/O (improves disk performance on virtio). |
 | `BALLOON` | `1` | Enable virtio memory balloon device. |
 | `RNG` | `1` | Enable virtio-rng device (provides entropy from `/dev/urandom`). |
 | `USB` | `1` | Enable USB controller (qemu-xhci) and USB tablet input device. |
-| `HYPERV` | `0` | Enable Hyper-V enlightenments for Windows guests (relaxed, vapic, spinlocks, stimer, etc.). |
+| `HYPERV` | `0` | Enable Hyper-V enlightenments for Windows guests (relaxed, vapic, spinlocks, stimer, etc.). Per-vendor CPU optimizations are applied automatically (AMD: disables evmcs, avic when unsupported; Intel: disables evmcs, apicv when unsupported). |
 | `GPU` | `off` | GPU passthrough: `off` or `intel` (Intel iGPU via rendernode). |
 
 ### Console & Access
@@ -136,6 +140,7 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `NETWORK_DIRECT_DEV` | *(required for direct)* | Host NIC to bind (e.g., `eth0`) when `NETWORK_MODE=direct` (requires `--volume /dev:/dev` and `--privileged`). |
 | `NETWORK_MAC` | *(auto)* | Override the guest MAC address (`aa:bb:cc:dd:ee:ff`). |
 | `NETWORK_MODEL` | `virtio` | NIC model: `virtio`, `e1000`, `e1000e`, `rtl8139`, `ne2k_pci`, `pcnet`, `vmxnet3`. |
+| `NETWORK_MTU` | *(auto)* | MTU for the guest NIC. Auto-detected from the host default interface; only set in the domain XML when != 1500. |
 | `NETWORK_BOOT` | `0` | Set `1` to include this NIC in the boot order (useful for PXE without iPXE). |
 | `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the primary NIC and prioritize `network` in the boot order. |
 | `IPXE_ROM_PATH` | *(auto)* | Override the iPXE ROM path. Auto-selected based on `NETWORK_MODEL` (e.g. `pxe-virtio.rom` for virtio on x86_64). Provide a full path when using a custom build. |
@@ -149,6 +154,8 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `GRAPHICS` | `none` | Graphics backend (`none`, `vnc`, `novnc`). |
 | `VNC_PORT` | `5900` | VNC listen port. |
 | `NOVNC_PORT` | `6080` | noVNC/websockify port. |
+
+When `GRAPHICS=novnc` is set, a **boot status page** is served at `https://localhost:6080/` during VM startup via websockify. The page shows real-time progress and automatically redirects to the noVNC console once the VM is ready.
 
 ### Redfish
 
@@ -170,6 +177,16 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `LOG_VERBOSE` | `0` | Set `1` to enable verbose debug logging (shows all subprocess commands). |
 | `REDFISH_STORAGE_POOL` | `default` | Libvirt storage pool name used by sushy-emulator. |
 | `REDFISH_STORAGE_PATH` | `/var/lib/libvirt/images` | Path for the Redfish storage pool. |
+
+### Container Runtime Detection
+
+The manager automatically detects the container runtime at startup and displays it in the Host info block:
+
+- **Docker** — detected via `/.dockerenv`
+- **Podman** — detected via `/run/.containerenv`
+- **Kubernetes** — detected via `/var/run/secrets/kubernetes.io`
+
+When running in a **rootless** container (Podman rootless, Docker rootless), certain errors (libvirt socket timeout, network backend failures) are automatically downgraded to warnings instead of fatal errors.
 
 ### CLI Flags
 

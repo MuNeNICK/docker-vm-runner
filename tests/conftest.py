@@ -87,6 +87,8 @@ def default_vm_config() -> VMConfig:
         filesystems=[],
         port_forwards=[],
         boot_mode="legacy",
+        disk_io="native",
+        disk_cache="none",
     )
 
 
@@ -149,6 +151,9 @@ _PARSE_ENV_VARS = [
     "NETWORK_BOOT",
     "FILESYSTEM_SOURCE",
     "FILESYSTEM_TARGET",
+    "DISK_IO",
+    "DISK_CACHE",
+    "NETWORK_MTU",
 ]
 
 

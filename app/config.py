@@ -15,7 +15,9 @@ from app.constants import (
     _DATA_DIR,
     ARCH_ALIASES,
     DEFAULT_CONFIG_PATH,
+    DISK_CACHE_MODES,
     DISK_CONTROLLERS,
+    DISK_IO_MODES,
     IPXE_DEFAULT_ROMS,
     MAC_ADDRESS_RE,
     SUPPORTED_ARCHES,
@@ -33,6 +35,7 @@ from app.models import (
 )
 from app.utils import (
     derive_vm_name,
+    detect_host_mtu,
     deterministic_mac,
     ensure_directory,
     get_available_disk_space,
@@ -299,6 +302,20 @@ def parse_env() -> VMConfig:
             suffix = "" if index == 1 else str(index)
             raise ManagerError(f"Unsupported NETWORK{suffix}_MODEL '{model_raw}'. Supported: {supported_models}")
 
+        mtu_raw = get_env_indexed("NETWORK_MTU", index)
+        mtu: Optional[int] = None
+        if mtu_raw is not None and mtu_raw.strip():
+            try:
+                mtu = int(mtu_raw.strip())
+            except ValueError:
+                suffix = "" if index == 1 else str(index)
+                raise ManagerError(f"Invalid NETWORK{suffix}_MTU '{mtu_raw}': must be an integer")
+        elif index == 1:
+            detected_mtu = detect_host_mtu()
+            if detected_mtu != 1500:
+                mtu = detected_mtu
+                log("INFO", f"Auto-detected host MTU: {mtu}")
+
         nic = NicConfig(
             mode=mode_key,
             bridge_name=bridge_name,
@@ -306,6 +323,7 @@ def parse_env() -> VMConfig:
             mac_address=mac_address,
             model=model,
             boot=False,
+            mtu=mtu,
         )
 
         boot_override = get_env_indexed("NETWORK_BOOT", index)
@@ -543,6 +561,19 @@ def parse_env() -> VMConfig:
     # --- Disk preallocation ---
     disk_preallocate = get_env_bool("ALLOCATE", False)
 
+    # --- Disk I/O and cache ---
+    disk_io_raw = (get_env("DISK_IO") or "native").strip().lower()
+    if disk_io_raw not in DISK_IO_MODES:
+        supported = ", ".join(sorted(DISK_IO_MODES))
+        raise ManagerError(f"Invalid DISK_IO '{disk_io_raw}'. Supported: {supported}")
+    disk_io = disk_io_raw
+
+    disk_cache_raw = (get_env("DISK_CACHE") or "none").strip().lower()
+    if disk_cache_raw not in DISK_CACHE_MODES:
+        supported = ", ".join(sorted(DISK_CACHE_MODES))
+        raise ManagerError(f"Invalid DISK_CACHE '{disk_cache_raw}'. Supported: {supported}")
+    disk_cache = disk_cache_raw
+
     # --- GPU ---
     gpu_raw = (get_env("GPU") or "off").strip().lower()
     if gpu_raw not in ("off", "intel"):
@@ -574,7 +605,7 @@ def parse_env() -> VMConfig:
     return VMConfig(
         distro=distro,
         image_url=distro_info["url"],
-        login_user=distro_info["user"],
+        login_user=distro_info.get("user", "user"),
         image_format=distro_info.get("format", "qcow2"),
         distro_name="Custom ISO" if iso_requested else distro_info["name"],
         memory_mb=memory_mb,
@@ -619,6 +650,8 @@ def parse_env() -> VMConfig:
         block_devices=block_devices,
         disk_controller=disk_controller,
         disk_preallocate=disk_preallocate,
+        disk_io=disk_io,
+        disk_cache=disk_cache,
         io_thread=io_thread,
         balloon_enabled=balloon_enabled,
         rng_enabled=rng_enabled,

@@ -33,6 +33,7 @@ class NicConfig:
     mac_address: Optional[str] = None
     model: str = "virtio"
     boot: bool = False
+    mtu: Optional[int] = None
 
 
 @dataclass
@@ -96,6 +97,8 @@ class VMConfig:
     # Disk options
     disk_controller: str = "virtio"
     disk_preallocate: bool = False
+    disk_io: str = "native"
+    disk_cache: str = "none"
     # Performance
     io_thread: bool = True
     balloon_enabled: bool = True

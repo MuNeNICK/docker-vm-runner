@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  vm-runner:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+    environment:
+      - DISTRO=ubuntu-2404
+      - GRAPHICS=novnc
+      - MEMORY=2048
+      - CPUS=2
+      - DISK_SIZE=10G
+      - NO_CONSOLE=1
+    ports:
+      - "2222:2222"
+      - "6080:6080"
+    volumes:
+      - vm-data:/data
+
+volumes:
+  vm-data:

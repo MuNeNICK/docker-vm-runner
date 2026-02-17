@@ -12,6 +12,9 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+_NOVNC_ROOT = Path("/usr/share/novnc")
+_STATUS_WEB_ROOT = Path("/opt/docker-vm-runner/web")
+
 try:
     import bcrypt  # type: ignore
 except ImportError as exc:  # pragma: no cover
@@ -25,6 +28,7 @@ except ImportError as exc:  # pragma: no cover
 from app.constants import LIBVIRT_URI, STATE_DIR
 from app.exceptions import ManagerError
 from app.models import VMConfig
+from app.runtime import RuntimeInfo, detect_runtime
 from app.utils import ensure_directory, log, run, wait_for_path
 
 
@@ -42,6 +46,7 @@ class ServiceManager:
         self._novnc_started = False
         self._storage_pool_name = os.environ.get("REDFISH_STORAGE_POOL", "default")
         self._storage_pool_path = Path(os.environ.get("REDFISH_STORAGE_PATH", "/var/lib/libvirt/images"))
+        self.runtime: RuntimeInfo = detect_runtime()
 
     def start(self) -> None:
         self._start_libvirt()
@@ -147,21 +152,29 @@ class ServiceManager:
             Path("/var/run/libvirt/virtlogd-sock"),
         ]
         if not any(wait_for_path(path, timeout=15) for path in libvirt_paths):
-            raise ManagerError(
+            msg = (
                 "libvirt socket did not appear.\n"
                 "  Possible fixes:\n"
                 "    - Run with --privileged\n"
                 "    - Or add --cgroupns=host --device /dev/kvm:/dev/kvm\n"
                 "    - Ensure the container has sufficient capabilities (SYS_ADMIN, NET_ADMIN)"
             )
+            if self.runtime.rootless:
+                log("WARN", msg)
+                return
+            raise ManagerError(msg)
         if not any(wait_for_path(path, timeout=15) for path in virtlogd_paths):
-            raise ManagerError(
+            msg = (
                 "virtlogd socket did not appear.\n"
                 "  Possible fixes:\n"
                 "    - Run with --privileged\n"
                 "    - Or add --cgroupns=host\n"
                 "    - Check container logs for virtlogd errors"
             )
+            if self.runtime.rootless:
+                log("WARN", msg)
+                return
+            raise ManagerError(msg)
 
     def _ensure_certificates(self) -> None:
         crt = self.cert_dir / "sushy.crt"
@@ -281,6 +294,22 @@ class ServiceManager:
             if conn is not None:
                 conn.close()
 
+    def _install_status_page(self) -> None:
+        """Copy status page assets into the noVNC web root."""
+        if not _STATUS_WEB_ROOT.exists():
+            return
+        for item in _STATUS_WEB_ROOT.iterdir():
+            dest = _NOVNC_ROOT / item.name
+            try:
+                if item.is_dir():
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
+            except OSError as exc:
+                log("WARN", f"Failed to copy status asset {item.name}: {exc}")
+
     def start_novnc(self) -> None:
         if not self.vm_config.novnc_enabled:
             return
@@ -292,53 +321,12 @@ class ServiceManager:
                 "noVNC requested but websockify is missing. Install websockify inside the container image."
             )
 
-        web_root = Path("/usr/share/novnc")
-        if not web_root.exists():
-            raise ManagerError("noVNC static assets not found at /usr/share/novnc.")
+        if not _NOVNC_ROOT.exists():
+            raise ManagerError(f"noVNC static assets not found at {_NOVNC_ROOT}.")
 
-        # Ensure landing on / renders the viewer automatically instead of a directory listing.
-        index_path = web_root / "index.html"
-        if (web_root / "vnc.html").exists():
-            redirect_marker = "<!-- docker-vm-runner novnc redirect -->"
-            try:
-                existing = index_path.read_text(encoding="utf-8")
-            except FileNotFoundError:
-                existing = ""
-            except OSError:
-                existing = None
-            if existing is None or redirect_marker not in existing:
-                redirect_html = f"""<!DOCTYPE html>
-<html>
-  <head>
-    {redirect_marker}
-    <meta charset="utf-8" />
-    <title>noVNC</title>
-    <script>
-      window.location.replace("vnc.html?autoconnect=1&resize=scale");
-    </script>
-  </head>
-  <body>
-    <p>
-      Redirecting to
-      <a href="vnc.html?autoconnect=1&resize=scale">noVNC console</a>…
-    </p>
-    <noscript>
-      <meta http-equiv="refresh" content="1;url=vnc_lite.html">
-      <p>
-        JavaScript is required for the full noVNC client.
-        You will be redirected to the lite client shortly.
-      </p>
-    </noscript>
-  </body>
-</html>
-"""
-                try:
-                    index_path.write_text(redirect_html, encoding="utf-8")
-                except OSError:
-                    log(
-                        "WARN",
-                        f"Failed to update {index_path} for noVNC redirect; directory listing will remain.",
-                    )
+        # Install status page as index.html (overrides noVNC directory listing).
+        # The status page polls /status.txt and redirects to vnc.html when ready.
+        self._install_status_page()
 
         self._ensure_certificates()
         cert = self.cert_dir / "sushy.crt"
@@ -349,7 +337,7 @@ class ServiceManager:
         cmd = [
             "websockify",
             "--web",
-            str(web_root),
+            str(_NOVNC_ROOT),
             "--cert",
             str(cert),
             "--key",
@@ -375,7 +363,7 @@ class ServiceManager:
         self._novnc_started = True
         log(
             "INFO",
-            f"noVNC web client available at https://localhost:{self.vm_config.novnc_port}/vnc.html",
+            f"Status page at https://localhost:{self.vm_config.novnc_port}/",
         )
 
     def stop(self) -> None:

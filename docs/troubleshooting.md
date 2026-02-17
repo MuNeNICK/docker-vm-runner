@@ -28,6 +28,9 @@ For detailed Redfish enablement and workflows, see the [Redfish Guide](redfish.m
 - **Network fallback warning (passt → slirp)**
   If the passt network backend fails (e.g., due to missing capabilities), the container automatically falls back to QEMU's built-in slirp networking. Performance and features may differ. Check container capabilities if this happens unexpectedly.
 
+- **Podman rootless / Docker rootless**
+  The container detects rootless mode automatically. When running rootless, libvirt socket timeouts and network backend errors are downgraded to warnings instead of fatal errors. Some features (bridge/direct networking, GPU passthrough) may not work in rootless mode. The runtime detection result is displayed in the Host info block at startup (e.g. `Runtime: podman (unprivileged, rootless)`).
+
 - **BTRFS / OverlayFS performance warning**
   The container warns at startup if the storage path is on BTRFS (COW overhead) or OverlayFS (Docker's default). For BTRFS, disable COW on the data directory: `chattr +C /path/to/data`. For best performance, use a dedicated volume with ext4 or xfs.
 

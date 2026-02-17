@@ -1,0 +1,21 @@
+{
+  "name": "Docker-VM-Runner Dev",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [2222, 6080],
+  "portsAttributes": {
+    "2222": { "label": "SSH to VM", "onAutoForward": "notify" },
+    "6080": { "label": "noVNC Console", "onAutoForward": "openBrowser" }
+  },
+  "postCreateCommand": "pip install -r requirements-dev.txt",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  }
+}

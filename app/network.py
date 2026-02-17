@@ -18,6 +18,12 @@ def _element_to_str(root: Element) -> str:
     return parseString(raw).documentElement.toprettyxml(indent="  ").strip()
 
 
+def _add_mtu(iface: Element, mtu: Optional[int]) -> None:
+    """Add MTU element to interface if non-default."""
+    if mtu is not None and mtu != 1500:
+        SubElement(iface, "mtu", size=str(mtu))
+
+
 def render_network_xml(
     config: NicConfig,
     ssh_port: Optional[int] = None,
@@ -25,6 +31,7 @@ def render_network_xml(
     boot_order: Optional[int] = None,
     rom_file: Optional[str] = None,
     port_forwards: Optional[List[PortForward]] = None,
+    ipv6_enabled: bool = False,
 ) -> Tuple[str, str]:
     """Render a libvirt interface definition based on the requested network mode."""
     mac = (mac_address or config.mac_address or random_mac()).lower()
@@ -37,7 +44,10 @@ def render_network_xml(
         SubElement(iface, "mac", address=mac)
         SubElement(iface, "backend", type="passt")
         SubElement(iface, "ip", family="ipv4", address="10.0.2.15", prefix="24")
+        if ipv6_enabled:
+            SubElement(iface, "ip", family="ipv6", address="fec0::2", prefix="64")
         SubElement(iface, "model", type=model)
+        _add_mtu(iface, config.mtu)
         if rom_file:
             SubElement(iface, "rom", file=rom_file)
         if ssh_port is not None:
@@ -58,6 +68,7 @@ def render_network_xml(
         if model == "virtio":
             SubElement(iface, "driver", name="vhost")
         SubElement(iface, "model", type=model)
+        _add_mtu(iface, config.mtu)
         if rom_file:
             SubElement(iface, "rom", file=rom_file)
         SubElement(iface, "source", bridge=config.bridge_name)
@@ -73,6 +84,7 @@ def render_network_xml(
         if model == "virtio":
             SubElement(iface, "driver", name="vhost")
         SubElement(iface, "model", type=model)
+        _add_mtu(iface, config.mtu)
         if rom_file:
             SubElement(iface, "rom", file=rom_file)
         SubElement(iface, "source", dev=config.direct_device, mode="bridge")

@@ -24,6 +24,7 @@ from app.constants import (
 )
 from app.exceptions import ManagerError
 from app.models import VMConfig
+from app.runtime import RuntimeInfo
 from app.services import ServiceManager
 from app.utils import (
     ensure_directory,
@@ -86,7 +87,7 @@ def list_distros(config_path: Optional[Path] = None, arch_filter: Optional[str] 
         info = distros[key]
         name = info.get("name", key)
         arch = info.get("arch", "x86_64")
-        user = info.get("user", "?")
+        user = info.get("user", "user")
         print(f"  {key:<{max_key}}  {name}  (arch={arch}, user={user})")
 
 
@@ -121,7 +122,7 @@ def _print_block(title: str, lines: List[str], colour: str = "\033[0;36m") -> No
     print(f"{dim}{'─' * width}{reset}", flush=True)
 
 
-def print_host_info(cfg: VMConfig) -> None:
+def print_host_info(cfg: VMConfig, runtime: Optional[RuntimeInfo] = None) -> None:
     """Print host system information block at startup."""
     from app.utils import get_available_disk_space, get_host_info
 
@@ -142,6 +143,11 @@ def print_host_info(cfg: VMConfig) -> None:
     kvm_status = "available" if kvm_available() else "NOT available (TCG fallback)"
     lines.append(f"KVM:     {kvm_status}")
     lines.append(f"Kernel:  {host.get('kernel', 'unknown')}")
+
+    if runtime is not None:
+        priv = "privileged" if runtime.privileged else "unprivileged"
+        rootless = ", rootless" if runtime.rootless else ""
+        lines.append(f"Runtime: {runtime.engine} ({priv}{rootless})")
 
     _print_block("Host", lines, colour="\033[0;90m")
 
@@ -281,9 +287,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     if args.dry_run:
+        from app.runtime import detect_runtime
+
+        runtime = detect_runtime()
         log("INFO", "=== Configuration ===")
         show_config(cfg)
         log("INFO", "=== Environment Checks ===")
+        priv = "privileged" if runtime.privileged else "unprivileged"
+        rootless = ", rootless" if runtime.rootless else ""
+        log("INFO", f"Runtime:     {runtime.engine} ({priv}{rootless})")
         # KVM check
         if kvm_available():
             log("SUCCESS", "KVM:         available (/dev/kvm)")
@@ -321,7 +333,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print_startup_banner(cfg)
         return 0
 
-    print_host_info(cfg)
+    from app.status import StatusBroadcaster
+
+    service_manager = ServiceManager(cfg)
+    status = StatusBroadcaster()
+
+    print_host_info(cfg, runtime=service_manager.runtime)
     print_vm_summary(cfg)
 
     has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
@@ -332,10 +349,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ensure_directory(STATE_DIR)
 
-    service_manager = ServiceManager(cfg)
+    status.update("Starting services...")
     service_manager.start()
 
-    vm_mgr = VMManager(cfg, service_manager)
+    vm_mgr = VMManager(cfg, service_manager, status=status)
     vm_mgr.connect()
     vm_started = False
     try:
