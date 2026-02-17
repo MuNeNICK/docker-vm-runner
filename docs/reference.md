@@ -64,7 +64,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `GUEST_NAME` | *(auto)* | Internal VM name, used for disk paths. Fallback: `GUEST_NAME` -> `HOSTNAME` -> distro key. Set explicitly when using host networking. |
-| `GUEST_PASSWORD` | *(random)* | Console password injected via cloud-init. Generated randomly if not set. |
+| `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
 | `PERSIST` | `0` (`1` when `/data` mounted) | Keep the work disk and libvirt domain after shutdown. Automatically enabled when a volume is mounted at `/data`. |
@@ -115,7 +115,7 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `REDFISH_ENABLE` | `0` | Start sushy-emulator for Redfish. |
 | `REDFISH_PORT` | `8443` | Redfish HTTPS port. |
 | `REDFISH_USERNAME` | `admin` | Redfish username. |
-| `REDFISH_PASSWORD` | *(random)* | Redfish password. Generated randomly if not set. |
+| `REDFISH_PASSWORD` | `password` | Redfish password. |
 | `REDFISH_SYSTEM_ID` | *(derived VM name)* | Redfish system identifier. Defaults to the resolved VM name (same as `GUEST_NAME` when set). |
 
 ### Advanced

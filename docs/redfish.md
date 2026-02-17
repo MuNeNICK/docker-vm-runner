@@ -27,12 +27,12 @@ Set `REDFISH_ENABLE=0` (default) or omit the variable entirely. The service and 
 ## Endpoint & Authentication
 
 - Base URL: `https://<host>:${REDFISH_PORT:-8443}`
-- Default credentials: `admin` / *(random — shown in startup banner, or set via `REDFISH_PASSWORD`)*
+- Default credentials: `admin` / `password`
 - Trust: self-signed certificate stored under `/var/lib/docker-vm-runner/certs` (persist it if needed).
 
 Example: list systems
 ```bash
-curl -k -u admin:$REDFISH_PASSWORD https://localhost:8443/redfish/v1/Systems
+curl -k -u admin:password https://localhost:8443/redfish/v1/Systems
 ```
 
 ## Common Workloads
@@ -41,25 +41,25 @@ curl -k -u admin:$REDFISH_PASSWORD https://localhost:8443/redfish/v1/Systems
 
 ```bash
 # Graceful shutdown
-curl -k -u admin:$REDFISH_PASSWORD \
+curl -k -u admin:password \
   -H "Content-Type: application/json" \
   -d '{"ResetType":"GracefulShutdown"}' \
   https://localhost:8443/redfish/v1/Systems/vm1/Actions/ComputerSystem.Reset
 
 # Force off
-curl -k -u admin:$REDFISH_PASSWORD \
+curl -k -u admin:password \
   -H "Content-Type: application/json" \
   -d '{"ResetType":"ForceOff"}' \
   https://localhost:8443/redfish/v1/Systems/vm1/Actions/ComputerSystem.Reset
 
 # Power on
-curl -k -u admin:$REDFISH_PASSWORD \
+curl -k -u admin:password \
   -H "Content-Type: application/json" \
   -d '{"ResetType":"On"}' \
   https://localhost:8443/redfish/v1/Systems/vm1/Actions/ComputerSystem.Reset
 
 # Reboot
-curl -k -u admin:$REDFISH_PASSWORD \
+curl -k -u admin:password \
   -H "Content-Type: application/json" \
   -d '{"ResetType":"GracefulRestart"}' \
   https://localhost:8443/redfish/v1/Systems/vm1/Actions/ComputerSystem.Reset
@@ -70,7 +70,7 @@ Use `ForceRestart` or `ForceOff` when the guest does not react to graceful comma
 ### Power State Query
 
 ```bash
-curl -k -u admin:$REDFISH_PASSWORD \
+curl -k -u admin:password \
   https://localhost:8443/redfish/v1/Systems/vm1 | jq '.PowerState'
 ```
 
@@ -79,7 +79,7 @@ curl -k -u admin:$REDFISH_PASSWORD \
 Change the next boot device (e.g., to network):
 
 ```bash
-curl -k -u admin:$REDFISH_PASSWORD \
+curl -k -u admin:password \
   -H "Content-Type: application/json" \
   -d '{"Boot":{"BootSourceOverrideEnabled":"Once","BootSourceOverrideTarget":"Pxe"}}' \
   https://localhost:8443/redfish/v1/Systems/vm1

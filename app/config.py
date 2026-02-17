@@ -32,7 +32,6 @@ from app.utils import (
     derive_vm_name,
     deterministic_mac,
     ensure_directory,
-    generate_password,
     get_env,
     get_env_bool,
     log,
@@ -209,12 +208,7 @@ def parse_env() -> VMConfig:
     cpu_model = get_env("CPU_MODEL", "host")
     extra_args = get_env("EXTRA_ARGS", "")
 
-    guest_password_env = get_env("GUEST_PASSWORD")
-    if guest_password_env is not None:
-        guest_password = guest_password_env
-    else:
-        guest_password = generate_password()
-        log("INFO", f"No GUEST_PASSWORD set; generated random password: {guest_password}")
+    guest_password = get_env("GUEST_PASSWORD", "password")
     ssh_port = parse_int_env("SSH_PORT", "2222", min_val=1, max_val=65535)
 
     vm_name = derive_vm_name(distro, iso_mode=iso_requested)
@@ -424,11 +418,7 @@ def parse_env() -> VMConfig:
     force_iso = get_env_bool("FORCE_ISO", False)
     ssh_pubkey = get_env("SSH_PUBKEY")
     redfish_user = get_env("REDFISH_USERNAME", "admin")
-    redfish_password_env = get_env("REDFISH_PASSWORD")
-    if redfish_password_env is not None:
-        redfish_password = redfish_password_env
-    else:
-        redfish_password = generate_password()
+    redfish_password = get_env("REDFISH_PASSWORD", "password")
     redfish_port = parse_int_env("REDFISH_PORT", "8443", min_val=1, max_val=65535)
     redfish_system_id = get_env("REDFISH_SYSTEM_ID", vm_name)
     redfish_enabled = get_env_bool("REDFISH_ENABLE", False)
