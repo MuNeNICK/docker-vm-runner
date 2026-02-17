@@ -1025,10 +1025,58 @@ class VMManager:
             log("WARN", f"Slirp fallback also failed: {exc}")
         return False
 
+    def _guest_exec(self, command: str, args: list) -> Optional[tuple]:
+        """Execute a command inside the guest via guest agent. Returns (exit_code, stdout) or None on failure."""
+        exec_payload = json.dumps(
+            {
+                "execute": "guest-exec",
+                "arguments": {"path": command, "arg": args, "capture-output": True},
+            }
+        )
+        try:
+            result = subprocess.run(
+                ["virsh", "-c", LIBVIRT_URI, "qemu-agent-command", self.cfg.vm_name, exec_payload],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                return None
+            pid = json.loads(result.stdout).get("return", {}).get("pid")
+            if pid is None:
+                return None
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+            return None
+
+        # Poll for completion
+        status_payload = json.dumps({"execute": "guest-exec-status", "arguments": {"pid": pid}})
+        poll_deadline = time.time() + 30
+        while time.time() < poll_deadline:
+            try:
+                status_result = subprocess.run(
+                    ["virsh", "-c", LIBVIRT_URI, "qemu-agent-command", self.cfg.vm_name, status_payload],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if status_result.returncode != 0:
+                    return None
+                ret = json.loads(status_result.stdout).get("return", {})
+                if ret.get("exited"):
+                    import base64
+
+                    stdout = base64.b64decode(ret.get("out-data", "")).decode("utf-8", errors="replace")
+                    return (ret.get("exitcode", -1), stdout)
+            except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+                return None
+            time.sleep(0.5)
+        return None
+
     def wait_for_guest_ready(self, timeout: float = 120.0, interval: float = 3.0) -> bool:
-        """Poll QEMU Guest Agent until the guest OS is responsive."""
+        """Poll QEMU Guest Agent until the guest OS is responsive, then wait for cloud-init if enabled."""
         log("INFO", "Waiting for guest agent to become ready...")
         deadline = time.time() + timeout
+        agent_ready = False
         while time.time() < deadline:
             try:
                 result = subprocess.run(
@@ -1038,15 +1086,50 @@ class VMManager:
                     timeout=5,
                 )
                 if result.returncode == 0:
-                    log("SUCCESS", "Guest agent is ready — VM is fully booted")
-                    return True
+                    log("SUCCESS", "Guest agent is ready")
+                    agent_ready = True
+                    break
             except subprocess.TimeoutExpired:
                 pass
             except Exception:
                 pass
             time.sleep(interval)
-        log("WARN", f"Guest agent did not respond within {int(timeout)}s (VM may still be booting)")
-        return False
+
+        if not agent_ready:
+            log("WARN", f"Guest agent did not respond within {int(timeout)}s (VM may still be booting)")
+            return False
+
+        if not self.cfg.cloud_init_enabled:
+            return True
+
+        # Phase 2: wait for cloud-init completion
+        ci_timeout = 300.0
+        ci_interval = 5.0
+        log("INFO", "Waiting for cloud-init to finish...")
+        ci_start = time.time()
+        ci_deadline = ci_start + ci_timeout
+        while time.time() < ci_deadline:
+            ret = self._guest_exec("cloud-init", ["status"])
+            if ret is None:
+                # cloud-init not installed or agent lost — skip
+                log("WARN", "Could not query cloud-init status (not installed?); skipping wait")
+                return True
+            exit_code, stdout = ret
+            stdout_lower = stdout.lower()
+            if "done" in stdout_lower:
+                elapsed = int(time.time() - ci_start)
+                log("SUCCESS", f"Cloud-init complete ({elapsed}s)")
+                return True
+            if "error" in stdout_lower:
+                elapsed = int(time.time() - ci_start)
+                log("WARN", f"Cloud-init finished with errors ({elapsed}s)")
+                return True
+            if "disabled" in stdout_lower:
+                log("INFO", "Cloud-init is disabled in the guest")
+                return True
+            time.sleep(ci_interval)
+        log("WARN", f"Cloud-init did not finish within {int(ci_timeout)}s (may still be running)")
+        return True
 
     def wait_until_stopped(self) -> None:
         if self.domain is None:
