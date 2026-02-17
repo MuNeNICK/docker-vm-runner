@@ -11,7 +11,7 @@ from app.utils import (
     derive_vm_name,
     detect_cloud_init_content_type,
     deterministic_mac,
-    generate_password,
+
     get_env,
     get_env_bool,
     hash_password,
@@ -212,24 +212,6 @@ class TestDetectCloudInitContentType:
     def test_unrecognized_defaults_to_cloud_config(self):
         assert detect_cloud_init_content_type("foo: bar") == "text/cloud-config"
 
-
-class TestGeneratePassword:
-    def test_default_length(self):
-        pw = generate_password()
-        assert len(pw) == 16
-
-    def test_custom_length(self):
-        pw = generate_password(32)
-        assert len(pw) == 32
-
-    def test_only_expected_characters(self):
-        alphabet = set("abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789")
-        pw = generate_password(100)
-        assert set(pw).issubset(alphabet)
-
-    def test_different_each_call(self):
-        passwords = {generate_password() for _ in range(10)}
-        assert len(passwords) == 10
 
 
 class TestHashPassword:
