@@ -11,7 +11,6 @@ from app.utils import (
     derive_vm_name,
     detect_cloud_init_content_type,
     deterministic_mac,
-
     get_env,
     get_env_bool,
     hash_password,
@@ -211,7 +210,6 @@ class TestDetectCloudInitContentType:
 
     def test_unrecognized_defaults_to_cloud_config(self):
         assert detect_cloud_init_content_type("foo: bar") == "text/cloud-config"
-
 
 
 class TestHashPassword:

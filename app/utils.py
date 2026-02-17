@@ -184,7 +184,6 @@ def random_mac() -> str:
     return ":".join(f"{octet:02x}" for octet in octets)
 
 
-
 def hash_password(password: str) -> str:
     """Generate a bcrypt hash for cloud-init."""
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
@@ -333,7 +332,9 @@ def detect_filesystem(path: Path) -> str:
     try:
         result = subprocess.run(
             ["stat", "-f", "-c", "%T", str(path)],
-            capture_output=True, text=True, check=True,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return result.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -354,6 +355,7 @@ def extract_compressed(source: Path, dest_dir: Path) -> Path:
 
     if suffix == ".gz":
         import gzip
+
         out = dest_dir / stem
         with gzip.open(source, "rb") as f_in, open(out, "wb") as f_out:
             while True:
@@ -365,6 +367,7 @@ def extract_compressed(source: Path, dest_dir: Path) -> Path:
 
     if suffix == ".xz":
         import lzma
+
         out = dest_dir / stem
         with lzma.open(source, "rb") as f_in, open(out, "wb") as f_out:
             while True:
@@ -376,6 +379,7 @@ def extract_compressed(source: Path, dest_dir: Path) -> Path:
 
     if suffix == ".bz2":
         import bz2
+
         out = dest_dir / stem
         with bz2.open(source, "rb") as f_in, open(out, "wb") as f_out:
             while True:
@@ -387,6 +391,7 @@ def extract_compressed(source: Path, dest_dir: Path) -> Path:
 
     if suffix == ".zip":
         import zipfile
+
         with zipfile.ZipFile(source, "r") as zf:
             names = zf.namelist()
             if not names:

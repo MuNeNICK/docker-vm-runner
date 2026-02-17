@@ -176,8 +176,10 @@ class VMManager:
             self.base_image.unlink()
 
         download_file_with_retry(
-            self.cfg.image_url, self.base_image,
-            label="Downloading base image", retries=self.cfg.download_retries,
+            self.cfg.image_url,
+            self.base_image,
+            label="Downloading base image",
+            retries=self.cfg.download_retries,
         )
         self._post_process_image(self.base_image)
 
@@ -290,7 +292,10 @@ class VMManager:
                 continue
             log("INFO", f"Creating extra disk {disk_path} ({disk_cfg.size})")
             create_cmd = [
-                "qemu-img", "create", "-f", self.cfg.image_format,
+                "qemu-img",
+                "create",
+                "-f",
+                self.cfg.image_format,
             ]
             if self.cfg.disk_preallocate:
                 create_cmd.extend(["-o", "preallocation=falloc"])
@@ -391,22 +396,16 @@ class VMManager:
                 return  # No firmware needed for legacy BIOS boot
             # UEFI or Secure Boot
             if not firmware_cfg or self.cfg.boot_mode not in firmware_cfg:
-                raise ManagerError(
-                    f"Firmware configuration for boot_mode='{self.cfg.boot_mode}' not found for {arch}."
-                )
+                raise ManagerError(f"Firmware configuration for boot_mode='{self.cfg.boot_mode}' not found for {arch}.")
             mode_cfg = firmware_cfg[self.cfg.boot_mode]
             loader_path = Path(mode_cfg["loader"])
             vars_template_path = Path(mode_cfg["vars_template"])
 
             if not loader_path.exists():
-                raise ManagerError(
-                    f"OVMF firmware not found at {loader_path}. "
-                    "Ensure the 'ovmf' package is installed."
-                )
+                raise ManagerError(f"OVMF firmware not found at {loader_path}. Ensure the 'ovmf' package is installed.")
             if not vars_template_path.exists():
                 raise ManagerError(
-                    f"OVMF variable template not found at {vars_template_path}. "
-                    "Ensure the 'ovmf' package is installed."
+                    f"OVMF variable template not found at {vars_template_path}. Ensure the 'ovmf' package is installed."
                 )
         elif firmware_cfg:
             # aarch64 and other arches with firmware (flat dict with loader/vars_template)
@@ -420,9 +419,7 @@ class VMManager:
             if not loader_path.exists():
                 raise ManagerError(f"Firmware loader not found at {loader_path} for arch {arch}.")
             if not vars_template_path.exists():
-                raise ManagerError(
-                    f"Firmware variable template not found at {vars_template_path} for arch {arch}."
-                )
+                raise ManagerError(f"Firmware variable template not found at {vars_template_path} for arch {arch}.")
         else:
             return  # No firmware for this arch
 
@@ -445,9 +442,12 @@ class VMManager:
 
         log("INFO", "Starting software TPM (swtpm)...")
         cmd = [
-            "swtpm", "socket",
-            "--tpmstate", f"dir={tpm_dir}",
-            "--ctrl", f"type=unixio,path={sock_path}",
+            "swtpm",
+            "socket",
+            "--tpmstate",
+            f"dir={tpm_dir}",
+            "--ctrl",
+            f"type=unixio,path={sock_path}",
             "--tpm2",
             "--daemon",
         ]
@@ -458,9 +458,7 @@ class VMManager:
                 stderr = proc.stderr.read().decode() if proc.stderr else ""
                 raise ManagerError(f"swtpm failed to start: {stderr}")
         except FileNotFoundError:
-            raise ManagerError(
-                "swtpm not found. Ensure swtpm and swtpm-tools are installed."
-            )
+            raise ManagerError("swtpm not found. Ensure swtpm and swtpm-tools are installed.")
         self._tpm_sock_path = sock_path
         log("SUCCESS", "Software TPM started")
 
@@ -759,7 +757,9 @@ class VMManager:
             try:
                 ss_result = subprocess.run(
                     ["blockdev", "--getss", blk_dev.path],
-                    capture_output=True, text=True, check=True,
+                    capture_output=True,
+                    text=True,
+                    check=True,
                 )
                 sector_size = ss_result.stdout.strip()
                 if sector_size and sector_size != "512":
@@ -930,8 +930,8 @@ class VMManager:
         try:
             # Get current XML and replace passt with slirp
             xml = self.domain.XMLDesc(0)
-            if "<backend type=\"passt\"/>" in xml:
-                xml = xml.replace("<backend type=\"passt\"/>", "")
+            if '<backend type="passt"/>' in xml:
+                xml = xml.replace('<backend type="passt"/>', "")
                 # Undefine old domain and re-define with modified XML
                 try:
                     if self._firmware_vars_path is not None:

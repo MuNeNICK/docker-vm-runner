@@ -71,7 +71,7 @@ class TestRenderDomainXml:
         assert "<name>test-xml-vm</name>" in xml
         assert '<memory unit="MiB">4096</memory>' in xml
         assert '<vcpu placement="static">2</vcpu>' in xml
-        assert 'machine="pc"' in xml
+        assert 'machine="q35"' in xml
         assert '<model fallback="allow">qemu64</model>' in xml
         assert "<acpi/>" in xml
         assert "<apic/>" in xml

@@ -86,6 +86,7 @@ def parse_env() -> VMConfig:
     disk_size_raw = get_env("DISK_SIZE", "20G") or "20G"
     if disk_size_raw.strip().lower() in ("max", "half"):
         from app.constants import VM_IMAGES_DIR
+
         avail = get_available_disk_space(VM_IMAGES_DIR if VM_IMAGES_DIR.exists() else Path("/"))
         if disk_size_raw.strip().lower() == "max":
             disk_bytes = int(avail * 0.9)  # Leave 10% headroom

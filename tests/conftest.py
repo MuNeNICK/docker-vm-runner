@@ -86,6 +86,7 @@ def default_vm_config() -> VMConfig:
         ipxe_rom_path=None,
         filesystems=[],
         port_forwards=[],
+        boot_mode="legacy",
     )
 
 
