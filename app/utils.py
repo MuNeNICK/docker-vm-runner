@@ -6,6 +6,7 @@ import hashlib
 import os
 import random
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -183,6 +184,12 @@ def random_mac() -> str:
     octets = [0x52, 0x54, 0x00]  # qemu prefix
     octets += [random.randint(0x00, 0x7F) for _ in range(3)]
     return ":".join(f"{octet:02x}" for octet in octets)
+
+
+def generate_password(length: int = 16) -> str:
+    """Generate a cryptographically secure random password."""
+    alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def hash_password(password: str) -> str:

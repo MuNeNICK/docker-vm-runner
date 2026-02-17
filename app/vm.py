@@ -17,6 +17,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
+from xml.etree.ElementTree import Element, SubElement, fromstring, register_namespace, tostring
 
 try:
     import yaml  # type: ignore
@@ -501,60 +502,94 @@ class VMManager:
             raise ManagerError("Failed to define libvirt domain")
         log("SUCCESS", f"Defined domain {self.cfg.vm_name}")
 
+    _QEMU_NS = "http://libvirt.org/schemas/domain/qemu/1.0"
+
     def _render_domain_xml(self) -> str:
-        qemu_ns = "xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'"
+        register_namespace("qemu", self._QEMU_NS)
+
         domain_type = "kvm" if self._kvm_available else "qemu"
         effective_model = self._effective_cpu_model
         host_cpu = self._kvm_available and effective_model.lower() in ("host", "host-passthrough")
         machine_type = self._arch_profile["machine"]
-
-        if host_cpu:
-            cpu_xml = "<cpu mode='host-passthrough'/>"
-        else:
-            cpu_xml = textwrap.dedent(
-                f"""
-                <cpu mode='custom' match='exact'>
-                  <model fallback='allow'>{effective_model}</model>
-                </cpu>
-                """
-            ).strip()
-
-        extra_cmds = ""
-        if self.cfg.extra_args:
-            extra_cmds = (
-                "<qemu:commandline>\n"
-                + "\n".join(
-                    f"  <qemu:arg value='{arg}'/>"
-                    for arg in self.cfg.extra_args.split()
-                )
-                + "\n</qemu:commandline>"
-            )
-
         boot_order_priority = {dev: idx + 1 for idx, dev in enumerate(self.cfg.boot_order)}
 
-        features = self._arch_profile.get("features", ())
-        features_inner = "\n".join(f"            <{feature}/>" for feature in features)
-        features_block = f"          <features>\n{features_inner}\n          </features>"
+        domain = Element("domain", type=domain_type)
 
-        loader_xml = ""
+        SubElement(domain, "name").text = self.cfg.vm_name
+        mem = SubElement(domain, "memory", unit="MiB")
+        mem.text = str(self.cfg.memory_mb)
+        vcpu = SubElement(domain, "vcpu", placement="static")
+        vcpu.text = str(self.cfg.cpus)
+
+        # <os>
+        os_el = SubElement(domain, "os")
+        os_type = SubElement(os_el, "type", arch=self.cfg.arch, machine=machine_type)
+        os_type.text = "hvm"
         if self._arch_profile.get("firmware"):
             if self._firmware_loader_path is None or self._firmware_vars_path is None:
                 raise ManagerError("Firmware assets not prepared for this architecture.")
-            loader_xml = textwrap.dedent(
-                f"""
-                <loader readonly='yes' secure='no' type='pflash'>{self._firmware_loader_path}</loader>
-                <nvram>{self._firmware_vars_path}</nvram>
-                """
-            ).strip()
-            loader_xml = textwrap.indent(loader_xml, "            ")
+            loader = SubElement(os_el, "loader", readonly="yes", secure="no", type="pflash")
+            loader.text = str(self._firmware_loader_path)
+            nvram = SubElement(os_el, "nvram")
+            nvram.text = str(self._firmware_vars_path)
 
+        # <features>
+        features = self._arch_profile.get("features", ())
+        if features:
+            features_el = SubElement(domain, "features")
+            for feature in features:
+                SubElement(features_el, feature)
+
+        # <memoryBacking> (required for virtiofs)
+        if any(fs.driver == "virtiofs" for fs in self.cfg.filesystems):
+            mb = SubElement(domain, "memoryBacking")
+            SubElement(mb, "source", type="memfd")
+            SubElement(mb, "access", mode="shared")
+
+        # <cpu>
+        if host_cpu:
+            SubElement(domain, "cpu", mode="host-passthrough")
+        else:
+            cpu_el = SubElement(domain, "cpu", mode="custom", match="exact")
+            model_el = SubElement(cpu_el, "model", fallback="allow")
+            model_el.text = effective_model
+
+        # <devices>
+        devices = SubElement(domain, "devices")
+
+        # Primary disk
+        disk = SubElement(devices, "disk", type="file", device="disk")
+        SubElement(disk, "driver", name="qemu", type=self.cfg.image_format, cache="none")
+        SubElement(disk, "source", file=str(self.work_image))
+        SubElement(disk, "target", dev="vda", bus="virtio")
+        hd_order = boot_order_priority.get("hd")
+        if hd_order is not None:
+            SubElement(disk, "boot", order=str(hd_order))
+
+        # Seed ISO (cloud-init)
+        if self.seed_iso:
+            seed_disk = SubElement(devices, "disk", type="file", device="cdrom")
+            SubElement(seed_disk, "driver", name="qemu", type="raw")
+            SubElement(seed_disk, "source", file=str(self.seed_iso))
+            SubElement(seed_disk, "target", dev="sda", bus="sata")
+            SubElement(seed_disk, "readonly")
+
+        # Boot ISO
+        if self.boot_iso:
+            boot_disk = SubElement(devices, "disk", type="file", device="cdrom")
+            SubElement(boot_disk, "driver", name="qemu", type="raw")
+            SubElement(boot_disk, "source", file=str(self.boot_iso))
+            SubElement(boot_disk, "target", dev="sdb", bus="sata")
+            SubElement(boot_disk, "readonly")
+            cdrom_order = boot_order_priority.get("cdrom")
+            if cdrom_order is not None:
+                SubElement(boot_disk, "boot", order=str(cdrom_order))
+
+        # Network interfaces
         network_order = boot_order_priority.get("network")
-        interfaces_xml: List[str] = []
         for idx, nic in enumerate(self.cfg.nics):
             nic_boot_order = network_order if nic.boot else None
-            rom_file = None
-            if self._ipxe_rom_path is not None:
-                rom_file = str(self._ipxe_rom_path)
+            rom_file = str(self._ipxe_rom_path) if self._ipxe_rom_path is not None else None
             ssh_forward = self.cfg.ssh_port if idx == 0 and nic.mode == "user" else None
             pf_list = self.cfg.port_forwards if idx == 0 and nic.mode == "user" else None
             mac_seed = self._network_macs.get(idx)
@@ -567,153 +602,63 @@ class VMManager:
                 port_forwards=pf_list,
             )
             self._network_macs[idx] = resolved_mac
-            interfaces_xml.append(textwrap.indent(nic_xml, "            "))
-        interfaces_block = ""
-        if interfaces_xml:
-            interfaces_block = "\n" + "\n".join(interfaces_xml)
+            devices.append(fromstring(nic_xml))
 
-        filesystems_xml: List[str] = []
+        # Filesystem shares
         for fs in self.cfg.filesystems:
             driver_type = "virtiofs" if fs.driver == "virtiofs" else "path"
-            fs_lines = [
-                f"<filesystem type='mount' accessmode='{fs.accessmode}'>",
-                f"  <driver type='{driver_type}'/>",
-                f"  <source dir='{fs.source}'/>",
-                f"  <target dir='{fs.target}'/>",
-            ]
+            fs_el = SubElement(devices, "filesystem", type="mount", accessmode=fs.accessmode)
+            SubElement(fs_el, "driver", type=driver_type)
             if fs.driver == "virtiofs":
-                fs_lines.insert(
-                    2,
-                    "  <binary path='/usr/lib/qemu/virtiofsd'/>",
-                )
+                SubElement(fs_el, "binary", path="/usr/lib/qemu/virtiofsd")
+            SubElement(fs_el, "source", dir=str(fs.source))
+            SubElement(fs_el, "target", dir=fs.target)
             if fs.readonly:
-                fs_lines.append("  <readonly/>")
-            fs_lines.append("</filesystem>")
-            filesystems_xml.append(textwrap.indent("\n".join(fs_lines), "            "))
-        filesystems_block = ""
-        if filesystems_xml:
-            filesystems_block = "\n" + "\n".join(filesystems_xml)
+                SubElement(fs_el, "readonly")
 
-        display_xml = ""
+        # Guest agent channel
+        channel_ga = SubElement(devices, "channel", type="unix")
+        SubElement(channel_ga, "target", type="virtio", name="org.qemu.guest_agent.0")
+
+        # Serial & console
+        serial = SubElement(devices, "serial", type="pty")
+        SubElement(serial, "target", port="0")
+        console = SubElement(devices, "console", type="pty")
+        SubElement(console, "target", type="virtio", port="0")
+
+        # Graphics / display
         graphics = self.cfg.graphics_type
         if graphics and graphics != "none":
-            keymap_attr = f" keymap='{self.cfg.vnc_keymap}'" if self.cfg.vnc_keymap else ""
+            gfx_attrs = {"type": graphics, "listen": "0.0.0.0"}
             if graphics == "vnc":
-                display_xml = (
-                    f"<graphics type='{graphics}' listen='0.0.0.0' "
-                    f"port='{self.cfg.vnc_port}' autoport='no'{keymap_attr}/>"
-                )
+                gfx_attrs["port"] = str(self.cfg.vnc_port)
+                gfx_attrs["autoport"] = "no"
             else:
-                display_xml = (
-                    f"<graphics type='{graphics}' listen='0.0.0.0' autoport='yes'{keymap_attr}/>"
-                )
-            display_xml += "\n" + textwrap.dedent("""\
-            <video>
-              <model type='virtio' heads='1' primary='yes'>
-                <resolution x='1920' y='1080'/>
-              </model>
-            </video>""")
-            display_xml += "\n" + textwrap.dedent("""\
-            <channel type='qemu-vdagent'>
-              <source>
-                <clipboard copypaste='yes'/>
-                <mouse mode='client'/>
-              </source>
-              <target type='virtio' name='com.redhat.spice.0'/>
-            </channel>""")
+                gfx_attrs["autoport"] = "yes"
+            if self.cfg.vnc_keymap:
+                gfx_attrs["keymap"] = self.cfg.vnc_keymap
+            SubElement(devices, "graphics", **gfx_attrs)
 
-        seed_iso_xml = ""
-        if self.seed_iso:
-            seed_iso_xml = textwrap.dedent(
-                f"""
-                <disk type='file' device='cdrom'>
-                  <driver name='qemu' type='raw'/>
-                  <source file='{self.seed_iso}'/>
-                  <target dev='sda' bus='sata'/>
-                  <readonly/>
-                </disk>
-                """
-            ).strip()
-            seed_iso_xml = textwrap.indent(seed_iso_xml, "            ")
+            video = SubElement(devices, "video")
+            vid_model = SubElement(video, "model", type="virtio", heads="1", primary="yes")
+            SubElement(vid_model, "resolution", x="1920", y="1080")
 
-        boot_iso_xml = ""
-        if self.boot_iso:
-            boot_order_attr = ""
-            order = boot_order_priority.get("cdrom")
-            if order is not None:
-                boot_order_attr = f"\n                  <boot order='{order}'/>"
-            boot_iso_xml = textwrap.dedent(
-                f"""
-                <disk type='file' device='cdrom'>
-                  <driver name='qemu' type='raw'/>
-                  <source file='{self.boot_iso}'/>
-                  <target dev='sdb' bus='sata'/>
-                  <readonly/>{boot_order_attr}
-                </disk>
-                """
-            ).strip()
-            boot_iso_xml = textwrap.indent(boot_iso_xml, "            ")
+            vdagent = SubElement(devices, "channel", type="qemu-vdagent")
+            vda_src = SubElement(vdagent, "source")
+            SubElement(vda_src, "clipboard", copypaste="yes")
+            SubElement(vda_src, "mouse", mode="client")
+            SubElement(vdagent, "target", type="virtio", name="com.redhat.spice.0")
 
-        memory_unit = "MiB"
-        disk_boot_attr = ""
-        order = boot_order_priority.get("hd")
-        if order is not None:
-            disk_boot_attr = f"\n              <boot order='{order}'/>"
+        # qemu:commandline for extra args
+        if self.cfg.extra_args:
+            qemu_cl = SubElement(domain, f"{{{self._QEMU_NS}}}commandline")
+            for arg in self.cfg.extra_args.split():
+                SubElement(qemu_cl, f"{{{self._QEMU_NS}}}arg", value=arg)
 
-        memory_backing_xml = ""
-        if any(fs.driver == "virtiofs" for fs in self.cfg.filesystems):
-            memory_backing_xml = textwrap.dedent(
-                """
-                <memoryBacking>
-                  <source type='memfd'/>
-                  <access mode='shared'/>
-                </memoryBacking>
-                """
-            ).strip()
+        from xml.dom.minidom import parseString
 
-        os_lines = [
-            f"            <type arch='{self.cfg.arch}' machine='{machine_type}'>hvm</type>",
-        ]
-        if loader_xml:
-            os_lines.append(loader_xml)
-        os_block = "\n".join(os_lines)
-
-        xml = f"""
-        <domain type='{domain_type}' {qemu_ns}>
-          <name>{self.cfg.vm_name}</name>
-          <memory unit='{memory_unit}'>{self.cfg.memory_mb}</memory>
-          <vcpu placement='static'>{self.cfg.cpus}</vcpu>
-          <os>
-{os_block}
-          </os>
-{features_block}
-          {memory_backing_xml}
-          {cpu_xml}
-          <devices>
-            <disk type='file' device='disk'>
-              <driver name='qemu' type='{self.cfg.image_format}' cache='none'/>
-              <source file='{self.work_image}'/>
-              <target dev='vda' bus='virtio'/>{disk_boot_attr}
-            </disk>
-            {seed_iso_xml}
-            {boot_iso_xml}
-{interfaces_block}
-{filesystems_block}
-            <channel type='unix'>
-              <target type='virtio' name='org.qemu.guest_agent.0'/>
-            </channel>
-            <serial type='pty'>
-              <target port='0'/>
-            </serial>
-            <console type='pty'>
-              <target type='virtio' port='0'/>
-            </console>
-            {display_xml}
-          </devices>
-          {extra_cmds}
-        </domain>
-        """
-        return textwrap.dedent(xml).strip()
+        raw = tostring(domain, encoding="unicode")
+        return parseString(raw).toprettyxml(indent="  ").split("\n", 1)[1].rstrip()
 
     def start(self) -> None:
         if self.domain is None:
