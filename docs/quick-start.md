@@ -13,8 +13,8 @@ docker run --rm -it \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
-- SSH: `ssh -p 2222 <user>@localhost` (user defaults to the image’s `login_user`).
-- Redfish (when enabled): `https://localhost:8443` (default credentials `admin` / `password`).
+- SSH: `ssh -p 2222 user@localhost` (default credentials are shown in the startup banner).
+- Redfish (when enabled): `https://localhost:8443` (credentials are shown in the startup banner).
 
 To launch a different distro or adjust resources:
 

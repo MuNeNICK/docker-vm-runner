@@ -4,18 +4,17 @@ This document covers security considerations for production deployments of Docke
 
 ## Default Credentials
 
-Docker-VM-Runner ships with intentionally weak defaults for quick local testing. **You must change them before exposing services to any network.**
+When `GUEST_PASSWORD` or `REDFISH_PASSWORD` are not explicitly set, Docker-VM-Runner generates a random password at each startup and displays it in the startup banner.
 
 | Service        | Default User | Default Password | Override Variable      |
 |----------------|-------------|------------------|------------------------|
-| Guest VM       | (per distro) | `password`       | `GUEST_PASSWORD`       |
-| Redfish API    | `admin`     | `password`        | `REDFISH_USERNAME` / `REDFISH_PASSWORD` |
+| Guest VM       | `user`      | (random)         | `GUEST_PASSWORD`       |
+| Redfish API    | `admin`     | (random)         | `REDFISH_USERNAME` / `REDFISH_PASSWORD` |
 
 **Recommendations:**
 
-- Set `GUEST_PASSWORD` to a strong value or, better, disable password auth entirely by providing an SSH public key via `SSH_PUBKEY`.
-- Set `REDFISH_USERNAME` and `REDFISH_PASSWORD` to non-default values when `REDFISH_ENABLE=1`.
-- For production VMs, disable password-based SSH in your cloud-init user-data and rely on key-based authentication.
+- For production VMs, disable password-based SSH in your cloud-init user-data and rely on key-based authentication via `SSH_PUBKEY`.
+- Set `REDFISH_USERNAME` and `REDFISH_PASSWORD` to fixed values when `REDFISH_ENABLE=1` and you need stable credentials.
 
 ## TLS Certificates
 

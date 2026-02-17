@@ -11,7 +11,7 @@ docker run --rm -it \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
-SSH into the guest with `ssh -p 2222 ubuntu@localhost`.
+SSH into the guest with `ssh -p 2222 user@localhost`.
 
 Three modes are available:
 

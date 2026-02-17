@@ -17,19 +17,19 @@ def distro_config_file(tmp_path):
             "ubuntu-2404": {
                 "name": "Ubuntu 24.04",
                 "url": "https://example.com/ubuntu.qcow2",
-                "user": "ubuntu",
+                "user": "user",
                 "format": "qcow2",
             },
             "debian-12": {
                 "name": "Debian 12",
                 "url": "https://example.com/debian.qcow2",
-                "user": "debian",
+                "user": "user",
                 "format": "qcow2",
             },
             "alma-aarch64": {
                 "name": "AlmaLinux 9 (aarch64)",
                 "url": "https://example.com/alma-aarch64.qcow2",
-                "user": "almalinux",
+                "user": "user",
                 "format": "qcow2",
                 "arch": "aarch64",
             },
@@ -52,7 +52,7 @@ class TestLoadDistroConfig:
     def test_valid_distro(self, distro_config_file):
         info = load_distro_config("ubuntu-2404", distro_config_file)
         assert info["name"] == "Ubuntu 24.04"
-        assert info["user"] == "ubuntu"
+        assert info["user"] == "user"
         assert "url" in info
 
     def test_unknown_distro_raises(self, distro_config_file):

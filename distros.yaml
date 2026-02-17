@@ -6,35 +6,35 @@ distributions:
   ubuntu-2404:
     name: "Ubuntu 24.04 LTS (Noble)"
     url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
-    user: ubuntu
+    user: user
     format: qcow2
     arch: x86_64
 
   ubuntu-2404-arm64:
     name: "Ubuntu 24.04 LTS (Noble) ARM64"
     url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img"
-    user: ubuntu
+    user: user
     format: qcow2
     arch: aarch64
     
   ubuntu-2204:
     name: "Ubuntu 22.04 LTS (Jammy)"
     url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
-    user: ubuntu
+    user: user
     format: qcow2
     arch: x86_64
 
   ubuntu-2204-arm64:
     name: "Ubuntu 22.04 LTS (Jammy) ARM64"
     url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img"
-    user: ubuntu
+    user: user
     format: qcow2
     arch: aarch64
     
   ubuntu-2004:
     name: "Ubuntu 20.04 LTS (Focal)"
     url: "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
-    user: ubuntu
+    user: user
     format: qcow2
     arch: x86_64
 
@@ -42,21 +42,21 @@ distributions:
   debian-12:
     name: "Debian 12 (Bookworm)"
     url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
-    user: debian
+    user: user
     format: qcow2
     arch: x86_64
 
   debian-12-arm64:
     name: "Debian 12 (Bookworm) ARM64"
     url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2"
-    user: debian
+    user: user
     format: qcow2
     arch: aarch64
     
   debian-11:
     name: "Debian 11 (Bullseye)"
     url: "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
-    user: debian
+    user: user
     format: qcow2
     arch: x86_64
 
@@ -64,7 +64,7 @@ distributions:
   centos-stream-9:
     name: "CentOS Stream 9"
     url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
-    user: centos
+    user: user
     format: qcow2
     arch: x86_64
 
@@ -72,14 +72,14 @@ distributions:
   fedora-41:
     name: "Fedora 41"
     url: "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-41-1.4.x86_64.qcow2"
-    user: fedora
+    user: user
     format: qcow2
     arch: x86_64
 
   fedora-41-arm64:
     name: "Fedora 41 ARM64"
     url: "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Cloud/aarch64/images/Fedora-Cloud-Base-Generic-41-1.4.aarch64.qcow2"
-    user: fedora
+    user: user
     format: qcow2
     arch: aarch64
 
@@ -87,7 +87,7 @@ distributions:
   opensuse-leap-155:
     name: "openSUSE Leap 15.5"
     url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
-    user: opensuse
+    user: user
     format: qcow2
     arch: x86_64
 
@@ -95,21 +95,21 @@ distributions:
   rocky-linux-9:
     name: "Rocky Linux 9"
     url: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
-    user: rocky
+    user: user
     format: qcow2
     arch: x86_64
 
   rocky-linux-9-arm64:
     name: "Rocky Linux 9 ARM64"
     url: "https://download.rockylinux.org/pub/rocky/9/images/aarch64/Rocky-9-GenericCloud-Base.latest.aarch64.qcow2"
-    user: rocky
+    user: user
     format: qcow2
     arch: aarch64
     
   rocky-linux-8:
     name: "Rocky Linux 8"
     url: "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
-    user: rocky
+    user: user
     format: qcow2
     arch: x86_64
 
@@ -117,21 +117,21 @@ distributions:
   almalinux-9:
     name: "AlmaLinux 9"
     url: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
-    user: almalinux
+    user: user
     format: qcow2
     arch: x86_64
 
   almalinux-9-arm64:
     name: "AlmaLinux 9 ARM64"
     url: "https://repo.almalinux.org/almalinux/9/cloud/aarch64/images/AlmaLinux-9-GenericCloud-latest.aarch64.qcow2"
-    user: almalinux
+    user: user
     format: qcow2
     arch: aarch64
     
   almalinux-8:
     name: "AlmaLinux 8"
     url: "https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
-    user: almalinux
+    user: user
     format: qcow2
     arch: x86_64
 
@@ -139,7 +139,7 @@ distributions:
   archlinux:
     name: "Arch Linux"
     url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2"
-    user: arch
+    user: user
     format: qcow2
     arch: x86_64
 

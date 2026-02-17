@@ -48,7 +48,7 @@ def default_vm_config() -> VMConfig:
     return VMConfig(
         distro="ubuntu-2404",
         image_url="https://example.com/ubuntu.qcow2",
-        login_user="ubuntu",
+        login_user="user",
         image_format="qcow2",
         distro_name="Ubuntu 24.04",
         memory_mb=4096,
