@@ -101,6 +101,62 @@ The command captures stdout/stderr and propagates the guest exit code. Cloud ima
 
 If the guest agent is not yet running, `guest-exec` prints a clear error message and exits with code 127.
 
+## UEFI & Secure Boot
+
+Boot with UEFI firmware (OVMF):
+
+```bash
+docker run --rm -it \
+  --device /dev/kvm:/dev/kvm \
+  -p 2222:2222 \
+  -e BOOT_MODE=uefi \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Secure Boot with TPM (TPM is auto-enabled):
+
+```bash
+docker run --rm -it \
+  --device /dev/kvm:/dev/kvm \
+  -p 2222:2222 \
+  -e BOOT_MODE=secure \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+## Windows Guests
+
+For Windows guests, enable Hyper-V enlightenments and use UEFI:
+
+```bash
+docker run --rm -it \
+  --device /dev/kvm:/dev/kvm \
+  -p 6080:6080 \
+  -e BOOT_ISO=https://example.com/windows.iso \
+  -e BOOT_MODE=uefi \
+  -e HYPERV=1 \
+  -e DISK_SIZE=64G \
+  -e MEMORY=8192 \
+  -e CPUS=4 \
+  -e GRAPHICS=novnc \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+## Multiple Disks & Resource Auto-Sizing
+
+Attach extra disks and let the VM use all available host resources:
+
+```bash
+docker run --rm -it \
+  --device /dev/kvm:/dev/kvm \
+  -p 2222:2222 \
+  -e MEMORY=max \
+  -e CPUS=half \
+  -e DISK_SIZE=50G \
+  -e DISK2_SIZE=100G \
+  -e DISK3_SIZE=20G \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
 ## Custom distros.yaml
 
 Override the built-in mapping by bind-mounting your own file:

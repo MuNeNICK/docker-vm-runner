@@ -15,6 +15,7 @@ from app.constants import (
     _DATA_DIR,
     ARCH_ALIASES,
     DEFAULT_CONFIG_PATH,
+    DISK_CONTROLLERS,
     IPXE_DEFAULT_ROMS,
     MAC_ADDRESS_RE,
     SUPPORTED_ARCHES,
@@ -23,6 +24,8 @@ from app.constants import (
 )
 from app.exceptions import ManagerError
 from app.models import (
+    BlockDevice,
+    DiskConfig,
     FilesystemConfig,
     NicConfig,
     PortForward,
@@ -32,10 +35,12 @@ from app.utils import (
     derive_vm_name,
     deterministic_mac,
     ensure_directory,
+    get_available_disk_space,
     get_env,
     get_env_bool,
     log,
     parse_int_env,
+    parse_resource_size,
     validate_disk_size,
 )
 
@@ -63,9 +68,34 @@ def parse_env() -> VMConfig:
     distro = get_env("DISTRO", "ubuntu-2404")
     distro_info = load_distro_config(distro)
 
-    memory_mb = parse_int_env("MEMORY", "4096")
-    cpus = parse_int_env("CPUS", "2")
-    disk_size = validate_disk_size(get_env("DISK_SIZE", "20G") or "20G")
+    # --- Resource sizing with max/half support ---
+    memory_raw = get_env("MEMORY", "4096") or "4096"
+    if memory_raw.strip().lower() in ("max", "half"):
+        memory_mb = parse_resource_size(memory_raw, "memory")
+        log("INFO", f"MEMORY={memory_raw} resolved to {memory_mb} MiB")
+    else:
+        memory_mb = parse_int_env("MEMORY", "4096")
+
+    cpus_raw = get_env("CPUS", "2") or "2"
+    if cpus_raw.strip().lower() in ("max", "half"):
+        cpus = parse_resource_size(cpus_raw, "cpus")
+        log("INFO", f"CPUS={cpus_raw} resolved to {cpus}")
+    else:
+        cpus = parse_int_env("CPUS", "2")
+
+    disk_size_raw = get_env("DISK_SIZE", "20G") or "20G"
+    if disk_size_raw.strip().lower() in ("max", "half"):
+        from app.constants import VM_IMAGES_DIR
+        avail = get_available_disk_space(VM_IMAGES_DIR if VM_IMAGES_DIR.exists() else Path("/"))
+        if disk_size_raw.strip().lower() == "max":
+            disk_bytes = int(avail * 0.9)  # Leave 10% headroom
+        else:
+            disk_bytes = avail // 2
+        disk_gb = max(1, disk_bytes // (1024**3))
+        disk_size = f"{disk_gb}G"
+        log("INFO", f"DISK_SIZE={disk_size_raw} resolved to {disk_size}")
+    else:
+        disk_size = validate_disk_size(disk_size_raw)
 
     display = (get_env("GRAPHICS") or "none").strip().lower() or "none"
     novnc_enabled = display == "novnc"
@@ -455,6 +485,83 @@ def parse_env() -> VMConfig:
     for pf in port_forwards:
         active_ports[f"PORT_FWD({pf.host_port}:{pf.guest_port})"] = pf.host_port
 
+    # --- BOOT_MODE ---
+    boot_mode_raw = (get_env("BOOT_MODE") or "uefi").strip().lower()
+    if boot_mode_raw not in ("legacy", "uefi", "secure"):
+        raise ManagerError(f"Invalid BOOT_MODE '{boot_mode_raw}'. Supported: legacy, uefi, secure")
+    boot_mode = boot_mode_raw
+
+    # --- TPM ---
+    tpm_raw = get_env("TPM")
+    if tpm_raw is not None:
+        tpm_enabled = tpm_raw.strip().lower() in TRUTHY
+    else:
+        tpm_enabled = boot_mode == "secure"
+
+    # --- MACHINE type ---
+    machine_raw = get_env("MACHINE")
+    if machine_raw is not None:
+        machine_type = machine_raw.strip().lower()
+        if machine_type not in ("q35", "pc"):
+            raise ManagerError(f"Invalid MACHINE '{machine_raw}'. Supported: q35, pc")
+    else:
+        machine_type = SUPPORTED_ARCHES.get(arch, {}).get("machine", "q35")
+
+    # --- DISK_TYPE (disk controller) ---
+    disk_controller_raw = (get_env("DISK_TYPE") or "virtio").strip().lower()
+    if disk_controller_raw not in DISK_CONTROLLERS:
+        supported = ", ".join(sorted(DISK_CONTROLLERS.keys()))
+        raise ManagerError(f"Invalid DISK_TYPE '{disk_controller_raw}'. Supported: {supported}")
+    disk_controller = disk_controller_raw
+
+    # --- Multiple disks (DISK2_SIZE through DISK6_SIZE) ---
+    extra_disks: List[DiskConfig] = []
+    for disk_idx in range(2, 7):
+        disk_env = get_env(f"DISK{disk_idx}_SIZE")
+        if disk_env is not None and disk_env.strip():
+            validated = validate_disk_size(disk_env.strip())
+            extra_disks.append(DiskConfig(size=validated, index=disk_idx, controller=disk_controller))
+
+    # --- Block device passthrough (DEVICE, DEVICE2 through DEVICE6) ---
+    block_devices: List[BlockDevice] = []
+    for dev_idx in range(1, 7):
+        if dev_idx == 1:
+            dev_env = get_env("DEVICE")
+        else:
+            dev_env = get_env(f"DEVICE{dev_idx}")
+        if dev_env is not None and dev_env.strip():
+            dev_path = dev_env.strip()
+            if not Path(dev_path).exists():
+                label = "DEVICE" if dev_idx == 1 else f"DEVICE{dev_idx}"
+                raise ManagerError(f"{label}={dev_path} does not exist")
+            if not Path(dev_path).is_block_device():
+                label = "DEVICE" if dev_idx == 1 else f"DEVICE{dev_idx}"
+                raise ManagerError(f"{label}={dev_path} is not a block device")
+            block_devices.append(BlockDevice(path=dev_path, index=dev_idx))
+
+    # --- Disk preallocation ---
+    disk_preallocate = get_env_bool("ALLOCATE", False)
+
+    # --- GPU ---
+    gpu_raw = (get_env("GPU") or "off").strip().lower()
+    if gpu_raw not in ("off", "intel"):
+        raise ManagerError(f"Invalid GPU '{gpu_raw}'. Supported: off, intel")
+    gpu_passthrough = gpu_raw
+
+    # --- USB controller ---
+    usb_controller = get_env_bool("USB", True)
+
+    # --- Hyper-V enlightenments ---
+    hyperv_enabled = get_env_bool("HYPERV", False)
+
+    # --- Performance features ---
+    balloon_enabled = get_env_bool("BALLOON", True)
+    rng_enabled = get_env_bool("RNG", True)
+    io_thread = get_env_bool("IO_THREAD", True)
+
+    # --- Download retries ---
+    download_retries = parse_int_env("DOWNLOAD_RETRIES", "3", min_val=1, max_val=10)
+
     seen: Dict[int, str] = {}
     for label, port in active_ports.items():
         if port in seen:
@@ -504,4 +611,18 @@ def parse_env() -> VMConfig:
         ipxe_rom_path=ipxe_rom_path,
         filesystems=filesystems,
         port_forwards=port_forwards,
+        boot_mode=boot_mode,
+        tpm_enabled=tpm_enabled,
+        machine_type=machine_type,
+        extra_disks=extra_disks,
+        block_devices=block_devices,
+        disk_controller=disk_controller,
+        disk_preallocate=disk_preallocate,
+        io_thread=io_thread,
+        balloon_enabled=balloon_enabled,
+        rng_enabled=rng_enabled,
+        usb_controller=usb_controller,
+        hyperv_enabled=hyperv_enabled,
+        gpu_passthrough=gpu_passthrough,
+        download_retries=download_retries,
     )

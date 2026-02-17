@@ -33,9 +33,19 @@ MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
 SUPPORTED_ARCHES = {
     "x86_64": {
-        "machine": "pc",
+        "machine": "q35",
         "features": ("acpi", "apic", "pae"),
         "tcg_fallback": "qemu64",
+        "firmware": {
+            "uefi": {
+                "loader": Path("/usr/share/OVMF/OVMF_CODE_4M.fd"),
+                "vars_template": Path("/usr/share/OVMF/OVMF_VARS_4M.fd"),
+            },
+            "secure": {
+                "loader": Path("/usr/share/OVMF/OVMF_CODE_4M.ms.fd"),
+                "vars_template": Path("/usr/share/OVMF/OVMF_VARS_4M.ms.fd"),
+            },
+        },
     },
     "aarch64": {
         "machine": "virt",
@@ -102,3 +112,14 @@ DISK_SIZE_RE = re.compile(r"^\d+[KMGTkmgt]?$")
 _CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
 
 _SENSITIVE_FIELDS = {"password", "redfish_password"}
+
+DISK_CONTROLLERS = {
+    "virtio": {"bus": "virtio", "dev_prefix": "vd"},
+    "scsi": {"bus": "scsi", "dev_prefix": "sd"},
+    "nvme": {"bus": "nvme", "dev_prefix": "nvme"},
+    "ide": {"bus": "ide", "dev_prefix": "hd"},
+    "usb": {"bus": "usb", "dev_prefix": "sd"},
+}
+
+CONVERTIBLE_FORMATS = {"vhd", "vhdx", "vmdk", "vdi"}
+COMPRESSED_EXTENSIONS = {".gz", ".xz", ".7z", ".zip", ".bz2", ".rar"}

@@ -27,8 +27,10 @@ from app.models import VMConfig
 from app.services import ServiceManager
 from app.utils import (
     ensure_directory,
+    get_available_disk_space,
     get_env,
     get_env_bool,
+    get_host_info,
     has_controlling_tty,
     kvm_available,
     log,
@@ -113,7 +115,12 @@ def print_startup_banner(cfg: VMConfig) -> None:
     """Print a visually distinct access-info banner after VM starts."""
     lines: List[str] = []
     lines.append(f"  VM: {cfg.vm_name} ({cfg.distro_name})")
-    lines.append(f"  Arch: {cfg.arch} | Memory: {cfg.memory_mb} MiB | CPUs: {cfg.cpus}")
+    boot_info = f"  Arch: {cfg.arch} | Memory: {cfg.memory_mb} MiB | CPUs: {cfg.cpus}"
+    if cfg.boot_mode != "legacy":
+        boot_info += f" | Boot: {cfg.boot_mode.upper()}"
+    if cfg.tpm_enabled:
+        boot_info += " | TPM"
+    lines.append(boot_info)
 
     has_user_nic = any(nic.mode == "user" for nic in cfg.nics)
     ports_to_publish: List[str] = []
@@ -242,6 +249,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         print_startup_banner(cfg)
         return 0
 
+    # Display host system info
+    host_info = get_host_info()
+    log("INFO", f"Host: {host_info.get('cpu_model', 'unknown')} ({host_info.get('cpu_count', '?')} cores)")
+    mem_total_gb = host_info.get("mem_total", 0) / (1024**3)
+    mem_avail_gb = host_info.get("mem_available", 0) / (1024**3)
+    log("INFO", f"Memory: {mem_avail_gb:.1f}G available / {mem_total_gb:.1f}G total")
+    disk_avail = get_available_disk_space(IMAGES_DIR if IMAGES_DIR.exists() else Path("/"))
+    disk_avail_gb = disk_avail / (1024**3)
+    log("INFO", f"Storage: {disk_avail_gb:.1f}G available at {IMAGES_DIR}")
+    if kvm_available():
+        log("INFO", f"KVM: available | Kernel: {host_info.get('kernel', 'unknown')}")
+    else:
+        log("WARN", f"KVM: NOT available (TCG mode) | Kernel: {host_info.get('kernel', 'unknown')}")
+
     # Compact startup log
     iso_boot = bool(cfg.boot_iso_path or cfg.boot_iso_url)
     if iso_boot:
@@ -266,6 +287,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             mode = "ro" if fs.readonly else "rw"
             mount = sanitize_mount_target(fs.target)
             log("INFO", f"Filesystem #{idx}: {fs.source} -> /mnt/{mount} ({fs.driver}, {mode})")
+    if cfg.boot_mode != "legacy":
+        log("INFO", f"Boot mode: {cfg.boot_mode}")
+    if cfg.tpm_enabled:
+        log("INFO", "TPM: enabled")
+    if cfg.extra_disks:
+        for ed in cfg.extra_disks:
+            log("INFO", f"Extra disk {ed.index}: {ed.size}")
+    if cfg.block_devices:
+        for bd in cfg.block_devices:
+            log("INFO", f"Block device {bd.index}: {bd.path}")
+    if cfg.disk_controller != "virtio":
+        log("INFO", f"Disk controller: {cfg.disk_controller}")
+    if cfg.hyperv_enabled:
+        log("INFO", "Hyper-V enlightenments: enabled")
+    if cfg.gpu_passthrough != "off":
+        log("INFO", f"GPU passthrough: {cfg.gpu_passthrough}")
     log("INFO", f"Boot order: {', '.join(cfg.boot_order)}")
 
     ensure_directory(STATE_DIR)

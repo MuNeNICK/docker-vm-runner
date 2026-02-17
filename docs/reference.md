@@ -19,6 +19,23 @@ docker run --rm -it --device /dev/kvm:/dev/kvm \
 docker run --rm -it --device /dev/kvm:/dev/kvm \
   -v ./share:/share -e FILESYSTEM_SOURCE=/share -e FILESYSTEM_DRIVER=9p ...
 
+# UEFI boot
+docker run --rm -it --device /dev/kvm:/dev/kvm \
+  -e BOOT_MODE=uefi ...
+
+# Secure Boot + TPM
+docker run --rm -it --device /dev/kvm:/dev/kvm \
+  -e BOOT_MODE=secure ...
+
+# Use all available resources with multiple disks
+docker run --rm -it --device /dev/kvm:/dev/kvm \
+  -e MEMORY=max -e CPUS=half -e DISK2_SIZE=50G ...
+
+# Windows with Hyper-V enlightenments
+docker run --rm -it --device /dev/kvm:/dev/kvm -p 6080:6080 \
+  -e BOOT_ISO=/path/to/windows.iso -e BOOT_MODE=uefi -e HYPERV=1 \
+  -e DISK_SIZE=64G -e MEMORY=8192 -e GRAPHICS=novnc ...
+
 # List available distributions
 docker run --rm ghcr.io/munenick/docker-vm-runner:latest --list-distros
 ```
@@ -45,10 +62,15 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DISTRO` | `ubuntu-2404` | Distribution key from `distros.yaml`. |
-| `MEMORY` | `4096` | Memory in MiB. |
-| `CPUS` | `2` | Number of vCPUs. |
-| `DISK_SIZE` | `20G` | Working disk size; resized on first boot. |
-| `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. |
+| `MEMORY` | `4096` | Memory in MiB. Accepts `max` (all available minus 512 MiB reserve) or `half`. |
+| `CPUS` | `2` | Number of vCPUs. Accepts `max` (all host CPUs) or `half`. |
+| `DISK_SIZE` | `20G` | Working disk size; resized on first boot. Accepts `max` (90% of available space) or `half`. |
+| `DISK2_SIZE` … `DISK6_SIZE` | *(unset)* | Create additional disks attached to the VM. Same format as `DISK_SIZE`. |
+| `DEVICE` | *(unset)* | Pass through a host block device (e.g. `/dev/sdb`) directly to the VM. |
+| `DEVICE2` … `DEVICE6` | *(unset)* | Additional block device passthrough paths. |
+| `DISK_TYPE` | `virtio` | Disk bus controller: `virtio`, `scsi`, `nvme`, `ide`, or `usb`. |
+| `ALLOCATE` | `0` | Set `1` to preallocate disk space with `fallocate` (better I/O, uses more space upfront). |
+| `BASE_IMAGE` | *(auto downloaded)* | Override base QCOW2/RAW image path. Use `blank` to create a fresh disk. Compressed images (`.gz`, `.xz`, `.7z`, `.zip`, `.bz2`) are auto-extracted. Foreign formats (`.vhd`, `.vhdx`, `.vmdk`, `.vdi`) are auto-converted to qcow2. |
 | `BLANK_DISK` | `0` | Set `1` to create a blank disk sized by `DISK_SIZE`. |
 | `BOOT_ISO` | *(unset)* | Attach an ISO as CD-ROM. Accepts a local path or an HTTP(S) URL (URLs are auto-detected and downloaded). When an ISO is detected, `cdrom` is auto-added to `BOOT_ORDER` and cloud-init is auto-disabled (override with `CLOUD_INIT=1`). A blank work disk is also created by default unless `BASE_IMAGE` or `BLANK_DISK` is explicitly set. Automatically skipped on subsequent boots when a prior installation is detected on a persistent disk (override with `FORCE_ISO=1`). |
 | `BOOT_ISO_URL` | *(unset)* | Explicit URL form (same as setting `BOOT_ISO` to a URL). |
@@ -58,6 +80,26 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | `ARCH` | `x86_64` | Guest architecture. Accepts `x86_64` (alias `amd64`) or `aarch64` (alias `arm64`). Defaults to the distribution's declared `arch` or `x86_64`. |
 | `CPU_MODEL` | `host` | CPU model (`host`, `host-passthrough`, named models). |
 | `EXTRA_ARGS` | *(blank)* | Additional QEMU CLI arguments (space-delimited). |
+| `DOWNLOAD_RETRIES` | `3` | Number of download retry attempts (with backoff) for base images and ISOs. |
+
+### Boot & Firmware
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BOOT_MODE` | `uefi` | Boot firmware mode: `uefi` (OVMF, default), `legacy` (BIOS), or `secure` (UEFI + Secure Boot). Secure mode auto-enables TPM. |
+| `TPM` | *(auto)* | Enable software TPM emulation (`1`/`0`). Auto-enabled when `BOOT_MODE=secure`. |
+| `MACHINE` | `q35` | Machine type for x86_64: `q35` (recommended) or `pc`. Other architectures use their default. |
+
+### Performance & Devices
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `IO_THREAD` | `1` | Enable IOThread for disk I/O (improves disk performance on virtio). |
+| `BALLOON` | `1` | Enable virtio memory balloon device. |
+| `RNG` | `1` | Enable virtio-rng device (provides entropy from `/dev/urandom`). |
+| `USB` | `1` | Enable USB controller (qemu-xhci) and USB tablet input device. |
+| `HYPERV` | `0` | Enable Hyper-V enlightenments for Windows guests (relaxed, vapic, spinlocks, stimer, etc.). |
+| `GPU` | `off` | GPU passthrough: `off` or `intel` (Intel iGPU via rendernode). |
 
 ### Console & Access
 

@@ -24,6 +24,8 @@ except ImportError as exc:  # pragma: no cover
 from app.constants import (
     _CONTAINER_ID_RE,
     _LOG_VERBOSE,
+    COMPRESSED_EXTENSIONS,
+    CONVERTIBLE_FORMATS,
     DISK_SIZE_RE,
     TRUTHY,
 )
@@ -250,3 +252,223 @@ def run(cmd: List[str], check: bool = True, **kwargs) -> subprocess.CompletedPro
     log("DEBUG", f"Running: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=check, text=True, **kwargs)
     return result
+
+
+def download_file_with_retry(url: str, destination: Path, label: str = "Downloading", retries: int = 3) -> None:
+    """Download a file with retry logic."""
+    delays = [5, 10, 20]
+    for attempt in range(1, retries + 1):
+        try:
+            download_file(url, destination, label=label)
+            return
+        except ManagerError:
+            if attempt >= retries:
+                raise
+            delay = delays[min(attempt - 1, len(delays) - 1)]
+            log("WARN", f"Download failed (attempt {attempt}/{retries}), retrying in {delay}s...")
+            time.sleep(delay)
+
+
+def get_host_info() -> dict:
+    """Return host system information."""
+    info: dict = {}
+    # CPU model
+    try:
+        with open("/proc/cpuinfo") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    info["cpu_model"] = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        info["cpu_model"] = "unknown"
+
+    info["cpu_count"] = os.cpu_count() or 1
+
+    # Memory
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    info["mem_total"] = int(line.split()[1]) * 1024  # KB to bytes
+                elif line.startswith("MemAvailable:"):
+                    info["mem_available"] = int(line.split()[1]) * 1024
+    except OSError:
+        info["mem_total"] = 0
+        info["mem_available"] = 0
+
+    # Kernel
+    try:
+        info["kernel"] = os.uname().release
+    except AttributeError:
+        info["kernel"] = "unknown"
+
+    return info
+
+
+def get_available_disk_space(path: Path) -> int:
+    """Return available disk space in bytes at the given path."""
+    try:
+        stat = os.statvfs(str(path))
+        return stat.f_bavail * stat.f_frsize
+    except OSError:
+        return 0
+
+
+def get_available_memory() -> int:
+    """Return available memory in bytes."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return 0
+
+
+def get_cpu_count() -> int:
+    """Return number of host CPUs."""
+    return os.cpu_count() or 1
+
+
+def detect_filesystem(path: Path) -> str:
+    """Detect filesystem type at the given path."""
+    try:
+        result = subprocess.run(
+            ["stat", "-f", "-c", "%T", str(path)],
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+def convert_disk_image(source: Path, dest: Path, target_format: str = "qcow2") -> None:
+    """Convert VHD/VMDK/VDI/VHDX to qcow2 using qemu-img convert."""
+    log("INFO", f"Converting {source.name} to {target_format}...")
+    run(["qemu-img", "convert", "-p", "-O", target_format, str(source), str(dest)])
+    log("SUCCESS", f"Converted to {dest}")
+
+
+def extract_compressed(source: Path, dest_dir: Path) -> Path:
+    """Extract .gz/.xz/.7z/.zip/.bz2 files. Returns path to extracted file."""
+    suffix = source.suffix.lower()
+    stem = source.stem
+
+    if suffix == ".gz":
+        import gzip
+        out = dest_dir / stem
+        with gzip.open(source, "rb") as f_in, open(out, "wb") as f_out:
+            while True:
+                chunk = f_in.read(1024 * 256)
+                if not chunk:
+                    break
+                f_out.write(chunk)
+        return out
+
+    if suffix == ".xz":
+        import lzma
+        out = dest_dir / stem
+        with lzma.open(source, "rb") as f_in, open(out, "wb") as f_out:
+            while True:
+                chunk = f_in.read(1024 * 256)
+                if not chunk:
+                    break
+                f_out.write(chunk)
+        return out
+
+    if suffix == ".bz2":
+        import bz2
+        out = dest_dir / stem
+        with bz2.open(source, "rb") as f_in, open(out, "wb") as f_out:
+            while True:
+                chunk = f_in.read(1024 * 256)
+                if not chunk:
+                    break
+                f_out.write(chunk)
+        return out
+
+    if suffix == ".zip":
+        import zipfile
+        with zipfile.ZipFile(source, "r") as zf:
+            names = zf.namelist()
+            if not names:
+                raise ManagerError(f"Empty zip archive: {source}")
+            # Extract the largest file (likely the disk image)
+            largest = max(names, key=lambda n: zf.getinfo(n).file_size)
+            zf.extract(largest, dest_dir)
+            return dest_dir / largest
+
+    if suffix == ".7z":
+        run(["7z", "x", "-y", f"-o{dest_dir}", str(source)])
+        # Find extracted files
+        extracted = [f for f in dest_dir.iterdir() if f != source and f.is_file()]
+        if not extracted:
+            raise ManagerError(f"No files extracted from {source}")
+        return max(extracted, key=lambda f: f.stat().st_size)
+
+    if suffix == ".rar":
+        run(["7z", "x", "-y", f"-o{dest_dir}", str(source)])
+        extracted = [f for f in dest_dir.iterdir() if f != source and f.is_file()]
+        if not extracted:
+            raise ManagerError(f"No files extracted from {source}")
+        return max(extracted, key=lambda f: f.stat().st_size)
+
+    raise ManagerError(f"Unsupported compressed format: {suffix}")
+
+
+def check_filesystem_compatibility(path: Path) -> None:
+    """Warn about BTRFS COW, OverlayFS, FUSE, ecryptfs issues."""
+    fs_type = detect_filesystem(path)
+    fs_lower = fs_type.lower()
+
+    if "btrfs" in fs_lower:
+        log("WARN", f"Storage is on BTRFS ({path}). Consider disabling COW with 'chattr +C' on the directory")
+    elif "overlay" in fs_lower:
+        log("WARN", f"Storage is on OverlayFS ({path}). Disk I/O performance may be reduced")
+    elif "fuse" in fs_lower:
+        log("WARN", f"Storage is on a FUSE filesystem ({path}). Performance may be reduced")
+    elif "ecryptfs" in fs_lower:
+        log("WARN", f"Storage is on ecryptfs ({path}). Encrypted filesystems may impact VM disk performance")
+
+
+def check_disk_space(path: Path, required_bytes: int) -> None:
+    """Warn if insufficient disk space."""
+    available = get_available_disk_space(path)
+    if available == 0:
+        return
+    if available < required_bytes:
+        avail_gb = available / (1024**3)
+        req_gb = required_bytes / (1024**3)
+        log("ERROR", f"Insufficient disk space: {avail_gb:.1f}G available, {req_gb:.1f}G required at {path}")
+    elif available < required_bytes * 2:
+        avail_gb = available / (1024**3)
+        req_gb = required_bytes / (1024**3)
+        log("WARN", f"Low disk space: {avail_gb:.1f}G available for {req_gb:.1f}G disk at {path}")
+
+
+def parse_resource_size(raw: str, resource_type: str) -> int:
+    """Parse 'max', 'half', or integer for MEMORY/CPUS/DISK_SIZE.
+
+    resource_type: 'memory' (returns MiB), 'cpus' (returns count), 'disk' (returns bytes)
+    """
+    value = raw.strip().lower()
+    if value == "max":
+        if resource_type == "memory":
+            mem = get_available_memory()
+            # Reserve 512 MiB for the host
+            return max(512, (mem // (1024 * 1024)) - 512)
+        elif resource_type == "cpus":
+            return get_cpu_count()
+        elif resource_type == "disk":
+            return 0  # handled at call site with path info
+    elif value == "half":
+        if resource_type == "memory":
+            mem = get_available_memory()
+            return max(512, mem // (1024 * 1024) // 2)
+        elif resource_type == "cpus":
+            return max(1, get_cpu_count() // 2)
+        elif resource_type == "disk":
+            return 0  # handled at call site with path info
+    # Fall through to integer parsing
+    raise ManagerError(f"Invalid {resource_type} value '{raw}'. Use an integer, 'max', or 'half'")

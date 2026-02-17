@@ -32,6 +32,12 @@ For persistence, GUI, ISO installs, and compose workflows see the [documentation
 - Run commands inside the guest with `docker exec <container> guest-exec "command"` — no SSH required.
 - Bind-mount host directories into the guest via virtiofs or 9p for easy file sharing.
 - Optional noVNC web console with TLS, local ISO/blank disk workflows, and docker-compose support.
+- UEFI and Secure Boot support (OVMF) with software TPM emulation.
+- Multiple disk support (up to 6 disks), block device passthrough, and multiple disk controllers (virtio, scsi, nvme, ide, usb).
+- Auto-sizing resources with `MEMORY=max`, `CPUS=half`, `DISK_SIZE=max`.
+- Hyper-V enlightenments for optimal Windows guest performance.
+- Compressed image auto-extraction (.gz, .xz, .7z, .zip) and foreign format conversion (VHD, VMDK, VDI to qcow2).
+- Host system info display at startup with filesystem compatibility warnings.
 
 ## Documentation
 

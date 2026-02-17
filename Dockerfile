@@ -64,6 +64,7 @@ RUN apt-get update \
         dbus \
         dnsmasq-base \
         dmidecode \
+        e2fsprogs \
         genisoimage \
         iproute2 \
         iptables \
@@ -75,6 +76,8 @@ RUN apt-get update \
         libvirt-daemon-driver-qemu \
         libvirt-daemon-system \
         openssl \
+        ovmf \
+        p7zip-full \
         passt \
         python3 \
         python3-bcrypt \
@@ -92,7 +95,10 @@ RUN apt-get update \
         qemu-system-s390x \
         qemu-system-riscv \
         qemu-utils \
+        swtpm \
+        swtpm-tools \
         tini \
+        xz-utils \
     && rm -rf /usr/lib/python3/dist-packages/setuptools \
               /usr/lib/python3/dist-packages/pkg_resources \
     && rm -f /usr/bin/qemu-system-x86_64 \

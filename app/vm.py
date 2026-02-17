@@ -32,6 +32,9 @@ except ImportError as exc:  # pragma: no cover
 from app.constants import (
     BASE_IMAGES_DIR,
     BOOT_ISO_CACHE_DIR,
+    COMPRESSED_EXTENSIONS,
+    CONVERTIBLE_FORMATS,
+    DISK_CONTROLLERS,
     IMAGES_DIR,
     INSTALLED_MARKER_NAME,
     LIBVIRT_URI,
@@ -43,9 +46,14 @@ from app.exceptions import ManagerError
 from app.models import VMConfig
 from app.network import render_network_xml
 from app.utils import (
+    check_disk_space,
+    check_filesystem_compatibility,
+    convert_disk_image,
     detect_cloud_init_content_type,
     download_file,
+    download_file_with_retry,
     ensure_directory,
+    extract_compressed,
     get_env_bool,
     hash_password,
     kvm_available,
@@ -92,6 +100,7 @@ class VMManager:
         self._boot_iso_cache_path: Optional[Path] = None
         if self.cfg.ipxe_enabled and self.cfg.ipxe_rom_path:
             self._ipxe_rom_path = Path(self.cfg.ipxe_rom_path)
+        self._tpm_process: Optional[subprocess.Popen] = None
 
     def connect(self) -> None:
         self.conn = libvirt.open(LIBVIRT_URI)
@@ -144,6 +153,7 @@ class VMManager:
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
         self._extract_qemu_binary()
         self._prepare_firmware()
+        self._start_tpm()
         self._generate_cloud_init()
         self._define_domain()
 
@@ -152,6 +162,7 @@ class VMManager:
             if not self.base_image.exists():
                 raise ManagerError(f"Base image not found: {self.base_image}")
             log("INFO", f"Using external base image: {self.base_image}")
+            self._post_process_image(self.base_image)
             return
         if self.base_image.exists() and self.base_image.stat().st_size > 100 * 1024 * 1024:
             log("INFO", f"Using cached image: {self.base_image}")
@@ -164,9 +175,49 @@ class VMManager:
             )
             self.base_image.unlink()
 
-        download_file(self.cfg.image_url, self.base_image, label="Downloading base image")
+        download_file_with_retry(
+            self.cfg.image_url, self.base_image,
+            label="Downloading base image", retries=self.cfg.download_retries,
+        )
+        self._post_process_image(self.base_image)
+
+    def _post_process_image(self, image_path: Path) -> None:
+        """Handle compressed extraction and disk format conversion after download."""
+        # Compressed image auto-extraction
+        suffix = image_path.suffix.lower()
+        if suffix in COMPRESSED_EXTENSIONS:
+            log("INFO", f"Extracting compressed image ({suffix})...")
+            extracted = extract_compressed(image_path, image_path.parent)
+            # Replace the compressed file with the extracted one
+            if extracted != image_path:
+                image_path.unlink(missing_ok=True)
+                extracted.rename(image_path)
+            log("SUCCESS", "Image extracted")
+
+        # Disk format conversion (check the actual file or inner extension)
+        # Re-check suffix after extraction (the inner extension may differ)
+        inner_suffix = image_path.stem.rsplit(".", 1)[-1].lower() if "." in image_path.stem else ""
+        if inner_suffix in CONVERTIBLE_FORMATS or image_path.suffix.lstrip(".").lower() in CONVERTIBLE_FORMATS:
+            converted = image_path.with_suffix(".qcow2")
+            if converted == image_path:
+                converted = image_path.with_name(image_path.stem + ".converted.qcow2")
+            convert_disk_image(image_path, converted)
+            image_path.unlink(missing_ok=True)
+            converted.rename(image_path)
+            self.cfg.image_format = "qcow2"
 
     def _prepare_work_image(self) -> None:
+        # Filesystem compatibility check
+        check_filesystem_compatibility(self.vm_dir)
+
+        # Disk space check
+        if self.cfg.disk_size and self.cfg.disk_size != "0":
+            suffix = self.cfg.disk_size[-1].upper() if self.cfg.disk_size[-1].isalpha() else ""
+            num = int(self.cfg.disk_size[:-1]) if suffix else int(self.cfg.disk_size)
+            multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(suffix, 1)
+            required_bytes = num * multiplier
+            check_disk_space(self.vm_dir, required_bytes)
+
         self._disk_reused = False
         if self.cfg.persist and self.work_image.exists():
             size = self.work_image.stat().st_size
@@ -184,10 +235,10 @@ class VMManager:
                         current_vsize = json.loads(info.stdout).get("virtual-size", 0)
                         requested = self.cfg.disk_size
                         # Parse requested size to bytes for comparison
-                        suffix = requested[-1].upper() if requested[-1].isalpha() else ""
-                        num = int(requested[:-1]) if suffix else int(requested)
-                        multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(suffix, 1)
-                        requested_bytes = num * multiplier
+                        req_suffix = requested[-1].upper() if requested[-1].isalpha() else ""
+                        req_num = int(requested[:-1]) if req_suffix else int(requested)
+                        req_mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(req_suffix, 1)
+                        requested_bytes = req_num * req_mult
                         if requested_bytes > current_vsize:
                             log("INFO", f"Expanding disk from {current_vsize // (1024**3)}G to {requested}...")
                             run(["qemu-img", "resize", str(self.work_image), requested])
@@ -203,16 +254,16 @@ class VMManager:
         if not self._disk_reused:
             if self.cfg.blank_work_disk:
                 log("INFO", f"Creating blank disk {self.work_image} ({self.cfg.disk_size})")
-                run(
-                    [
-                        "qemu-img",
-                        "create",
-                        "-f",
-                        self.cfg.image_format,
-                        str(self.work_image),
-                        self.cfg.disk_size,
-                    ]
-                )
+                create_cmd = [
+                    "qemu-img",
+                    "create",
+                    "-f",
+                    self.cfg.image_format,
+                ]
+                if self.cfg.disk_preallocate:
+                    create_cmd.extend(["-o", "preallocation=falloc"])
+                create_cmd.extend([str(self.work_image), self.cfg.disk_size])
+                run(create_cmd)
             else:
                 log("INFO", f"Creating working disk {self.work_image}")
                 if self.base_image.suffix.lower() == ".iso":
@@ -226,6 +277,25 @@ class VMManager:
                     run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
         else:
             log("INFO", f"Persistent disk retained at {self.work_image}")
+
+        # Prepare extra disks (DISK2-6)
+        self._prepare_extra_disks()
+
+    def _prepare_extra_disks(self) -> None:
+        """Create extra disk images for DISK2_SIZE through DISK6_SIZE."""
+        for disk_cfg in self.cfg.extra_disks:
+            disk_path = self.vm_dir / f"disk{disk_cfg.index}.{self.cfg.image_format}"
+            if disk_path.exists() and self.cfg.persist:
+                log("INFO", f"Reusing extra disk {disk_path}")
+                continue
+            log("INFO", f"Creating extra disk {disk_path} ({disk_cfg.size})")
+            create_cmd = [
+                "qemu-img", "create", "-f", self.cfg.image_format,
+            ]
+            if self.cfg.disk_preallocate:
+                create_cmd.extend(["-o", "preallocation=falloc"])
+            create_cmd.extend([str(disk_path), disk_cfg.size])
+            run(create_cmd)
 
     def _prepare_boot_iso(self) -> None:
         if self.boot_iso:
@@ -312,23 +382,49 @@ class VMManager:
         log("SUCCESS", "AAVMF firmware extracted successfully.")
 
     def _prepare_firmware(self) -> None:
+        arch = self.cfg.arch
         firmware_cfg = self._arch_profile.get("firmware")
-        if not firmware_cfg:
-            return
 
-        loader_path = Path(firmware_cfg["loader"])
-        vars_template_path = Path(firmware_cfg["vars_template"])
+        # x86_64 firmware depends on boot_mode
+        if arch == "x86_64":
+            if self.cfg.boot_mode == "legacy":
+                return  # No firmware needed for legacy BIOS boot
+            # UEFI or Secure Boot
+            if not firmware_cfg or self.cfg.boot_mode not in firmware_cfg:
+                raise ManagerError(
+                    f"Firmware configuration for boot_mode='{self.cfg.boot_mode}' not found for {arch}."
+                )
+            mode_cfg = firmware_cfg[self.cfg.boot_mode]
+            loader_path = Path(mode_cfg["loader"])
+            vars_template_path = Path(mode_cfg["vars_template"])
 
-        # Extract AAVMF from .deb on demand if firmware files are missing
-        if not loader_path.exists() or not vars_template_path.exists():
-            self._extract_aavmf_deb()
+            if not loader_path.exists():
+                raise ManagerError(
+                    f"OVMF firmware not found at {loader_path}. "
+                    "Ensure the 'ovmf' package is installed."
+                )
+            if not vars_template_path.exists():
+                raise ManagerError(
+                    f"OVMF variable template not found at {vars_template_path}. "
+                    "Ensure the 'ovmf' package is installed."
+                )
+        elif firmware_cfg:
+            # aarch64 and other arches with firmware (flat dict with loader/vars_template)
+            loader_path = Path(firmware_cfg["loader"])
+            vars_template_path = Path(firmware_cfg["vars_template"])
 
-        if not loader_path.exists():
-            raise ManagerError(f"Firmware loader not found at {loader_path} for arch {self.cfg.arch}.")
-        if not vars_template_path.exists():
-            raise ManagerError(
-                f"Firmware variable template not found at {vars_template_path} for arch {self.cfg.arch}."
-            )
+            # Extract AAVMF from .deb on demand if firmware files are missing
+            if not loader_path.exists() or not vars_template_path.exists():
+                self._extract_aavmf_deb()
+
+            if not loader_path.exists():
+                raise ManagerError(f"Firmware loader not found at {loader_path} for arch {arch}.")
+            if not vars_template_path.exists():
+                raise ManagerError(
+                    f"Firmware variable template not found at {vars_template_path} for arch {arch}."
+                )
+        else:
+            return  # No firmware for this arch
 
         firmware_dir = STATE_DIR / "firmware"
         ensure_directory(firmware_dir)
@@ -338,6 +434,35 @@ class VMManager:
 
         self._firmware_loader_path = loader_path
         self._firmware_vars_path = vars_destination
+
+    def _start_tpm(self) -> None:
+        """Start swtpm software TPM emulator if TPM is enabled."""
+        if not self.cfg.tpm_enabled:
+            return
+        tpm_dir = STATE_DIR / "tpm" / self.cfg.vm_name
+        ensure_directory(tpm_dir)
+        sock_path = tpm_dir / "swtpm-sock"
+
+        log("INFO", "Starting software TPM (swtpm)...")
+        cmd = [
+            "swtpm", "socket",
+            "--tpmstate", f"dir={tpm_dir}",
+            "--ctrl", f"type=unixio,path={sock_path}",
+            "--tpm2",
+            "--daemon",
+        ]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc.wait(timeout=5)
+            if proc.returncode != 0:
+                stderr = proc.stderr.read().decode() if proc.stderr else ""
+                raise ManagerError(f"swtpm failed to start: {stderr}")
+        except FileNotFoundError:
+            raise ManagerError(
+                "swtpm not found. Ensure swtpm and swtpm-tools are installed."
+            )
+        self._tpm_sock_path = sock_path
+        log("SUCCESS", "Software TPM started")
 
     def _generate_cloud_init(self) -> None:
         if not self.cfg.cloud_init_enabled:
@@ -503,7 +628,11 @@ class VMManager:
         domain_type = "kvm" if self._kvm_available else "qemu"
         effective_model = self._effective_cpu_model
         host_cpu = self._kvm_available and effective_model.lower() in ("host", "host-passthrough")
-        machine_type = self._arch_profile["machine"]
+        # Use cfg.machine_type for x86_64, otherwise arch profile default
+        if self.cfg.arch == "x86_64":
+            machine_type = self.cfg.machine_type
+        else:
+            machine_type = self._arch_profile["machine"]
         boot_order_priority = {dev: idx + 1 for idx, dev in enumerate(self.cfg.boot_order)}
 
         domain = Element("domain", type=domain_type)
@@ -514,24 +643,54 @@ class VMManager:
         vcpu = SubElement(domain, "vcpu", placement="static")
         vcpu.text = str(self.cfg.cpus)
 
+        # <iothreads>
+        if self.cfg.io_thread:
+            SubElement(domain, "iothreads").text = "1"
+
         # <os>
         os_el = SubElement(domain, "os")
         os_type = SubElement(os_el, "type", arch=self.cfg.arch, machine=machine_type)
         os_type.text = "hvm"
-        if self._arch_profile.get("firmware"):
+
+        # Firmware handling
+        need_firmware = False
+        if self.cfg.arch == "x86_64" and self.cfg.boot_mode != "legacy":
+            need_firmware = True
+        elif self.cfg.arch != "x86_64" and self._arch_profile.get("firmware"):
+            need_firmware = True
+
+        if need_firmware:
             if self._firmware_loader_path is None or self._firmware_vars_path is None:
                 raise ManagerError("Firmware assets not prepared for this architecture.")
-            loader = SubElement(os_el, "loader", readonly="yes", secure="no", type="pflash")
+            secure_val = "yes" if self.cfg.boot_mode == "secure" else "no"
+            loader = SubElement(os_el, "loader", readonly="yes", secure=secure_val, type="pflash")
             loader.text = str(self._firmware_loader_path)
             nvram = SubElement(os_el, "nvram")
             nvram.text = str(self._firmware_vars_path)
 
         # <features>
-        features = self._arch_profile.get("features", ())
-        if features:
+        arch_features = self._arch_profile.get("features", ())
+        if arch_features or self.cfg.hyperv_enabled:
             features_el = SubElement(domain, "features")
-            for feature in features:
+            for feature in arch_features:
                 SubElement(features_el, feature)
+
+            # Hyper-V enlightenments
+            if self.cfg.hyperv_enabled:
+                hyperv = SubElement(features_el, "hyperv", mode="passthrough")
+                SubElement(hyperv, "relaxed", state="on")
+                SubElement(hyperv, "vapic", state="on")
+                SubElement(hyperv, "spinlocks", state="on", retries="8191")
+                SubElement(hyperv, "vpindex", state="on")
+                SubElement(hyperv, "runtime", state="on")
+                SubElement(hyperv, "synic", state="on")
+                SubElement(hyperv, "stimer", state="on")
+                SubElement(hyperv, "frequencies", state="on")
+
+        # <clock> for Hyper-V
+        if self.cfg.hyperv_enabled:
+            clock = SubElement(domain, "clock", offset="localtime")
+            SubElement(clock, "timer", name="hypervclock", present="yes")
 
         # <memoryBacking> (required for virtiofs)
         if any(fs.driver == "virtiofs" for fs in self.cfg.filesystems):
@@ -550,14 +709,63 @@ class VMManager:
         # <devices>
         devices = SubElement(domain, "devices")
 
+        # Disk controller info
+        ctrl_info = DISK_CONTROLLERS.get(self.cfg.disk_controller, DISK_CONTROLLERS["virtio"])
+        disk_bus = ctrl_info["bus"]
+        dev_prefix = ctrl_info["dev_prefix"]
+
+        # SCSI controller (needed for scsi bus)
+        if self.cfg.disk_controller == "scsi":
+            SubElement(devices, "controller", type="scsi", model="virtio-scsi-pci")
+
         # Primary disk
+        disk_driver_attrs = {"name": "qemu", "type": self.cfg.image_format, "cache": "none"}
+        if self.cfg.io_thread and disk_bus == "virtio":
+            disk_driver_attrs["iothread"] = "1"
+
         disk = SubElement(devices, "disk", type="file", device="disk")
-        SubElement(disk, "driver", name="qemu", type=self.cfg.image_format, cache="none")
+        SubElement(disk, "driver", **disk_driver_attrs)
         SubElement(disk, "source", file=str(self.work_image))
-        SubElement(disk, "target", dev="vda", bus="virtio")
+        primary_dev = f"{dev_prefix}a"
+        SubElement(disk, "target", dev=primary_dev, bus=disk_bus)
         hd_order = boot_order_priority.get("hd")
         if hd_order is not None:
             SubElement(disk, "boot", order=str(hd_order))
+
+        # Extra disks (DISK2-6)
+        for disk_cfg in self.cfg.extra_disks:
+            extra_disk_path = self.vm_dir / f"disk{disk_cfg.index}.{self.cfg.image_format}"
+            extra_disk = SubElement(devices, "disk", type="file", device="disk")
+            extra_driver_attrs = {"name": "qemu", "type": self.cfg.image_format, "cache": "none"}
+            if self.cfg.io_thread and disk_bus == "virtio":
+                extra_driver_attrs["iothread"] = "1"
+            SubElement(extra_disk, "driver", **extra_driver_attrs)
+            SubElement(extra_disk, "source", file=str(extra_disk_path))
+            # dev names: vdb, vdc, ... or sdb, sdc, ... etc.
+            dev_letter = chr(ord("a") + disk_cfg.index - 1)
+            SubElement(extra_disk, "target", dev=f"{dev_prefix}{dev_letter}", bus=disk_bus)
+
+        # Block device passthrough
+        for blk_dev in self.cfg.block_devices:
+            blk = SubElement(devices, "disk", type="block", device="disk")
+            blk_driver_attrs = {"name": "qemu", "type": "raw", "cache": "none"}
+            SubElement(blk, "driver", **blk_driver_attrs)
+            SubElement(blk, "source", dev=blk_dev.path)
+            # Assign device names after existing disks
+            dev_offset = len(self.cfg.extra_disks) + blk_dev.index
+            dev_letter = chr(ord("a") + dev_offset)
+            SubElement(blk, "target", dev=f"{dev_prefix}{dev_letter}", bus=disk_bus)
+            # Detect sector size
+            try:
+                ss_result = subprocess.run(
+                    ["blockdev", "--getss", blk_dev.path],
+                    capture_output=True, text=True, check=True,
+                )
+                sector_size = ss_result.stdout.strip()
+                if sector_size and sector_size != "512":
+                    SubElement(blk, "blockio", logical_block_size=sector_size, physical_block_size=sector_size)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass
 
         # Seed ISO (cloud-init)
         if self.seed_iso:
@@ -609,6 +817,25 @@ class VMManager:
             if fs.readonly:
                 SubElement(fs_el, "readonly")
 
+        # USB controller + tablet
+        if self.cfg.usb_controller:
+            SubElement(devices, "controller", type="usb", model="qemu-xhci")
+            SubElement(devices, "input", type="tablet", bus="usb")
+
+        # TPM device
+        if self.cfg.tpm_enabled:
+            tpm_el = SubElement(devices, "tpm", model="tpm-crb")
+            SubElement(tpm_el, "backend", type="emulator", version="2.0")
+
+        # Memory balloon
+        if self.cfg.balloon_enabled:
+            SubElement(devices, "memballoon", model="virtio")
+
+        # RNG (random number generator)
+        if self.cfg.rng_enabled:
+            rng = SubElement(devices, "rng", model="virtio")
+            SubElement(rng, "backend", model="random").text = "/dev/urandom"
+
         # Guest agent channel
         channel_ga = SubElement(devices, "channel", type="unix")
         SubElement(channel_ga, "target", type="virtio", name="org.qemu.guest_agent.0")
@@ -632,9 +859,14 @@ class VMManager:
                 gfx_attrs["keymap"] = self.cfg.vnc_keymap
             SubElement(devices, "graphics", **gfx_attrs)
 
-            video = SubElement(devices, "video")
-            vid_model = SubElement(video, "model", type="virtio", heads="1", primary="yes")
-            SubElement(vid_model, "resolution", x="1920", y="1080")
+            # GPU passthrough (Intel iGPU)
+            if self.cfg.gpu_passthrough == "intel":
+                video = SubElement(devices, "video")
+                SubElement(video, "model", type="virtio", heads="1", primary="yes")
+            else:
+                video = SubElement(devices, "video")
+                vid_model = SubElement(video, "model", type="virtio", heads="1", primary="yes")
+                SubElement(vid_model, "resolution", x="1920", y="1080")
 
             vdagent = SubElement(devices, "channel", type="qemu-vdagent")
             vda_src = SubElement(vdagent, "source")
@@ -642,10 +874,19 @@ class VMManager:
             SubElement(vda_src, "mouse", mode="client")
             SubElement(vdagent, "target", type="virtio", name="com.redhat.spice.0")
 
-        # qemu:commandline for extra args
+        # qemu:commandline for extra args and GPU passthrough
+        qemu_args = []
         if self.cfg.extra_args:
+            qemu_args.extend(self.cfg.extra_args.split())
+        if self.cfg.gpu_passthrough == "intel":
+            render_node = Path("/dev/dri/renderD128")
+            if render_node.exists():
+                qemu_args.extend(["-display", "egl-headless"])
+                qemu_args.extend(["-device", f"virtio-vga-gl,rendernode={render_node}"])
+
+        if qemu_args:
             qemu_cl = SubElement(domain, f"{{{self._QEMU_NS}}}commandline")
-            for arg in self.cfg.extra_args.split():
+            for arg in qemu_args:
                 SubElement(qemu_cl, f"{{{self._QEMU_NS}}}arg", value=arg)
 
         from xml.dom.minidom import parseString
@@ -668,10 +909,45 @@ class VMManager:
                         f"libvirt could not access host cgroups: {message}\n"
                         "Run the container with --cgroupns=host to fix this."
                     ) from exc
+                # Network fallback: if passt fails, try slirp
+                if "passt" in message.lower() or "backend" in message.lower():
+                    log("WARN", f"Network backend failed: {message}")
+                    log("INFO", "Attempting fallback to slirp network backend...")
+                    if self._try_network_fallback():
+                        log("SUCCESS", f"Domain {self.cfg.vm_name} started (with slirp fallback)")
+                        if self.cfg.novnc_enabled:
+                            self.service_manager.start_novnc()
+                        return
                 raise ManagerError(f"Failed to start domain: {message}") from exc
             log("SUCCESS", f"Domain {self.cfg.vm_name} started")
         if self.cfg.novnc_enabled:
             self.service_manager.start_novnc()
+
+    def _try_network_fallback(self) -> bool:
+        """Attempt to restart domain with slirp backend instead of passt."""
+        if self.conn is None or self.domain is None:
+            return False
+        try:
+            # Get current XML and replace passt with slirp
+            xml = self.domain.XMLDesc(0)
+            if "<backend type=\"passt\"/>" in xml:
+                xml = xml.replace("<backend type=\"passt\"/>", "")
+                # Undefine old domain and re-define with modified XML
+                try:
+                    if self._firmware_vars_path is not None:
+                        self.domain.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_NVRAM)
+                    else:
+                        self.domain.undefine()
+                except libvirt.libvirtError:
+                    pass
+                self.domain = self.conn.defineXML(xml)
+                if self.domain is None:
+                    return False
+                self.domain.create()
+                return True
+        except libvirt.libvirtError as exc:
+            log("WARN", f"Slirp fallback also failed: {exc}")
+        return False
 
     def wait_for_guest_ready(self, timeout: float = 120.0, interval: float = 3.0) -> bool:
         """Poll QEMU Guest Agent until the guest OS is responsive."""
@@ -754,6 +1030,17 @@ class VMManager:
             signal.signal(signal.SIGINT, prev_sigint)
 
     def cleanup(self) -> None:
+        # Stop TPM if running
+        if self._tpm_process is not None:
+            try:
+                self._tpm_process.terminate()
+                self._tpm_process.wait(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    self._tpm_process.kill()
+                except OSError:
+                    pass
+
         if self.domain is not None:
             try:
                 if self.domain.isActive():  # type: ignore[attr-defined]
@@ -762,7 +1049,11 @@ class VMManager:
             except libvirt.libvirtError:
                 log("DEBUG", f"Could not destroy domain {self.cfg.vm_name} (libvirt connection lost)")
             try:
-                self.domain.undefine()
+                # NVRAM domains (UEFI) need the NVRAM flag to undefine
+                if self._firmware_vars_path is not None:
+                    self.domain.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_NVRAM)
+                else:
+                    self.domain.undefine()
             except libvirt.libvirtError:
                 log("DEBUG", f"Could not undefine domain {self.cfg.vm_name} (libvirt connection lost)")
 

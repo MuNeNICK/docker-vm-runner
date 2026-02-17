@@ -13,6 +13,19 @@ class PortForward(NamedTuple):
 
 
 @dataclass
+class DiskConfig:
+    size: str
+    index: int  # 2-6
+    controller: str = "virtio"
+
+
+@dataclass
+class BlockDevice:
+    path: str
+    index: int  # 1-6
+
+
+@dataclass
 class NicConfig:
     mode: str
     bridge_name: Optional[str] = None
@@ -73,3 +86,31 @@ class VMConfig:
     ipxe_rom_path: Optional[str]
     filesystems: List[FilesystemConfig]
     port_forwards: List[PortForward]
+    # Boot/firmware
+    boot_mode: str = "uefi"  # "legacy", "uefi", "secure"
+    tpm_enabled: bool = False
+    machine_type: str = "q35"
+    # Multiple disks
+    extra_disks: List[DiskConfig] = None  # type: ignore[assignment]
+    block_devices: List[BlockDevice] = None  # type: ignore[assignment]
+    # Disk options
+    disk_controller: str = "virtio"
+    disk_preallocate: bool = False
+    # Performance
+    io_thread: bool = True
+    balloon_enabled: bool = True
+    rng_enabled: bool = True
+    # USB
+    usb_controller: bool = True
+    # Windows
+    hyperv_enabled: bool = False
+    # GPU
+    gpu_passthrough: str = "off"
+    # Download
+    download_retries: int = 3
+
+    def __post_init__(self):
+        if self.extra_disks is None:
+            self.extra_disks = []
+        if self.block_devices is None:
+            self.block_devices = []

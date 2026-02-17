@@ -19,6 +19,21 @@
 
 For detailed Redfish enablement and workflows, see the [Redfish Guide](redfish.md).
 
+- **UEFI boot fails with "OVMF firmware not found"**
+  Ensure the container image includes the `ovmf` package. If using a custom image, install it with `apt-get install ovmf`.
+
+- **TPM error: "swtpm not found"**
+  The `swtpm` and `swtpm-tools` packages are required for `BOOT_MODE=secure` or `TPM=1`. These are included in the official image.
+
+- **Network fallback warning (passt → slirp)**
+  If the passt network backend fails (e.g., due to missing capabilities), the container automatically falls back to QEMU's built-in slirp networking. Performance and features may differ. Check container capabilities if this happens unexpectedly.
+
+- **BTRFS / OverlayFS performance warning**
+  The container warns at startup if the storage path is on BTRFS (COW overhead) or OverlayFS (Docker's default). For BTRFS, disable COW on the data directory: `chattr +C /path/to/data`. For best performance, use a dedicated volume with ext4 or xfs.
+
+- **Disk space warning**
+  The container checks available disk space before creating VM disks. If space is tight, you'll see a warning. Use `DISK_SIZE=half` or reduce the requested size.
+
 ## Networking
 
 Default networking uses QEMU user-mode NAT:
