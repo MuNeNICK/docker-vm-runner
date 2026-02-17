@@ -361,7 +361,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         vm_started = True
         print_startup_banner(cfg)
         # Background guest-agent readiness check (non-blocking for console mode)
-        if not console_requested:
+        # Skip when booting from ISO — installer images don't have the guest agent
+        if not console_requested and cfg.cloud_init_enabled:
             vm_mgr.wait_for_guest_ready(timeout=120)
         retcode = 0
         if not console_requested:
