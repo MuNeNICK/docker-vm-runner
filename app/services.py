@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Optional
 
 _NOVNC_ROOT = Path("/usr/share/novnc")
-_STATUS_WEB_ROOT = Path("/opt/docker-vm-runner/web")
+
 
 try:
     import bcrypt  # type: ignore
@@ -294,22 +294,6 @@ class ServiceManager:
             if conn is not None:
                 conn.close()
 
-    def _install_status_page(self) -> None:
-        """Copy status page assets into the noVNC web root."""
-        if not _STATUS_WEB_ROOT.exists():
-            return
-        for item in _STATUS_WEB_ROOT.iterdir():
-            dest = _NOVNC_ROOT / item.name
-            try:
-                if item.is_dir():
-                    if dest.exists():
-                        shutil.rmtree(dest)
-                    shutil.copytree(item, dest)
-                else:
-                    shutil.copy2(item, dest)
-            except OSError as exc:
-                log("WARN", f"Failed to copy status asset {item.name}: {exc}")
-
     def start_novnc(self) -> None:
         if not self.vm_config.novnc_enabled:
             return
@@ -323,10 +307,6 @@ class ServiceManager:
 
         if not _NOVNC_ROOT.exists():
             raise ManagerError(f"noVNC static assets not found at {_NOVNC_ROOT}.")
-
-        # Install status page as index.html (overrides noVNC directory listing).
-        # The status page polls /status.txt and redirects to vnc.html when ready.
-        self._install_status_page()
 
         self._ensure_certificates()
         cert = self.cert_dir / "sushy.crt"
@@ -363,7 +343,7 @@ class ServiceManager:
         self._novnc_started = True
         log(
             "INFO",
-            f"Status page at https://localhost:{self.vm_config.novnc_port}/",
+            f"noVNC console at https://localhost:{self.vm_config.novnc_port}/vnc.html?autoconnect=1&resize=scale",
         )
 
     def stop(self) -> None:

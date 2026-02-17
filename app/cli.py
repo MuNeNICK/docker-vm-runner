@@ -333,10 +333,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print_startup_banner(cfg)
         return 0
 
-    from app.status import StatusBroadcaster
-
     service_manager = ServiceManager(cfg)
-    status = StatusBroadcaster()
 
     print_host_info(cfg, runtime=service_manager.runtime)
     print_vm_summary(cfg)
@@ -349,10 +346,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ensure_directory(STATE_DIR)
 
-    status.update("Starting services...")
     service_manager.start()
 
-    vm_mgr = VMManager(cfg, service_manager, status=status)
+    vm_mgr = VMManager(cfg, service_manager)
     vm_mgr.connect()
     vm_started = False
     try:

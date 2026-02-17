@@ -68,10 +68,9 @@ from app.utils import (
 
 
 class VMManager:
-    def __init__(self, vm_config: VMConfig, service_manager, status=None) -> None:
+    def __init__(self, vm_config: VMConfig, service_manager) -> None:
         self.cfg = vm_config
         self.service_manager = service_manager
-        self.status = status
         self.conn: Optional[libvirt.virConnect] = None
         self.domain: Optional[libvirt.virDomain] = None
         self._kvm_available = kvm_available()
@@ -117,13 +116,7 @@ class VMManager:
             self.conn.close()
             self.conn = None
 
-    def _status_update(self, msg: str) -> None:
-        """Send a status update if StatusBroadcaster is available."""
-        if self.status is not None:
-            self.status.update(msg)
-
     def prepare(self) -> None:
-        self._status_update("Checking KVM availability...")
         if not self._kvm_available:
             log("WARN", "=" * 60)
             log("WARN", "  /dev/kvm not found!")
@@ -147,9 +140,8 @@ class VMManager:
                     f"CPU_MODEL=host is not compatible with TCG on {self.cfg.arch}. Using {fallback} instead.",
                 )
         if not self.cfg.blank_work_disk:
-            self._status_update("Downloading base image...")
             self._ensure_base_image()
-        self._status_update("Preparing work disk...")
+
         self._prepare_work_image()
         # Smart ISO skip: if disk was reused from a prior install, skip ISO boot
         iso_requested = bool(self.boot_iso or self.boot_iso_url)
@@ -161,18 +153,18 @@ class VMManager:
                 self.cfg.boot_order = [d for d in self.cfg.boot_order if d != "cdrom"]
             if "hd" not in self.cfg.boot_order:
                 self.cfg.boot_order = ["hd"] + self.cfg.boot_order
-        self._status_update("Preparing boot media...")
+
         self._prepare_boot_iso()
         if self.boot_iso and not self.boot_iso.exists():
             raise ManagerError(f"Boot ISO not found: {self.boot_iso}")
-        self._status_update("Extracting QEMU binaries...")
+
         self._extract_qemu_binary()
-        self._status_update("Preparing firmware...")
+
         self._prepare_firmware()
         self._start_tpm()
-        self._status_update("Generating cloud-init...")
+
         self._generate_cloud_init()
-        self._status_update("Defining VM domain...")
+
         self._define_domain()
 
     def _ensure_base_image(self) -> None:
@@ -951,7 +943,7 @@ class VMManager:
     def start(self) -> None:
         if self.domain is None:
             raise ManagerError("Domain not defined")
-        self._status_update("Starting VM...")
+
         if self.domain.isActive():  # type: ignore[attr-defined]
             log("INFO", f"Domain {self.cfg.vm_name} already running")
         else:
@@ -978,8 +970,6 @@ class VMManager:
                         return
                 raise ManagerError(f"Failed to start domain: {message}") from exc
             log("SUCCESS", f"Domain {self.cfg.vm_name} started")
-        if self.status is not None:
-            self.status.ready()
         if self.cfg.novnc_enabled:
             self.service_manager.start_novnc()
 

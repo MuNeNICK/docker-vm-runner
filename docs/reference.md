@@ -155,7 +155,7 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `VNC_PORT` | `5900` | VNC listen port. |
 | `NOVNC_PORT` | `6080` | noVNC/websockify port. |
 
-When `GRAPHICS=novnc` is set, a **boot status page** is served at `https://localhost:6080/` during VM startup via websockify. The page shows real-time progress and automatically redirects to the noVNC console once the VM is ready.
+When `GRAPHICS=novnc` is set, the noVNC console is available at `https://localhost:6080/vnc.html?autoconnect=1&resize=scale` once the VM starts.
 
 ### Redfish
 

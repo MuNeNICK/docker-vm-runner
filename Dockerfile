@@ -150,10 +150,9 @@ EOF
 # Create directories for images and configuration
 RUN mkdir -p /images /config /opt/docker-vm-runner
 
-# Copy configuration, application package, web assets, and entrypoint
+# Copy configuration, application package, and entrypoint
 COPY distros.yaml /config/distros.yaml
 COPY app/ /opt/docker-vm-runner/app/
-COPY web/ /opt/docker-vm-runner/web/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh /opt/docker-vm-runner/app/guest-exec \
     && ln -s /opt/docker-vm-runner/app/guest-exec /usr/local/bin/guest-exec

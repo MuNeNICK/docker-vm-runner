@@ -54,10 +54,6 @@ When an ISO is detected, the following are auto-configured:
 
 `GRAPHICS=novnc` auto-disables the serial console (override with `NO_CONSOLE=0`). The TLS certificate is shared with Redfish (self-signed).
 
-### Boot Status Page
-
-When `GRAPHICS=novnc` is set, the official container image serves a **boot status page** at `https://localhost:6080/` while the VM is starting up via websockify. The page displays real-time progress messages (image download, disk preparation, firmware setup, etc.) and automatically redirects to the noVNC console once the VM is ready.
-
 ### ISO Boot Details
 
 For a local ISO, specify the in-container path:
