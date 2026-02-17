@@ -6,7 +6,6 @@ import hashlib
 import os
 import random
 import re
-
 import subprocess
 import sys
 import tempfile
@@ -24,8 +23,6 @@ except ImportError as exc:  # pragma: no cover
 from app.constants import (
     _CONTAINER_ID_RE,
     _LOG_VERBOSE,
-    COMPRESSED_EXTENSIONS,
-    CONVERTIBLE_FORMATS,
     DISK_SIZE_RE,
     TRUTHY,
 )

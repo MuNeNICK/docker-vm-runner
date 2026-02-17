@@ -27,10 +27,8 @@ from app.models import VMConfig
 from app.services import ServiceManager
 from app.utils import (
     ensure_directory,
-    get_available_disk_space,
     get_env,
     get_env_bool,
-    get_host_info,
     has_controlling_tty,
     kvm_available,
     log,
@@ -115,8 +113,8 @@ def _print_block(title: str, lines: List[str], colour: str = "\033[0;36m") -> No
     """Print a titled block with a border."""
     reset = "\033[0m"
     dim = "\033[0;90m"
-    all_lines = [f"  {title}"] + [f"    {l}" for l in lines]
-    width = max(len(l) for l in all_lines) + 2
+    all_lines = [f"  {title}"] + [f"    {ln}" for ln in lines]
+    width = max(len(ln) for ln in all_lines) + 2
     print(f"{dim}{'─' * width}{reset}", flush=True)
     for line in all_lines:
         print(f"{colour}{line}{reset}", flush=True)
