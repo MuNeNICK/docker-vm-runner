@@ -1,0 +1,53 @@
+name: Test & Lint
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyYAML bcrypt pytest pytest-cov
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short --cov=app --cov-report=term-missing
+        env:
+          PYTHONPATH: .
+
+      - name: Coverage summary
+        if: always()
+        run: pytest tests/ --cov=app --cov-report=term-missing -q 2>/dev/null || true
+        env:
+          PYTHONPATH: .
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: ruff check app/ tests/
+
+      - name: Run ruff format check
+        run: ruff format --check app/ tests/

@@ -9,5 +9,6 @@ This directory collects task-specific guides and reference material for Docker-V
 - [Networking Guide](networking.md) — choosing between NAT, bridge, and direct/macvtap modes.
 - [Filesystem Sharing](filesystem-sharing.md) — sharing host directories via virtiofs or 9p.
 - [Configuration Reference](reference.md) — supported distribution keys, environment variables, and guest command execution.
+- [Security Guide](security.md) — default credentials, TLS, container security, and production hardening.
 - [Troubleshooting & Operations](troubleshooting.md) — common issues, Redfish tips, networking, and compose notes.
 - [Redfish Guide](redfish.md) — enabling the Redfish API and performing power/boot actions.

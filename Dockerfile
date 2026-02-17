@@ -135,13 +135,13 @@ EOF
 # Create directories for images and configuration
 RUN mkdir -p /images /config /opt/docker-vm-runner
 
-# Copy configuration, manager, and entrypoint
+# Copy configuration, application package, and entrypoint
 COPY distros.yaml /config/distros.yaml
-COPY app/manager.py /opt/docker-vm-runner/manager.py
-COPY app/guest-exec /opt/docker-vm-runner/guest-exec
+COPY app/ /opt/docker-vm-runner/app/
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh /opt/docker-vm-runner/manager.py /opt/docker-vm-runner/guest-exec \
-    && ln -s /opt/docker-vm-runner/guest-exec /usr/local/bin/guest-exec
+RUN chmod +x /entrypoint.sh /opt/docker-vm-runner/app/guest-exec \
+    && ln -s /opt/docker-vm-runner/app/guest-exec /usr/local/bin/guest-exec
+ENV PYTHONPATH="/opt/docker-vm-runner"
 
 # Set working directory
 WORKDIR /

@@ -40,6 +40,7 @@ For persistence, GUI, ISO installs, and compose workflows see the [documentation
 - [GUI & Installation Media](docs/gui-and-media.md)
 - [iPXE Boot Guide](docs/ipxe.md)
 - [Configuration Reference](docs/reference.md)
+- [Security Guide](docs/security.md)
 - [Troubleshooting & Operations](docs/troubleshooting.md)
 - [Redfish Guide](docs/redfish.md)
 

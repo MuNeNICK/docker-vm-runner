@@ -13,4 +13,4 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   PYTHON_BIN=$(command -v python3)
 fi
 
-exec "${PYTHON_BIN}" /opt/docker-vm-runner/manager.py "${args[@]}"
+exec "${PYTHON_BIN}" -m app "${args[@]}"
