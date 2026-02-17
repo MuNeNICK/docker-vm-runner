@@ -548,6 +548,13 @@ class VMManager:
                     },
                 ],
                 "runcmd": [
+                    # SELinux: allow qemu-guest-agent unrestricted access
+                    # (only affects virt_qemu_ga_t domain; system SELinux stays enforcing)
+                    [
+                        "sh",
+                        "-c",
+                        "command -v semanage >/dev/null 2>&1 && semanage permissive -a virt_qemu_ga_t || true",
+                    ],
                     # systemd distros (Debian, RHEL, SUSE, Arch, Kali …)
                     [
                         "sh",
@@ -1105,15 +1112,21 @@ class VMManager:
         # Phase 2: wait for cloud-init completion
         ci_timeout = 300.0
         ci_interval = 5.0
+        ci_fail_limit = 30  # give up after this many consecutive exec failures
         log("INFO", "Waiting for cloud-init to finish...")
         ci_start = time.time()
         ci_deadline = ci_start + ci_timeout
+        ci_failures = 0
         while time.time() < ci_deadline:
             ret = self._guest_exec("cloud-init", ["status"])
             if ret is None:
-                # cloud-init not installed or agent lost — skip
-                log("WARN", "Could not query cloud-init status (not installed?); skipping wait")
-                return True
+                ci_failures += 1
+                if ci_failures >= ci_fail_limit:
+                    log("WARN", "Could not query cloud-init status; skipping wait")
+                    return True
+                time.sleep(ci_interval)
+                continue
+            ci_failures = 0
             exit_code, stdout = ret
             stdout_lower = stdout.lower()
             if "done" in stdout_lower:
