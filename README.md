@@ -13,7 +13,6 @@ I rely on containers to avoid polluting host machines while developing applicati
 ```bash
 docker run --rm -it \
   --name vm1 \
-  --hostname vm1 \
   -p 2222:2222 \
   --device /dev/kvm:/dev/kvm \
   ghcr.io/munenick/docker-vm-runner:latest
