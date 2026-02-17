@@ -579,3 +579,147 @@ def parse_resource_size(raw: str, resource_type: str) -> int:
             return 0  # handled at call site with path info
     # Fall through to integer parsing
     raise ManagerError(f"Invalid {resource_type} value '{raw}'. Use an integer, 'max', or 'half'")
+
+
+def is_oci_reference(s: str) -> bool:
+    """Return True if *s* looks like an OCI container image reference.
+
+    Heuristic:
+    - Starts with ``http://``, ``https://``, or ``/`` → False (URL or local path)
+    - Does not contain ``/`` → False (bare word, not a registry reference)
+    - First path component contains ``.`` or ``:`` → True (registry host)
+    """
+    if s.startswith(("http://", "https://", "/")):
+        return False
+    if "/" not in s:
+        return False
+    first_component = s.split("/", 1)[0]
+    return "." in first_component or ":" in first_component
+
+
+def pull_oci_disk(reference: str, cache_dir: Path) -> Path:
+    """Pull an OCI container image and extract the VM disk from it.
+
+    Follows the KubeVirt containerDisk convention: disk images are placed
+    under ``/disk/`` inside the container image.  Falls back to extracting
+    the largest file if ``/disk/`` is not found.
+
+    Returns the path to the extracted disk image.
+    """
+    import json as _json
+    import tarfile
+
+    # 1. Get content digest for cache key
+    log("INFO", f"Inspecting OCI image: {reference}")
+    try:
+        inspect_result = subprocess.run(
+            ["skopeo", "inspect", "--format", "{{.Digest}}", f"docker://{reference}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError:
+        raise ManagerError("skopeo is not installed; cannot pull OCI container disk images")
+    except subprocess.CalledProcessError as exc:
+        raise ManagerError(f"skopeo inspect failed for {reference}: {exc.stderr.strip()}")
+
+    digest = inspect_result.stdout.strip()  # e.g. sha256:abc123...
+    digest_key = digest.replace(":", "-")[:19]  # sha256-abc123... (short)
+
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", reference.rsplit("/", 1)[-1].split("@")[0])
+    sentinel = cache_dir / f"{digest_key}-{safe_name}.done"
+    disk_dir = cache_dir / f"{digest_key}-{safe_name}"
+
+    # 2. Cache hit check
+    if sentinel.exists():
+        # Find the disk file
+        for f in disk_dir.iterdir():
+            if f.is_file() and f.suffix != ".done":
+                log("INFO", f"Using cached OCI disk: {f}")
+                return f
+        # Sentinel exists but no disk found — re-extract
+        sentinel.unlink(missing_ok=True)
+
+    log("INFO", f"Pulling OCI image: {reference} (digest: {digest})")
+
+    # 3. Pull to OCI layout in a temp directory
+    with tempfile.TemporaryDirectory(dir=cache_dir) as tmpdir:
+        oci_dir = Path(tmpdir) / "oci"
+        try:
+            subprocess.run(
+                ["skopeo", "copy", f"docker://{reference}", f"oci:{oci_dir}:disk"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise ManagerError(f"skopeo copy failed for {reference}: {exc.stderr.strip()}")
+
+        # 4. Parse OCI layout: index.json → manifest → layers
+        index_path = oci_dir / "index.json"
+        with open(index_path) as f:
+            index = _json.load(f)
+
+        manifest_descriptor = index["manifests"][0]
+        manifest_digest = manifest_descriptor["digest"]  # sha256:...
+        algo, hex_digest = manifest_digest.split(":", 1)
+        manifest_path = oci_dir / "blobs" / algo / hex_digest
+
+        with open(manifest_path) as f:
+            manifest = _json.load(f)
+
+        # 5. Extract disk from layers
+        disk_dir.mkdir(parents=True, exist_ok=True)
+        extracted_path: Path | None = None
+
+        for layer in manifest.get("layers", []):
+            layer_digest = layer["digest"]
+            l_algo, l_hex = layer_digest.split(":", 1)
+            blob_path = oci_dir / "blobs" / l_algo / l_hex
+
+            media_type = layer.get("mediaType", "")
+            is_gzip = "gzip" in media_type or "+gzip" in media_type
+
+            try:
+                if is_gzip:
+                    tf = tarfile.open(blob_path, "r:gz")
+                else:
+                    tf = tarfile.open(blob_path, "r:*")
+            except (tarfile.TarError, Exception):
+                continue
+
+            with tf:
+                members = tf.getmembers()
+
+                # Look for /disk/ convention (KubeVirt)
+                disk_members = [m for m in members if m.isfile() and m.name.lstrip("./").startswith("disk/")]
+                if disk_members:
+                    target = max(disk_members, key=lambda m: m.size)
+                    tf.extract(target, disk_dir, filter="data")
+                    extracted_path = disk_dir / target.name
+                    break
+
+                # Fallback: extract largest file
+                file_members = [m for m in members if m.isfile() and m.size > 0]
+                if file_members:
+                    target = max(file_members, key=lambda m: m.size)
+                    tf.extract(target, disk_dir, filter="data")
+                    extracted_path = disk_dir / target.name
+
+        if extracted_path is None or not extracted_path.exists():
+            raise ManagerError(f"No disk image found in OCI image {reference}")
+
+        # Move extracted file to a clean name at disk_dir top level if nested
+        final_path = disk_dir / extracted_path.name
+        if extracted_path != final_path:
+            extracted_path.rename(final_path)
+            # Clean up empty parent dirs
+            try:
+                extracted_path.parent.rmdir()
+            except OSError:
+                pass
+
+    # 6. Write sentinel
+    sentinel.write_text(digest)
+    log("SUCCESS", f"OCI disk extracted: {final_path}")
+    return final_path

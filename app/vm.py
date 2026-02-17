@@ -36,6 +36,7 @@ from app.constants import (
     IMAGES_DIR,
     INSTALLED_MARKER_NAME,
     LIBVIRT_URI,
+    OCI_DISK_CACHE_DIR,
     STATE_DIR,
     SUPPORTED_ARCHES,
     VM_IMAGES_DIR,
@@ -57,8 +58,10 @@ from app.utils import (
     get_env_bool,
     has_ipv6,
     hash_password,
+    is_oci_reference,
     kvm_available,
     log,
+    pull_oci_disk,
     run,
     sanitize_mount_target,
 )
@@ -157,12 +160,13 @@ class VMManager:
         self._define_domain()
 
     def _resolve_boot_from(self) -> None:
-        """Resolve BOOT_FROM: download if URL, detect type (ISO vs disk image)."""
+        """Resolve BOOT_FROM: download if URL, pull if OCI, detect type (ISO vs disk image)."""
         boot_from = self.cfg.boot_from
         if not boot_from:
             return
 
         is_url = boot_from.startswith(("http://", "https://"))
+        is_oci = not is_url and is_oci_reference(boot_from)
 
         if is_url:
             ensure_directory(BOOT_ISO_CACHE_DIR)
@@ -181,6 +185,9 @@ class VMManager:
                     retries=self.cfg.download_retries,
                 )
             resolved = destination
+        elif is_oci:
+            ensure_directory(OCI_DISK_CACHE_DIR)
+            resolved = pull_oci_disk(boot_from, OCI_DISK_CACHE_DIR)
         else:
             resolved = Path(boot_from)
             if not resolved.exists():

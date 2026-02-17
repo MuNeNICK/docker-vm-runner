@@ -27,6 +27,7 @@ else:
     STATE_DIR = Path("/var/lib/docker-vm-runner")
 INSTALLED_MARKER_NAME = ".installed"
 BOOT_ISO_CACHE_DIR = STATE_DIR / "boot-isos"
+OCI_DISK_CACHE_DIR = STATE_DIR / "oci-disks"
 LIBVIRT_URI = os.environ.get("LIBVIRT_URI", "qemu:///system")
 TRUTHY = {"1", "true", "yes", "on"}
 MAC_ADDRESS_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")

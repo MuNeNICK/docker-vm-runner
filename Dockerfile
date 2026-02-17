@@ -95,6 +95,7 @@ RUN apt-get update \
         qemu-system-s390x \
         qemu-system-riscv \
         qemu-utils \
+        skopeo \
         swtpm \
         swtpm-tools \
         tini \
@@ -111,6 +112,7 @@ RUN apt-get update \
              /usr/bin/qemu-system-s390x \
              /usr/bin/qemu-system-riscv32 \
              /usr/bin/qemu-system-riscv64 \
+    && rm -rf /usr/lib/cni \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy pre-built venv, noVNC, and AAVMF .deb from builder
