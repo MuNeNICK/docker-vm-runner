@@ -570,7 +570,7 @@ class VMManager:
             }
 
             if self.cfg.ssh_pubkey:
-                vendor_cfg["ssh_authorized_keys"] = [self.cfg.ssh_pubkey]
+                vendor_cfg["users"][0]["ssh_authorized_keys"] = [self.cfg.ssh_pubkey]
 
             if self.cfg.filesystems:
                 mounts = []
