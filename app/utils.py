@@ -475,13 +475,33 @@ def extract_compressed(source: Path, dest_dir: Path) -> Path:
     raise ManagerError(f"Unsupported compressed format: {suffix}")
 
 
+def disable_cow(path: Path) -> None:
+    """Disable Copy-on-Write on a file or directory (for Btrfs/ZFS)."""
+    try:
+        subprocess.run(["chattr", "+C", str(path)], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        log("WARN", f"Failed to disable COW on {path} (chattr +C failed)")
+        return
+
+    # Verify the attribute was actually set
+    try:
+        result = subprocess.run(["lsattr", "-d", str(path)], capture_output=True, text=True, check=True)
+        if "C" not in result.stdout.split()[0]:
+            log("WARN", f"COW disable not confirmed on {path} (lsattr check failed)")
+        else:
+            log("INFO", f"COW disabled on {path}")
+    except (subprocess.CalledProcessError, FileNotFoundError, IndexError):
+        log("WARN", f"Could not verify COW attribute on {path}")
+
+
 def check_filesystem_compatibility(path: Path) -> None:
     """Warn about BTRFS COW, OverlayFS, FUSE, ecryptfs issues."""
     fs_type = detect_filesystem(path)
     fs_lower = fs_type.lower()
 
     if "btrfs" in fs_lower:
-        log("WARN", f"Storage is on BTRFS ({path}). Consider disabling COW with 'chattr +C' on the directory")
+        log("INFO", f"Storage is on BTRFS ({path}). Disabling COW for VM disk performance...")
+        disable_cow(path)
     elif "overlay" in fs_lower:
         log("WARN", f"Storage is on OverlayFS ({path}). Disk I/O performance may be reduced")
     elif "fuse" in fs_lower:

@@ -925,7 +925,7 @@ class VMManager:
             SubElement(vda_src, "mouse", mode="client")
             SubElement(vdagent, "target", type="virtio", name="com.redhat.spice.0")
 
-        # qemu:commandline for extra args and GPU passthrough
+        # qemu:commandline for extra args, GPU passthrough, and Windows tuning
         qemu_args = []
         if self.cfg.extra_args:
             qemu_args.extend(self.cfg.extra_args.split())
@@ -934,6 +934,9 @@ class VMManager:
             if render_node.exists():
                 qemu_args.extend(["-display", "egl-headless"])
                 qemu_args.extend(["-device", f"virtio-vga-gl,rendernode={render_node}"])
+        if self.cfg.hyperv_enabled:
+            qemu_args.extend(["-global", "ICH9-LPC.disable_s3=1"])
+            qemu_args.extend(["-global", "ICH9-LPC.disable_s4=1"])
 
         if qemu_args:
             qemu_cl = SubElement(domain, f"{{{self._QEMU_NS}}}commandline")
