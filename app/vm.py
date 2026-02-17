@@ -12,10 +12,8 @@ import subprocess
 import tempfile
 import textwrap
 import time
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from urllib.parse import urlparse
 from xml.etree.ElementTree import Element, SubElement, fromstring, register_namespace, tostring
 
@@ -49,7 +47,6 @@ from app.utils import (
     check_disk_space,
     check_filesystem_compatibility,
     convert_disk_image,
-    detect_cloud_init_content_type,
     detect_filesystem,
     download_file,
     download_file_with_retry,
@@ -480,7 +477,9 @@ class VMManager:
             tmp = Path(tmpdir)
             passwd_hash = hash_password(self.cfg.password)
 
-            cloud_cfg: Dict[str, object] = {
+            # Vendor cloud-config: written to vendor-data so it is processed
+            # independently of user-data and immune to cloud-config merging.
+            vendor_cfg: Dict[str, object] = {
                 "packages": ["qemu-guest-agent"],
                 "users": [
                     {
@@ -493,14 +492,13 @@ class VMManager:
                 ],
                 "chpasswd": {"expire": False},
                 "ssh_pwauth": True,
+                "runcmd": [
+                    ["systemctl", "enable", "--now", "qemu-guest-agent"],
+                ],
             }
 
             if self.cfg.ssh_pubkey:
-                cloud_cfg["ssh_authorized_keys"] = [self.cfg.ssh_pubkey]
-
-            runcmd: List[List[str]] = [
-                ["systemctl", "enable", "--now", "qemu-guest-agent"],
-            ]
+                vendor_cfg["ssh_authorized_keys"] = [self.cfg.ssh_pubkey]
 
             if self.cfg.filesystems:
                 mounts = []
@@ -508,9 +506,7 @@ class VMManager:
                     tag = fs.target
                     safe_target = sanitize_mount_target(tag)
                     mount_dir = Path("/mnt") / safe_target
-                    mkdir_cmd = ["mkdir", "-p", str(mount_dir)]
-                    if mkdir_cmd not in runcmd:
-                        runcmd.append(mkdir_cmd)
+                    vendor_cfg["runcmd"].append(["mkdir", "-p", str(mount_dir)])  # type: ignore[union-attr]
                     if fs.driver == "virtiofs":
                         fstype = "virtiofs"
                         options = ["defaults", "_netdev"]
@@ -519,68 +515,27 @@ class VMManager:
                         options = ["trans=virtio,version=9p2000.L", "_netdev"]
                     if fs.readonly:
                         options.append("ro")
-                    mount_entry = [
-                        tag,
-                        str(mount_dir),
-                        fstype,
-                        ",".join(options),
-                        "0",
-                        "0",
-                    ]
-                    mounts.append(mount_entry)
+                    mounts.append([tag, str(mount_dir), fstype, ",".join(options), "0", "0"])
                 if mounts:
-                    cloud_cfg["mounts"] = mounts
+                    vendor_cfg["mounts"] = mounts
 
-            if runcmd:
-                cloud_cfg["runcmd"] = runcmd
+            vendor_data = "#cloud-config\n" + yaml.safe_dump(
+                vendor_cfg, sort_keys=False, default_flow_style=False
+            )
+            (tmp / "vendor-data").write_text(vendor_data, encoding="utf-8")
 
-            vendor_user_data = "#cloud-config\n" + yaml.safe_dump(cloud_cfg, sort_keys=False, default_flow_style=False)
-
-            user_data_payload = vendor_user_data
+            # user-data: user's custom payload only (no vendor content mixed in)
             override_path = self.cfg.cloud_init_user_data_path
             if override_path:
                 override_content = override_path.read_text(encoding="utf-8")
                 if override_content.strip():
-                    log("INFO", f"Appending user cloud-init data from {override_path}")
-                    multipart = MIMEMultipart()
-                    vendor_part = MIMEText(
-                        vendor_user_data,
-                        _subtype="cloud-config",
-                        _charset="utf-8",
-                    )
-                    vendor_part.add_header(
-                        "Content-Disposition",
-                        "attachment",
-                        filename="00-vendor-cloud-config.yaml",
-                    )
-                    multipart.attach(vendor_part)
-
-                    content_type = detect_cloud_init_content_type(override_content)
-                    main_type, _, subtype = content_type.partition("/")
-                    if main_type != "text" or not subtype:
-                        raise ManagerError(
-                            f"Unsupported content type '{content_type}' inferred for CLOUD_INIT_USER_DATA"
-                        )
-                    user_part = MIMEText(
-                        override_content,
-                        _subtype=subtype,
-                        _charset="utf-8",
-                    )
-                    user_part.add_header(
-                        "Content-Disposition",
-                        "attachment",
-                        filename=f"99-user-data.{subtype.replace('/', '-')}",
-                    )
-                    multipart.attach(user_part)
-                    user_data_payload = multipart.as_string()
+                    log("INFO", f"Using user cloud-init data from {override_path}")
+                    (tmp / "user-data").write_text(override_content, encoding="utf-8")
                 else:
-                    log(
-                        "WARN",
-                        f"CLOUD_INIT_USER_DATA file {override_path} is empty; "
-                        "only vendor cloud-config will be applied.",
-                    )
-
-            (tmp / "user-data").write_text(user_data_payload, encoding="utf-8")
+                    log("WARN", f"CLOUD_INIT_USER_DATA file {override_path} is empty; ignored")
+                    (tmp / "user-data").write_text("", encoding="utf-8")
+            else:
+                (tmp / "user-data").write_text("", encoding="utf-8")
             meta_data = (
                 textwrap.dedent(
                     f"""
@@ -600,8 +555,9 @@ class VMManager:
                 "cidata",
                 "-joliet",
                 "-rock",
-                str(tmp / "user-data"),
                 str(tmp / "meta-data"),
+                str(tmp / "user-data"),
+                str(tmp / "vendor-data"),
             ]
             run(cmd)
 
