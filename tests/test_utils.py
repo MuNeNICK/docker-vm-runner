@@ -9,13 +9,13 @@ import pytest
 from app.exceptions import ManagerError
 from app.utils import (
     derive_vm_name,
-    detect_cloud_init_content_type,
     deterministic_mac,
     get_env,
     get_env_bool,
     hash_password,
     log,
     parse_int_env,
+    parse_size_to_bytes,
     random_mac,
     sanitize_mount_target,
     validate_disk_size,
@@ -186,30 +186,23 @@ class TestSanitizeMountTarget:
         assert sanitize_mount_target("my.share-name") == "my.share-name"
 
 
-class TestDetectCloudInitContentType:
-    def test_empty(self):
-        assert detect_cloud_init_content_type("") == "text/cloud-config"
+class TestParseSizeToBytes:
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("20G", 20 * 1024**3),
+            ("500M", 500 * 1024**2),
+            ("1T", 1 * 1024**4),
+            ("1024K", 1024 * 1024),
+            ("100", 100),
+            ("20g", 20 * 1024**3),
+        ],
+    )
+    def test_valid_sizes(self, raw, expected):
+        assert parse_size_to_bytes(raw) == expected
 
-    def test_cloud_config(self):
-        assert detect_cloud_init_content_type("#cloud-config\nfoo: bar") == "text/cloud-config"
-
-    def test_shell_script(self):
-        assert detect_cloud_init_content_type("#!/bin/bash\necho hi") == "text/x-shellscript"
-
-    def test_boothook(self):
-        assert detect_cloud_init_content_type("#cloud-boothook\nfoo") == "text/cloud-boothook"
-
-    def test_include(self):
-        assert detect_cloud_init_content_type("#include\nhttps://example.com") == "text/x-include-url"
-
-    def test_part_handler(self):
-        assert detect_cloud_init_content_type("#part-handler\nfoo") == "text/part-handler"
-
-    def test_cloud_config_archive(self):
-        assert detect_cloud_init_content_type("#cloud-config-archive\n- foo") == "text/cloud-config-archive"
-
-    def test_unrecognized_defaults_to_cloud_config(self):
-        assert detect_cloud_init_content_type("foo: bar") == "text/cloud-config"
+    def test_zero(self):
+        assert parse_size_to_bytes("0") == 0
 
 
 class TestHashPassword:

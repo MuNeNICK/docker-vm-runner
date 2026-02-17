@@ -186,6 +186,15 @@ The manager automatically detects the container runtime at startup and displays 
 
 When running in a **rootless** container (Podman rootless, Docker rootless), certain errors (libvirt socket timeout, network backend failures) are automatically downgraded to warnings instead of fatal errors.
 
+### Health Check
+
+The container includes a built-in Docker `HEALTHCHECK` that monitors the VM domain state via `virsh domstate`. The container reports `healthy` once the VM is running (start period: 120s, interval: 10s).
+
+```bash
+# Check container health
+docker inspect --format='{{.State.Health.Status}}' <container>
+```
+
 ### CLI Flags
 
 The manager script accepts these flags (passed as container command arguments):
@@ -194,6 +203,7 @@ The manager script accepts these flags (passed as container command arguments):
 | --- | --- |
 | `--list-distros` | Print available distributions from `distros.yaml` and exit. |
 | `--show-config` | Parse environment variables, print the resolved configuration, and exit. |
+| `--show-xml` | Generate and print the libvirt domain XML for the current configuration, then exit. Useful for debugging or inspecting the VM definition. |
 | `--dry-run` | Validate configuration and environment (KVM, ports, boot ISO) without starting the VM. |
 | `--no-console` | Do not attach to the serial console (same as `NO_CONSOLE=1`). |
 

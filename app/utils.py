@@ -58,7 +58,8 @@ def get_env_bool(name: str, default: bool = False) -> bool:
 
 def parse_int_env(name: str, default: str, min_val: int = 1, max_val: Optional[int] = None) -> int:
     raw = get_env(name, default)
-    assert raw is not None
+    if raw is None:
+        raise ManagerError(f"{name} has no value and no default was provided")
     try:
         value = int(raw)
     except ValueError:
@@ -74,6 +75,16 @@ def validate_disk_size(raw: str) -> str:
     if not DISK_SIZE_RE.match(raw):
         raise ManagerError(f"Invalid DISK_SIZE '{raw}'. Use a number with optional suffix: K, M, G, T (e.g. '20G')")
     return raw
+
+
+def parse_size_to_bytes(raw: str) -> int:
+    """Parse a human-readable size string (e.g. '20G', '500M') to bytes."""
+    if not raw:
+        return 0
+    suffix = raw[-1].upper() if raw[-1].isalpha() else ""
+    num = int(raw[:-1]) if suffix else int(raw)
+    multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(suffix, 1)
+    return num * multiplier
 
 
 def download_file(url: str, destination: Path, label: str = "Downloading") -> None:
@@ -188,27 +199,6 @@ def hash_password(password: str) -> str:
     """Generate a bcrypt hash for cloud-init."""
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
     return hashed.decode("utf-8")
-
-
-def detect_cloud_init_content_type(payload: str) -> str:
-    """Infer the MIME type for cloud-init user data."""
-    stripped = payload.lstrip()
-    if not stripped:
-        return "text/cloud-config"
-    first_line = stripped.splitlines()[0].strip().lower()
-    if stripped.startswith("#!"):
-        return "text/x-shellscript"
-    if first_line.startswith("#cloud-config-archive"):
-        return "text/cloud-config-archive"
-    if first_line.startswith("#cloud-config"):
-        return "text/cloud-config"
-    if first_line.startswith("#cloud-boothook"):
-        return "text/cloud-boothook"
-    if first_line.startswith("#include"):
-        return "text/x-include-url"
-    if first_line.startswith("#part-handler"):
-        return "text/part-handler"
-    return "text/cloud-config"
 
 
 def derive_vm_name(distro: str, iso_mode: bool = False) -> str:
@@ -649,11 +639,9 @@ def pull_oci_disk(reference: str, cache_dir: Path) -> Path:
             subprocess.run(
                 ["skopeo", "copy", f"docker://{reference}", f"oci:{oci_dir}:disk"],
                 check=True,
-                capture_output=True,
-                text=True,
             )
         except subprocess.CalledProcessError as exc:
-            raise ManagerError(f"skopeo copy failed for {reference}: {exc.stderr.strip()}")
+            raise ManagerError(f"skopeo copy failed for {reference} (exit code {exc.returncode})")
 
         # 4. Parse OCI layout: index.json → manifest → layers
         index_path = oci_dir / "index.json"

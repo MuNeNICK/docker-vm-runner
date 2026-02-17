@@ -166,5 +166,9 @@ WORKDIR /
 # Configure libvirt defaults
 ENV LIBVIRT_DEFAULT_URI=qemu:///system
 
+# Health check: VM is healthy when domain is running (guest-agent or domain state)
+HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=3 \
+    CMD virsh domstate $(virsh list --name | head -1) 2>/dev/null | grep -q running || exit 1
+
 # Use entrypoint to handle image download and QEMU startup
 ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]

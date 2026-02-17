@@ -102,6 +102,9 @@ def parse_env() -> VMConfig:
         disk_size = validate_disk_size(disk_size_raw)
 
     display = (get_env("GRAPHICS") or "none").strip().lower() or "none"
+    valid_graphics = {"none", "vnc", "novnc"}
+    if display not in valid_graphics:
+        raise ManagerError(f"Invalid GRAPHICS '{display}'. Supported: {', '.join(sorted(valid_graphics))}")
     novnc_enabled = display == "novnc"
     if novnc_enabled:
         graphics_type = "vnc"

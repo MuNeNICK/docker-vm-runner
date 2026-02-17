@@ -61,6 +61,7 @@ from app.utils import (
     is_oci_reference,
     kvm_available,
     log,
+    parse_size_to_bytes,
     pull_oci_disk,
     run,
     sanitize_mount_target,
@@ -276,11 +277,7 @@ class VMManager:
 
         # Disk space check
         if self.cfg.disk_size and self.cfg.disk_size != "0":
-            suffix = self.cfg.disk_size[-1].upper() if self.cfg.disk_size[-1].isalpha() else ""
-            num = int(self.cfg.disk_size[:-1]) if suffix else int(self.cfg.disk_size)
-            multiplier = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(suffix, 1)
-            required_bytes = num * multiplier
-            check_disk_space(self.vm_dir, required_bytes)
+            check_disk_space(self.vm_dir, parse_size_to_bytes(self.cfg.disk_size))
 
         self._disk_reused = False
         if self.cfg.persist and self.work_image.exists():
@@ -297,16 +294,11 @@ class VMManager:
                     )
                     if info.returncode == 0:
                         current_vsize = json.loads(info.stdout).get("virtual-size", 0)
-                        requested = self.cfg.disk_size
-                        # Parse requested size to bytes for comparison
-                        req_suffix = requested[-1].upper() if requested[-1].isalpha() else ""
-                        req_num = int(requested[:-1]) if req_suffix else int(requested)
-                        req_mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(req_suffix, 1)
-                        requested_bytes = req_num * req_mult
+                        requested_bytes = parse_size_to_bytes(self.cfg.disk_size)
                         if requested_bytes > current_vsize:
-                            log("INFO", f"Expanding disk from {current_vsize // (1024**3)}G to {requested}...")
-                            run(["qemu-img", "resize", str(self.work_image), requested])
-                            log("SUCCESS", f"Disk expanded to {requested}")
+                            log("INFO", f"Expanding disk from {current_vsize // (1024**3)}G to {self.cfg.disk_size}...")
+                            run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
+                            log("SUCCESS", f"Disk expanded to {self.cfg.disk_size}")
             else:
                 size_mb = size / (1024 * 1024)
                 log(
@@ -346,11 +338,7 @@ class VMManager:
                     current_vsize = 0
                     if info.returncode == 0:
                         current_vsize = json.loads(info.stdout).get("virtual-size", 0)
-                    req = self.cfg.disk_size
-                    req_suffix = req[-1].upper() if req[-1].isalpha() else ""
-                    req_num = int(req[:-1]) if req_suffix else int(req)
-                    req_mult = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}.get(req_suffix, 1)
-                    requested_bytes = req_num * req_mult
+                    requested_bytes = parse_size_to_bytes(self.cfg.disk_size)
                     if requested_bytes > current_vsize:
                         log("INFO", f"Resizing disk to {self.cfg.disk_size}...")
                         run(["qemu-img", "resize", str(self.work_image), self.cfg.disk_size])
@@ -506,16 +494,16 @@ class VMManager:
             "--ctrl",
             f"type=unixio,path={sock_path}",
             "--tpm2",
-            "--daemon",
         ]
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            proc.wait(timeout=5)
-            if proc.returncode != 0:
-                stderr = proc.stderr.read().decode() if proc.stderr else ""
-                raise ManagerError(f"swtpm failed to start: {stderr}")
         except FileNotFoundError:
             raise ManagerError("swtpm not found. Ensure swtpm and swtpm-tools are installed.")
+        time.sleep(0.5)
+        if proc.poll() is not None:
+            stderr = proc.stderr.read().decode() if proc.stderr else ""
+            raise ManagerError(f"swtpm failed to start: {stderr}")
+        self._tpm_process = proc
         self._tpm_sock_path = sock_path
         log("SUCCESS", "Software TPM started")
 

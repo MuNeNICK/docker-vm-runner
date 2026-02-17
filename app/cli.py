@@ -253,6 +253,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="List available distributions and exit (optionally filter by arch: x86_64, aarch64, arm64, amd64)",
     )
     parser.add_argument("--show-config", action="store_true", help="Show resolved VM configuration and exit")
+    parser.add_argument("--show-xml", action="store_true", help="Show generated libvirt domain XML and exit")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and environment, then exit")
     args = parser.parse_args(argv)
 
@@ -284,6 +285,40 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.show_config:
         show_config(cfg)
+        return 0
+
+    if args.show_xml:
+        from unittest.mock import patch
+
+        from app.constants import SUPPORTED_ARCHES
+
+        arch_profile = SUPPORTED_ARCHES[cfg.arch]
+        # Resolve firmware paths for the XML preview
+        fw_loader: Path | None = None
+        fw_vars: Path | None = None
+        fw_cfg = arch_profile.get("firmware")
+        if fw_cfg:
+            if cfg.arch == "x86_64" and cfg.boot_mode in fw_cfg:
+                fw_loader = Path(fw_cfg[cfg.boot_mode]["loader"])
+                fw_vars = Path(fw_cfg[cfg.boot_mode]["vars_template"])
+            elif cfg.arch != "x86_64":
+                fw_loader = Path(fw_cfg["loader"])
+                fw_vars = Path(fw_cfg["vars_template"])
+
+        with patch.object(VMManager, "__init__", lambda self, *a, **kw: None):
+            mgr = VMManager.__new__(VMManager)
+            mgr.cfg = cfg
+            mgr._kvm_available = kvm_available()
+            mgr._effective_cpu_model = cfg.cpu_model
+            mgr._arch_profile = arch_profile
+            mgr._firmware_loader_path = fw_loader
+            mgr._firmware_vars_path = fw_vars
+            mgr.work_image = Path("/images/vms") / cfg.vm_name / f"disk.{cfg.image_format}"
+            mgr.seed_iso = Path("/images/vms") / cfg.vm_name / "seed.iso" if cfg.cloud_init_enabled else None
+            mgr.boot_iso = None
+            mgr._network_macs = {}
+            mgr._ipxe_rom_path = Path(cfg.ipxe_rom_path) if cfg.ipxe_rom_path else None
+        print(mgr._render_domain_xml())
         return 0
 
     if args.dry_run:
