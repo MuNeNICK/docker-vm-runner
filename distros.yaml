@@ -47,7 +47,7 @@ distributions:
   # CentOS Stream
   centos-stream-9:
     name: "CentOS Stream 9"
-    url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2"
+    url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-x86_64-9-latest.x86_64.qcow2"
     arch: x86_64
 
   # Fedora
