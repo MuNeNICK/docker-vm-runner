@@ -2,6 +2,7 @@ FROM debian:trixie-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG NOVNC_VERSION=1.4.0
+ARG VERSION_PASST="2026_01_20"
 
 # Builder: install only sushy-tools via pip (all other deps via apt in runtime),
 #          download noVNC and QEMU .deb files
@@ -36,6 +37,8 @@ RUN apt-get update \
     && mv qemu-system-ppc_*.deb /opt/qemu-ppc.deb \
     && mv qemu-system-s390x_*.deb /opt/qemu-s390x.deb \
     && mv qemu-system-riscv_*.deb /opt/qemu-riscv.deb \
+    && DPKG_ARCH="$(dpkg --print-architecture)" \
+    && wget -q "https://github.com/qemus/passt/releases/download/v${VERSION_PASST}/passt_${VERSION_PASST}_${DPKG_ARCH}.deb" -O /opt/passt.deb \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 # ── Runtime stage ─────────────────────────────────────────────
@@ -113,6 +116,12 @@ COPY --from=builder /opt/qemu-arm.deb /opt/qemu-arm.deb
 COPY --from=builder /opt/qemu-ppc.deb /opt/qemu-ppc.deb
 COPY --from=builder /opt/qemu-s390x.deb /opt/qemu-s390x.deb
 COPY --from=builder /opt/qemu-riscv.deb /opt/qemu-riscv.deb
+
+# Replace passt with Docker-compatible build (isolation features removed,
+# as they conflict with Docker's default seccomp policy; the container
+# itself provides the isolation layer).  See: https://github.com/qemus/passt
+COPY --from=builder /opt/passt.deb /tmp/passt.deb
+RUN dpkg -i /tmp/passt.deb && rm -f /tmp/passt.deb
 
 # Replace libvirt qemu.conf with container-friendly settings
 RUN mkdir -p /etc/libvirt /var/log/libvirt /run/libvirt /var/lib/libvirt/images \
