@@ -1079,11 +1079,11 @@ class VMManager:
             time.sleep(0.5)
         return None
 
-    def wait_for_guest_ready(self, timeout: float = 120.0, interval: float = 3.0) -> bool:
-        """Poll QEMU Guest Agent until the guest OS is responsive, then wait for cloud-init if enabled."""
-        log("INFO", "Waiting for guest agent to become ready...")
+    def wait_for_guest_agent(self, timeout: float = 120.0, interval: float = 3.0, quiet: bool = False) -> bool:
+        """Poll QEMU Guest Agent until it responds to guest-ping."""
+        if not quiet:
+            log("INFO", "Waiting for guest agent to become ready...")
         deadline = time.time() + timeout
-        agent_ready = False
         while time.time() < deadline:
             try:
                 result = subprocess.run(
@@ -1093,17 +1093,21 @@ class VMManager:
                     timeout=5,
                 )
                 if result.returncode == 0:
-                    log("SUCCESS", "Guest agent is ready")
-                    agent_ready = True
-                    break
+                    if not quiet:
+                        log("SUCCESS", "Guest agent is ready")
+                    return True
             except subprocess.TimeoutExpired:
                 pass
             except Exception:
                 pass
             time.sleep(interval)
-
-        if not agent_ready:
+        if not quiet:
             log("WARN", f"Guest agent did not respond within {int(timeout)}s (VM may still be booting)")
+        return False
+
+    def wait_for_guest_ready(self, timeout: float = 120.0, interval: float = 3.0) -> bool:
+        """Poll QEMU Guest Agent until the guest OS is responsive, then wait for cloud-init if enabled."""
+        if not self.wait_for_guest_agent(timeout, interval):
             return False
 
         if not self.cfg.cloud_init_enabled:

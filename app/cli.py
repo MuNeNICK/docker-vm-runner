@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import subprocess
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -38,11 +40,49 @@ from app.utils import (
 from app.vm import VMManager
 
 
-def run_console(vm_name: str) -> int:
+def _guest_stty_resize(vm_mgr: "VMManager") -> None:
+    """Set guest TTY size to match the host terminal via QGA."""
+    try:
+        cols, rows = os.get_terminal_size()
+    except OSError:
+        return
+    cmd = (
+        f'for tty in /dev/hvc0 /dev/ttyS0; do [ -e "$tty" ] && stty -F "$tty" rows {rows} cols {cols} 2>/dev/null; done'
+    )
+    vm_mgr._guest_exec("sh", ["-c", cmd])
+
+
+def run_console(vm_name: str, vm_mgr: Optional["VMManager"] = None) -> int:
     """Attach to the guest console via virsh."""
     cmd = ["virsh", "-c", LIBVIRT_URI, "console", vm_name]
     log("INFO", "Attaching to VM console (Ctrl+] to exit)")
     proc = subprocess.Popen(cmd)
+
+    resize_event = threading.Event()
+
+    # Daemon thread: wait for QGA then propagate terminal size
+    if vm_mgr is not None:
+
+        def _resize_worker():
+            if not vm_mgr.wait_for_guest_agent(quiet=True):
+                return
+            _guest_stty_resize(vm_mgr)
+            while True:
+                resize_event.wait()
+                resize_event.clear()
+                _guest_stty_resize(vm_mgr)
+
+        t = threading.Thread(target=_resize_worker, daemon=True)
+        t.start()
+
+    # SIGWINCH handler
+    prev_sigwinch = None
+    if hasattr(signal, "SIGWINCH"):
+
+        def _on_sigwinch(signum, frame):
+            resize_event.set()
+
+        prev_sigwinch = signal.signal(signal.SIGWINCH, _on_sigwinch)
 
     def _terminate_console(signum, frame):
         proc.terminate()
@@ -55,6 +95,8 @@ def run_console(vm_name: str) -> int:
         return proc.wait()
     finally:
         signal.signal(signal.SIGTERM, prev_sigterm)
+        if prev_sigwinch is not None:
+            signal.signal(signal.SIGWINCH, prev_sigwinch)
 
 
 def list_distros(config_path: Optional[Path] = None, arch_filter: Optional[str] = None) -> None:
@@ -399,7 +441,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not console_requested:
             vm_mgr.wait_until_stopped()
         else:
-            retcode = run_console(cfg.vm_name)
+            retcode = run_console(cfg.vm_name, vm_mgr)
             if retcode != 0:
                 log("WARN", f"Console exited with status {retcode}")
         return retcode
