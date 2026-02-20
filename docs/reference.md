@@ -44,16 +44,20 @@ docker run --rm ghcr.io/munenick/docker-vm-runner:latest --list-distros
 
 These map to entries in `distros.yaml` (bind-mount your own file to `/config/distros.yaml` to customize).
 
-- `ubuntu-2404`, `ubuntu-2404-arm64`, `ubuntu-2204`, `ubuntu-2204-arm64`, `ubuntu-2004`
-- `debian-12`, `debian-12-arm64`, `debian-11`
-- `centos-stream-9`
-- `fedora-41`, `fedora-41-arm64`
-- `opensuse-leap-155`
-- `rocky-linux-9`, `rocky-linux-9-arm64`, `rocky-linux-8`
-- `almalinux-9`, `almalinux-9-arm64`, `almalinux-8`
+- `ubuntu-2404`, `ubuntu-2404-arm64`, `ubuntu-2204`, `ubuntu-2204-arm64`
+- `debian-13`, `debian-13-arm64`, `debian-12`, `debian-12-arm64`, `debian-11`
+- `centos-stream-10`, `centos-stream-10-arm64`, `centos-stream-9`, `centos-stream-9-arm64`
+- `fedora-43`, `fedora-43-arm64`
+- `opensuse-tumbleweed`, `opensuse-leap-160`
+- `rocky-linux-10`, `rocky-linux-10-arm64`, `rocky-linux-9`, `rocky-linux-9-arm64`, `rocky-linux-8`
+- `almalinux-10`, `almalinux-10-arm64`, `almalinux-9`, `almalinux-9-arm64`, `almalinux-8`
 - `archlinux`
-- `alpine-3`
-- `kali`
+- `oracle-linux-9`, `oracle-linux-9-arm64`
+- `alpine-3`, `alpine-3-arm64`
+- `amazon-linux-2023`, `amazon-linux-2023-arm64`
+- `freebsd-15`, `freebsd-15-arm64`
+- `gentoo`, `gentoo-arm64`
+- `kali`, `kali-arm64`
 
 Each entry can declare an `arch` field to set the default architecture for that image. If omitted it defaults to `x86_64`.
 
