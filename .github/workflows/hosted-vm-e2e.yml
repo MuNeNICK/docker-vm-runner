@@ -1,0 +1,206 @@
+name: Hosted Runner VM E2E
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: hosted-vm-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vm_e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      IMAGE_NAME: docker-vm-runner:e2e
+      CONTAINER_NAME: vm-e2e
+      HOST_SSH_PORT: "2222"
+      GUEST_SSH_PORT: "2222"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t "${IMAGE_NAME}" .
+
+      - name: Detect KVM availability on runner
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            echo "KVM_DOCKER_ARGS=--device /dev/kvm:/dev/kvm -e REQUIRE_KVM=1" >> "$GITHUB_ENV"
+            echo "KVM_MODE=kvm" >> "$GITHUB_ENV"
+            echo "kvm" > /tmp/vm-e2e-kvm-mode.txt
+          else
+            echo "KVM_DOCKER_ARGS=" >> "$GITHUB_ENV"
+            echo "KVM_MODE=tcg" >> "$GITHUB_ENV"
+            echo "tcg" > /tmp/vm-e2e-kvm-mode.txt
+          fi
+
+      - name: Start container (documented headless usage)
+        run: |
+          set -euo pipefail
+          echo "Runner virtualization mode: ${KVM_MODE}"
+          docker run -d --name "${CONTAINER_NAME}" \
+            --hostname "${CONTAINER_NAME}" \
+            -p "${HOST_SSH_PORT}:${GUEST_SSH_PORT}" \
+            -e NO_CONSOLE=1 \
+            -e DISTRO=debian-12 \
+            -e SSH_PORT="${GUEST_SSH_PORT}" \
+            -e CPUS=2 \
+            -e MEMORY=2048 \
+            -e DISK_SIZE=10G \
+            ${KVM_DOCKER_ARGS} \
+            "${IMAGE_NAME}" >/tmp/vm-e2e-container-id.txt
+
+      - name: Wait for VM healthcheck
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 240); do
+            running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" || echo false)"
+            if [ "${running}" != "true" ]; then
+              break
+            fi
+
+            health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER_NAME}")"
+            echo "${health}" > /tmp/vm-e2e-health.txt
+            if [ "${health}" = "healthy" ]; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: container never became healthy"
+            exit 1
+          fi
+
+      - name: Wait for guest readiness (cloud-init + qemu-guest-agent)
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 20); do
+            if docker exec "${CONTAINER_NAME}" guest-exec --wait "cloud-init status --wait" \
+              >/tmp/vm-e2e-cloud-init.txt 2>/tmp/vm-e2e-cloud-init.err; then
+              ok=1
+              break
+            fi
+            sleep 15
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: guest did not become ready"
+            cat /tmp/vm-e2e-cloud-init.err || true
+            exit 1
+          fi
+
+      - name: Run documented guest-exec flow
+        run: |
+          set -euo pipefail
+
+          docker exec "${CONTAINER_NAME}" guest-exec "cat /etc/os-release" >/tmp/vm-e2e-os-release.txt
+          grep -Eq '^ID=' /tmp/vm-e2e-os-release.txt
+
+          set +e
+          docker exec "${CONTAINER_NAME}" guest-exec "exit 42"
+          rc=$?
+          set -e
+          if [ "${rc}" -ne 42 ]; then
+            echo "E2E failed: guest-exec exit code propagation mismatch (${rc})"
+            exit 1
+          fi
+
+      - name: Verify forwarded SSH port is reachable
+        run: |
+          set -euo pipefail
+          docker port "${CONTAINER_NAME}" "${GUEST_SSH_PORT}" >/tmp/vm-e2e-portmap.txt
+
+          ok=0
+          for _ in $(seq 1 120); do
+            if (echo >/dev/tcp/127.0.0.1/${HOST_SSH_PORT}) >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: SSH port ${HOST_SSH_PORT} did not become reachable"
+            exit 1
+          fi
+
+      - name: Wait until manager enters steady-state VM wait loop
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 240); do
+            running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" || echo false)"
+            if [ "${running}" != "true" ]; then
+              break
+            fi
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Waiting for domain ${CONTAINER_NAME} to stop"; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: manager did not reach steady-state wait loop"
+            exit 1
+          fi
+
+      - name: Request graceful shutdown
+        run: |
+          set -euo pipefail
+          docker stop --time 180 "${CONTAINER_NAME}" >/tmp/vm-e2e-stop.txt
+
+      - name: Verify clean container exit
+        run: |
+          set -euo pipefail
+
+          running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" || echo false)"
+          if [ "${running}" = "true" ]; then
+            echo "E2E failed: container is still running after docker stop"
+            exit 1
+          fi
+
+          exit_code="$(docker inspect -f '{{.State.ExitCode}}' "${CONTAINER_NAME}" || echo 999)"
+          echo "${exit_code}" >/tmp/vm-e2e-exit-code.txt
+          if [ "${exit_code}" != "0" ]; then
+            echo "E2E failed: container exit code is ${exit_code} (expected 0)"
+            exit 1
+          fi
+
+      - name: Collect diagnostics
+        if: always()
+        run: |
+          docker inspect "${CONTAINER_NAME}" >/tmp/vm-e2e-inspect.json 2>/dev/null || true
+          docker logs "${CONTAINER_NAME}" >/tmp/vm-e2e.log 2>&1 || true
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
+      - name: Upload E2E artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-vm-e2e-outputs
+          path: |
+            /tmp/vm-e2e-container-id.txt
+            /tmp/vm-e2e-health.txt
+            /tmp/vm-e2e-portmap.txt
+            /tmp/vm-e2e-stop.txt
+            /tmp/vm-e2e-exit-code.txt
+            /tmp/vm-e2e-cloud-init.txt
+            /tmp/vm-e2e-cloud-init.err
+            /tmp/vm-e2e-os-release.txt
+            /tmp/vm-e2e-kvm-mode.txt
+            /tmp/vm-e2e-inspect.json
+            /tmp/vm-e2e.log
