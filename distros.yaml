@@ -52,7 +52,7 @@ distributions:
   # CentOS Stream
   centos-stream-10:
     name: "CentOS Stream 10"
-    url: "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2"
+    url: "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-x86_64-10-latest.x86_64.qcow2"
     arch: x86_64
 
   centos-stream-10-arm64:
