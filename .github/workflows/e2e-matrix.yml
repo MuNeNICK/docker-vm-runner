@@ -1,0 +1,334 @@
+name: Multi-Distro E2E
+
+on:
+  schedule:
+    - cron: "0 3 * * 6" # Every Saturday 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      distros:
+        description: >
+          Comma-separated distro filter (e.g. "ubuntu-2404,rocky-linux-9").
+          Leave empty to run all.
+        required: false
+        default: ""
+
+concurrency:
+  group: e2e-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t docker-vm-runner:e2e .
+
+      - name: Save image as artifact
+        run: docker save docker-vm-runner:e2e | gzip > /tmp/docker-vm-runner-e2e.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/docker-vm-runner-e2e.tar.gz
+          retention-days: 1
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu-2404
+            family: debian
+            readiness: cloud-init
+            verify_cmd: "cat /etc/os-release"
+            verify_pattern: "^ID="
+            boot_timeout: 240
+            stop_timeout: 180
+
+          - distro: rocky-linux-9
+            family: rhel
+            readiness: cloud-init
+            verify_cmd: "cat /etc/os-release"
+            verify_pattern: "^ID="
+            boot_timeout: 240
+            stop_timeout: 180
+
+          - distro: alpine-3
+            family: alpine
+            readiness: cloud-init
+            verify_cmd: "cat /etc/os-release"
+            verify_pattern: "^ID="
+            boot_timeout: 300
+            stop_timeout: 180
+
+          - distro: freebsd-15
+            family: bsd
+            readiness: agent-only
+            verify_cmd: "uname -s"
+            verify_pattern: "FreeBSD"
+            boot_timeout: 360
+            stop_timeout: 300
+
+    env:
+      IMAGE_NAME: docker-vm-runner:e2e
+      CONTAINER_NAME: vm-e2e-${{ matrix.distro }}
+      HOST_SSH_PORT: "2222"
+      GUEST_SSH_PORT: "2222"
+
+    steps:
+      - name: Check distro filter
+        id: filter
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.distros != ''
+        run: |
+          filter="${{ github.event.inputs.distros }}"
+          distro="${{ matrix.distro }}"
+          if echo ",${filter}," | grep -q ",${distro},"; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip filtered distro
+        if: steps.filter.outputs.skip == 'true'
+        run: |
+          echo "Skipping ${{ matrix.distro }} (not in filter list)"
+          exit 0
+
+      - name: Checkout
+        if: steps.filter.outputs.skip != 'true'
+        uses: actions/checkout@v4
+
+      - name: Download image artifact
+        if: steps.filter.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker image
+        if: steps.filter.outputs.skip != 'true'
+        run: docker load < /tmp/docker-vm-runner-e2e.tar.gz
+
+      - name: Detect KVM availability
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            echo "KVM_DOCKER_ARGS=--device /dev/kvm:/dev/kvm -e REQUIRE_KVM=1" >> "$GITHUB_ENV"
+            echo "KVM_MODE=kvm" >> "$GITHUB_ENV"
+            echo "kvm" > /tmp/vm-e2e-kvm-mode.txt
+          else
+            echo "KVM_DOCKER_ARGS=" >> "$GITHUB_ENV"
+            echo "KVM_MODE=tcg" >> "$GITHUB_ENV"
+            echo "tcg" > /tmp/vm-e2e-kvm-mode.txt
+          fi
+
+      - name: Start container
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          echo "Runner virtualization mode: ${KVM_MODE}"
+          echo "Distro: ${{ matrix.distro }} (family: ${{ matrix.family }})"
+          docker run -d --name "${CONTAINER_NAME}" \
+            --hostname "${CONTAINER_NAME}" \
+            -p "${HOST_SSH_PORT}:${GUEST_SSH_PORT}" \
+            -e NO_CONSOLE=1 \
+            -e DISTRO=${{ matrix.distro }} \
+            -e SSH_PORT="${GUEST_SSH_PORT}" \
+            -e CPUS=2 \
+            -e MEMORY=2048 \
+            -e DISK_SIZE=10G \
+            ${KVM_DOCKER_ARGS} \
+            "${IMAGE_NAME}" >/tmp/vm-e2e-container-id.txt
+
+      - name: Wait for VM healthcheck
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 ${{ matrix.boot_timeout }}); do
+            running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" || echo false)"
+            if [ "${running}" != "true" ]; then
+              break
+            fi
+
+            health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER_NAME}")"
+            echo "${health}" > /tmp/vm-e2e-health.txt
+            if [ "${health}" = "healthy" ]; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: container never became healthy (timeout=${{ matrix.boot_timeout }}s)"
+            exit 1
+          fi
+
+      - name: Wait for guest readiness (cloud-init)
+        if: steps.filter.outputs.skip != 'true' && matrix.readiness == 'cloud-init'
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 20); do
+            if docker exec "${CONTAINER_NAME}" guest-exec --wait "cloud-init status --wait" \
+              >/tmp/vm-e2e-cloud-init.txt 2>/tmp/vm-e2e-cloud-init.err; then
+              ok=1
+              break
+            fi
+            sleep 15
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: guest did not become ready (cloud-init)"
+            cat /tmp/vm-e2e-cloud-init.err || true
+            exit 1
+          fi
+
+      - name: Wait for guest readiness (agent-only)
+        if: steps.filter.outputs.skip != 'true' && matrix.readiness == 'agent-only'
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 30); do
+            if docker exec "${CONTAINER_NAME}" guest-exec "echo ready" \
+              >/tmp/vm-e2e-agent-ready.txt 2>/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 15
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: guest agent did not become ready"
+            exit 1
+          fi
+
+      - name: Run guest-exec verification
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+
+          docker exec "${CONTAINER_NAME}" guest-exec "${{ matrix.verify_cmd }}" >/tmp/vm-e2e-verify.txt
+          if ! grep -Eq '${{ matrix.verify_pattern }}' /tmp/vm-e2e-verify.txt; then
+            echo "E2E failed: verify command output does not match pattern '${{ matrix.verify_pattern }}'"
+            cat /tmp/vm-e2e-verify.txt
+            exit 1
+          fi
+
+      - name: Test exit code propagation
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          set +e
+          docker exec "${CONTAINER_NAME}" guest-exec "exit 42"
+          rc=$?
+          set -e
+          if [ "${rc}" -ne 42 ]; then
+            echo "E2E failed: guest-exec exit code propagation mismatch (got ${rc}, expected 42)"
+            exit 1
+          fi
+
+      - name: Verify forwarded SSH port is reachable
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          docker port "${CONTAINER_NAME}" "${GUEST_SSH_PORT}" >/tmp/vm-e2e-portmap.txt
+
+          ok=0
+          for _ in $(seq 1 120); do
+            if (echo >/dev/tcp/127.0.0.1/${HOST_SSH_PORT}) >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: SSH port ${HOST_SSH_PORT} did not become reachable"
+            exit 1
+          fi
+
+      - name: Wait until manager enters steady-state
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          ok=0
+          for _ in $(seq 1 240); do
+            running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" || echo false)"
+            if [ "${running}" != "true" ]; then
+              break
+            fi
+            if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q "Waiting for domain ${CONTAINER_NAME} to stop"; then
+              ok=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${ok}" -ne 1 ]; then
+            echo "E2E failed: manager did not reach steady-state wait loop"
+            exit 1
+          fi
+
+      - name: Request graceful shutdown
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          docker stop --time ${{ matrix.stop_timeout }} "${CONTAINER_NAME}" >/tmp/vm-e2e-stop.txt
+
+      - name: Verify clean container exit
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+
+          running="$(docker inspect -f '{{.State.Running}}' "${CONTAINER_NAME}" || echo false)"
+          if [ "${running}" = "true" ]; then
+            echo "E2E failed: container is still running after docker stop"
+            exit 1
+          fi
+
+          exit_code="$(docker inspect -f '{{.State.ExitCode}}' "${CONTAINER_NAME}" || echo 999)"
+          echo "${exit_code}" >/tmp/vm-e2e-exit-code.txt
+          if [ "${exit_code}" != "0" ]; then
+            echo "E2E failed: container exit code is ${exit_code} (expected 0)"
+            exit 1
+          fi
+
+      - name: Collect diagnostics
+        if: always() && steps.filter.outputs.skip != 'true'
+        run: |
+          docker inspect "${CONTAINER_NAME}" >/tmp/vm-e2e-inspect.json 2>/dev/null || true
+          docker logs "${CONTAINER_NAME}" >/tmp/vm-e2e.log 2>&1 || true
+
+      - name: Cleanup
+        if: always() && steps.filter.outputs.skip != 'true'
+        run: docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+
+      - name: Upload E2E artifacts
+        if: always() && steps.filter.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.distro }}
+          path: |
+            /tmp/vm-e2e-container-id.txt
+            /tmp/vm-e2e-health.txt
+            /tmp/vm-e2e-portmap.txt
+            /tmp/vm-e2e-stop.txt
+            /tmp/vm-e2e-exit-code.txt
+            /tmp/vm-e2e-cloud-init.txt
+            /tmp/vm-e2e-cloud-init.err
+            /tmp/vm-e2e-agent-ready.txt
+            /tmp/vm-e2e-verify.txt
+            /tmp/vm-e2e-kvm-mode.txt
+            /tmp/vm-e2e-inspect.json
+            /tmp/vm-e2e.log
