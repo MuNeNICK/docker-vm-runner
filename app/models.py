@@ -107,6 +107,8 @@ class VMConfig:
     hyperv_enabled: bool = False
     # GPU
     gpu_passthrough: str = "off"
+    # Shell
+    login_shell: str = "/bin/bash"
     # Download
     download_retries: int = 3
 

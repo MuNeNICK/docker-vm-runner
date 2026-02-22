@@ -524,7 +524,7 @@ class VMManager:
                         "name": self.cfg.login_user,
                         "lock_passwd": False,
                         "sudo": "ALL=(ALL) NOPASSWD:ALL",
-                        "shell": "/bin/bash",
+                        "shell": self.cfg.login_shell,
                         "passwd": passwd_hash,
                     }
                 ],

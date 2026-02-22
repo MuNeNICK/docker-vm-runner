@@ -580,6 +580,13 @@ def parse_env() -> VMConfig:
     rng_enabled = get_env_bool("RNG", True)
     io_thread = get_env_bool("IO_THREAD", True)
 
+    # --- Login shell ---
+    shell_env = get_env("SHELL")
+    if shell_env is not None:
+        login_shell = shell_env.strip()
+    else:
+        login_shell = distro_info.get("shell", "/bin/bash")
+
     # --- Download retries ---
     download_retries = parse_int_env("DOWNLOAD_RETRIES", "3", min_val=1, max_val=10)
 
@@ -645,5 +652,6 @@ def parse_env() -> VMConfig:
         usb_controller=usb_controller,
         hyperv_enabled=hyperv_enabled,
         gpu_passthrough=gpu_passthrough,
+        login_shell=login_shell,
         download_retries=download_retries,
     )

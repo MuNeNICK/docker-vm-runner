@@ -7,214 +7,254 @@ distributions:
     name: "Ubuntu 24.04 LTS (Noble)"
     url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
     arch: x86_64
+    shell: /bin/bash
 
   ubuntu-2404-arm64:
     name: "Ubuntu 24.04 LTS (Noble) ARM64"
     url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-arm64.img"
     arch: aarch64
+    shell: /bin/bash
 
   ubuntu-2204:
     name: "Ubuntu 22.04 LTS (Jammy)"
     url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
     arch: x86_64
+    shell: /bin/bash
 
   ubuntu-2204-arm64:
     name: "Ubuntu 22.04 LTS (Jammy) ARM64"
     url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-arm64.img"
     arch: aarch64
+    shell: /bin/bash
 
   # Debian
   debian-13:
     name: "Debian 13 (Trixie)"
     url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   debian-13-arm64:
     name: "Debian 13 (Trixie) ARM64"
     url: "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-arm64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   debian-12:
     name: "Debian 12 (Bookworm)"
     url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   debian-12-arm64:
     name: "Debian 12 (Bookworm) ARM64"
     url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-arm64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   debian-11:
     name: "Debian 11 (Bullseye)"
     url: "https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   # CentOS Stream
   centos-stream-10:
     name: "CentOS Stream 10"
     url: "https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-x86_64-10-latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   centos-stream-10-arm64:
     name: "CentOS Stream 10 ARM64"
     url: "https://cloud.centos.org/centos/10-stream/aarch64/images/CentOS-Stream-GenericCloud-10-latest.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   centos-stream-9:
     name: "CentOS Stream 9"
     url: "https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-x86_64-9-latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   centos-stream-9-arm64:
     name: "CentOS Stream 9 ARM64"
     url: "https://cloud.centos.org/centos/9-stream/aarch64/images/CentOS-Stream-GenericCloud-9-latest.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   # Fedora
   fedora-43:
     name: "Fedora 43"
     url: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   fedora-43-arm64:
     name: "Fedora 43 ARM64"
     url: "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/aarch64/images/Fedora-Cloud-Base-Generic-43-1.6.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   # openSUSE
   opensuse-tumbleweed:
     name: "openSUSE Tumbleweed"
     url: "https://download.opensuse.org/tumbleweed/appliances/openSUSE-Tumbleweed-Minimal-VM.x86_64-Cloud.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   opensuse-leap-160:
     name: "openSUSE Leap 16.0"
     url: "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   # Rocky Linux
   rocky-linux-10:
     name: "Rocky Linux 10"
     url: "https://download.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base.latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   rocky-linux-10-arm64:
     name: "Rocky Linux 10 ARM64"
     url: "https://download.rockylinux.org/pub/rocky/10/images/aarch64/Rocky-10-GenericCloud-Base.latest.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   rocky-linux-9:
     name: "Rocky Linux 9"
     url: "https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   rocky-linux-9-arm64:
     name: "Rocky Linux 9 ARM64"
     url: "https://download.rockylinux.org/pub/rocky/9/images/aarch64/Rocky-9-GenericCloud-Base.latest.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   rocky-linux-8:
     name: "Rocky Linux 8"
     url: "https://download.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base.latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   # AlmaLinux
   almalinux-10:
     name: "AlmaLinux 10"
     url: "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   almalinux-10-arm64:
     name: "AlmaLinux 10 ARM64"
     url: "https://repo.almalinux.org/almalinux/10/cloud/aarch64/images/AlmaLinux-10-GenericCloud-latest.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   almalinux-9:
     name: "AlmaLinux 9"
     url: "https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   almalinux-9-arm64:
     name: "AlmaLinux 9 ARM64"
     url: "https://repo.almalinux.org/almalinux/9/cloud/aarch64/images/AlmaLinux-9-GenericCloud-latest.aarch64.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   almalinux-8:
     name: "AlmaLinux 8"
     url: "https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-latest.x86_64.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   # Arch Linux
   archlinux:
     name: "Arch Linux"
     url: "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   # Oracle Linux
   oracle-linux-9:
     name: "Oracle Linux 9"
     url: "https://yum.oracle.com/templates/OracleLinux/OL9/u7/x86_64/OL9U7_x86_64-kvm-b269.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   oracle-linux-9-arm64:
     name: "Oracle Linux 9 ARM64"
     url: "https://yum.oracle.com/templates/OracleLinux/OL9/u7/aarch64/OL9U7_aarch64-kvm-cloud-b158.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   # Alpine Linux
   alpine-3:
     name: "Alpine Linux 3.23"
     url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/nocloud_alpine-3.23.3-x86_64-uefi-cloudinit-r0.qcow2"
     arch: x86_64
+    shell: /bin/sh
 
   alpine-3-arm64:
     name: "Alpine Linux 3.23 ARM64"
     url: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/nocloud_alpine-3.23.3-aarch64-uefi-cloudinit-r0.qcow2"
     arch: aarch64
+    shell: /bin/sh
 
   # Amazon Linux
   amazon-linux-2023:
     name: "Amazon Linux 2023"
     url: "https://cdn.amazonlinux.com/al2023/os-images/latest/kvm/al2023-kvm-2023.10.20260216.1-kernel-6.1-x86_64.xfs.gpt.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   amazon-linux-2023-arm64:
     name: "Amazon Linux 2023 ARM64"
     url: "https://cdn.amazonlinux.com/al2023/os-images/latest/kvm-arm64/al2023-kvm-2023.10.20260216.1-kernel-6.1-arm64.xfs.gpt.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   # FreeBSD
   freebsd-15:
     name: "FreeBSD 15.0"
     url: "https://download.freebsd.org/releases/VM-IMAGES/15.0-RELEASE/amd64/Latest/FreeBSD-15.0-RELEASE-amd64-BASIC-CLOUDINIT-ufs.qcow2.xz"
     arch: x86_64
+    shell: /bin/sh
 
   freebsd-15-arm64:
     name: "FreeBSD 15.0 ARM64"
     url: "https://download.freebsd.org/releases/VM-IMAGES/15.0-RELEASE/aarch64/Latest/FreeBSD-15.0-RELEASE-arm64-aarch64-BASIC-CLOUDINIT-ufs.qcow2.xz"
     arch: aarch64
+    shell: /bin/sh
 
   # Gentoo
   gentoo:
     name: "Gentoo"
     url: "https://distfiles.gentoo.org/releases/amd64/autobuilds/20260215T164556Z/di-amd64-cloudinit-20260215T164556Z.qcow2"
     arch: x86_64
+    shell: /bin/bash
 
   gentoo-arm64:
     name: "Gentoo ARM64"
     url: "https://distfiles.gentoo.org/releases/arm64/autobuilds/20260215T233115Z/di-arm64-cloudinit-20260215T233115Z.qcow2"
     arch: aarch64
+    shell: /bin/bash
 
   # Kali Linux
   kali:
     name: "Kali Linux"
     url: "https://kali.download/cloud-images/current/kali-linux-2025.4-cloud-genericcloud-amd64.tar.xz"
     arch: x86_64
+    shell: /bin/bash
 
   kali-arm64:
     name: "Kali Linux ARM64"
     url: "https://kali.download/cloud-images/current/kali-linux-2025.4-cloud-genericcloud-arm64.tar.xz"
     arch: aarch64
+    shell: /bin/bash
 
 # Default VM settings are controlled via environment variables:
 #   MEMORY=4096  CPUS=2  DISK_SIZE=20G  NETWORK_MODE=nat

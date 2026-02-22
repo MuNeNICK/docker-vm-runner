@@ -59,7 +59,10 @@ These map to entries in `distros.yaml` (bind-mount your own file to `/config/dis
 - `gentoo`, `gentoo-arm64`
 - `kali`, `kali-arm64`
 
-Each entry can declare an `arch` field to set the default architecture for that image. If omitted it defaults to `x86_64`.
+Each entry can declare:
+- `arch` — default architecture for that image (defaults to `x86_64`).
+- `shell` — login shell for the guest user (defaults to `/bin/bash`). Use `/bin/sh` for distros without bash (e.g. Alpine).
+- `user` — login username (defaults to `user`).
 
 ## Environment Variables
 
@@ -113,6 +116,7 @@ Each entry can declare an `arch` field to set the default architecture for that 
 | --- | --- | --- |
 | `GUEST_NAME` | *(auto)* | Internal VM name, used for disk paths. Fallback: `GUEST_NAME` -> `HOSTNAME` -> distro key. Set explicitly when using host networking. |
 | `GUEST_PASSWORD` | `password` | Console password injected via cloud-init. |
+| `SHELL` | `/bin/bash` | Login shell for the guest user. Override for distros without bash (e.g. Alpine uses `/bin/sh`). Per-distro defaults can be set via the `shell` field in `distros.yaml`. |
 | `SSH_PORT` | `2222` | Host TCP port forwarded to guest `:22`. |
 | `SSH_PUBKEY` | *(unset)* | SSH public key injected via cloud-init. |
 | `PERSIST` | `0` (`1` when `/data` mounted) | Keep the work disk and libvirt domain after shutdown. Automatically enabled when a volume is mounted at `/data`. |
