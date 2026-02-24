@@ -7,6 +7,7 @@ import yaml
 
 from app.config import load_distro_config, parse_env
 from app.exceptions import ManagerError
+from app.models import GuestAddress
 
 
 @pytest.fixture
@@ -124,3 +125,69 @@ class TestParseEnv:
 
         cfg = parse_env()
         assert cfg.arch == "x86_64"
+
+    def test_guest_ip_default_empty(self):
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ips == []
+        assert cfg.nics[0].guest_ip6s == []
+
+    def test_guest_ip_single(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP", "192.168.1.100")
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ips == [GuestAddress("192.168.1.100", 24)]
+
+    def test_guest_ip_with_cidr(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP", "172.16.0.10/12")
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ips == [GuestAddress("172.16.0.10", 12)]
+
+    def test_guest_ip_multiple(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP", "10.0.2.15/24,192.168.1.100/16")
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ips == [
+            GuestAddress("10.0.2.15", 24),
+            GuestAddress("192.168.1.100", 16),
+        ]
+
+    def test_guest_ip_invalid_address(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP", "not-an-ip")
+        with pytest.raises(ManagerError, match="Invalid NETWORK_GUEST_IP.*must be a valid IPv4 address"):
+            parse_env()
+
+    def test_guest_ip_invalid_prefix(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP", "10.0.2.15/abc")
+        with pytest.raises(ManagerError, match="Invalid NETWORK_GUEST_IP prefix.*/abc.*must be an integer"):
+            parse_env()
+
+    def test_guest_ip_prefix_out_of_range(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP", "10.0.2.15/0")
+        with pytest.raises(ManagerError, match="Invalid NETWORK_GUEST_IP prefix.*/0.*must be between 1 and 32"):
+            parse_env()
+
+    def test_guest_ip6_single(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP6", "fd00::1")
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ip6s == [GuestAddress("fd00::1", 64)]
+
+    def test_guest_ip6_with_prefix(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP6", "fd00::1/48")
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ip6s == [GuestAddress("fd00::1", 48)]
+
+    def test_guest_ip6_multiple(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP6", "fec0::2/64,fd00::1/128")
+        cfg = parse_env()
+        assert cfg.nics[0].guest_ip6s == [
+            GuestAddress("fec0::2", 64),
+            GuestAddress("fd00::1", 128),
+        ]
+
+    def test_guest_ip6_invalid_address(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP6", "not-ipv6")
+        with pytest.raises(ManagerError, match="Invalid NETWORK_GUEST_IP6.*must be a valid IPv6 address"):
+            parse_env()
+
+    def test_guest_ip6_prefix_out_of_range(self, monkeypatch):
+        monkeypatch.setenv("NETWORK_GUEST_IP6", "fd00::1/0")
+        with pytest.raises(ManagerError, match="Invalid NETWORK_GUEST_IP6 prefix.*/0.*must be between 1 and 128"):
+            parse_env()

@@ -92,9 +92,39 @@ The host's default interface MTU is automatically detected. If it differs from 1
 
 Per-NIC override is supported with indexed variables: `NETWORK2_MTU`, `NETWORK3_MTU`, etc.
 
+### Guest IP Address
+
+By default, user-mode (NAT) networking assigns `10.0.2.15/24` to the guest. Override with `NETWORK_GUEST_IP` using CIDR notation:
+
+```bash
+# Single address with custom prefix
+-e NETWORK_GUEST_IP=192.168.1.100/16
+
+# Multiple addresses (comma-separated)
+-e NETWORK_GUEST_IP=10.0.2.15/24,192.168.1.100/16
+```
+
+The prefix defaults to `/24` when omitted (e.g. `192.168.1.100` is equivalent to `192.168.1.100/24`).
+
+Per-NIC override is supported with indexed variables: `NETWORK2_GUEST_IP`, `NETWORK3_GUEST_IP`, etc.
+
 ### IPv6
 
 IPv6 is automatically enabled in user-mode (NAT) networking when the host has IPv6 support (detected via `/proc/net/if_inet6`). The guest receives a link-local IPv6 address (`fec0::2/64`) in addition to the IPv4 address.
+
+To override the IPv6 address, use `NETWORK_GUEST_IP6` with CIDR notation:
+
+```bash
+# Single IPv6 address
+-e NETWORK_GUEST_IP6=fd00::1/64
+
+# Multiple IPv6 addresses
+-e NETWORK_GUEST_IP6=fec0::2/64,fd00::1/128
+```
+
+The prefix defaults to `/64` when omitted. When `NETWORK_GUEST_IP6` is set, it takes precedence over the auto-detected default.
+
+Per-NIC override: `NETWORK2_GUEST_IP6`, `NETWORK3_GUEST_IP6`, etc.
 
 ### Direct mode caveats
 

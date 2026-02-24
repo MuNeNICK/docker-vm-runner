@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, NamedTuple, Optional
 
@@ -10,6 +10,11 @@ from typing import List, NamedTuple, Optional
 class PortForward(NamedTuple):
     host_port: int
     guest_port: int
+
+
+class GuestAddress(NamedTuple):
+    address: str
+    prefix: int
 
 
 @dataclass
@@ -34,6 +39,8 @@ class NicConfig:
     model: str = "virtio"
     boot: bool = False
     mtu: Optional[int] = None
+    guest_ips: List[GuestAddress] = field(default_factory=list)
+    guest_ip6s: List[GuestAddress] = field(default_factory=list)
 
 
 @dataclass

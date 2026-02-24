@@ -29,6 +29,7 @@ from app.models import (
     BlockDevice,
     DiskConfig,
     FilesystemConfig,
+    GuestAddress,
     NicConfig,
     PortForward,
     VMConfig,
@@ -249,6 +250,45 @@ def parse_env() -> VMConfig:
         prefix, rest = name.split("_", 1)
         return get_env(f"{prefix}{index}_{rest}")
 
+    def _parse_guest_addresses(
+        raw: Optional[str], *, family: int, index: int,
+    ) -> List[GuestAddress]:
+        """Parse comma-separated CIDR addresses (e.g. '10.0.2.15/24,192.168.1.100/16')."""
+        import ipaddress
+
+        if raw is None or not raw.strip():
+            return []
+
+        suffix = "" if index == 1 else str(index)
+        env_name = f"NETWORK{suffix}_GUEST_IP" if family == 4 else f"NETWORK{suffix}_GUEST_IP6"
+        addr_cls = ipaddress.IPv4Address if family == 4 else ipaddress.IPv6Address
+        default_prefix = 24 if family == 4 else 64
+        max_prefix = 32 if family == 4 else 128
+
+        result: List[GuestAddress] = []
+        for entry in raw.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if "/" in entry:
+                addr_part, prefix_part = entry.rsplit("/", 1)
+                try:
+                    prefix = int(prefix_part)
+                except ValueError:
+                    raise ManagerError(f"Invalid {env_name} prefix '/{prefix_part}': must be an integer")
+                if not (1 <= prefix <= max_prefix):
+                    raise ManagerError(f"Invalid {env_name} prefix '/{prefix}': must be between 1 and {max_prefix}")
+            else:
+                addr_part = entry
+                prefix = default_prefix
+            try:
+                addr_cls(addr_part.strip())
+            except (ipaddress.AddressValueError, ValueError):
+                family_name = "IPv4" if family == 4 else "IPv6"
+                raise ManagerError(f"Invalid {env_name} '{addr_part.strip()}': must be a valid {family_name} address")
+            result.append(GuestAddress(address=addr_part.strip(), prefix=prefix))
+        return result
+
     def build_nic(index: int) -> Optional[NicConfig]:
         mode_raw = get_env_indexed("NETWORK_MODE", index)
         if mode_raw is None or not mode_raw.strip():
@@ -305,6 +345,15 @@ def parse_env() -> VMConfig:
                 mtu = detected_mtu
                 log("INFO", f"Auto-detected host MTU: {mtu}")
 
+        guest_ips = _parse_guest_addresses(
+            get_env_indexed("NETWORK_GUEST_IP", index),
+            family=4, index=index,
+        )
+        guest_ip6s = _parse_guest_addresses(
+            get_env_indexed("NETWORK_GUEST_IP6", index),
+            family=6, index=index,
+        )
+
         nic = NicConfig(
             mode=mode_key,
             bridge_name=bridge_name,
@@ -313,6 +362,8 @@ def parse_env() -> VMConfig:
             model=model,
             boot=False,
             mtu=mtu,
+            guest_ips=guest_ips,
+            guest_ip6s=guest_ip6s,
         )
 
         boot_override = get_env_indexed("NETWORK_BOOT", index)

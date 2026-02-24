@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.exceptions import ManagerError
-from app.models import NicConfig, PortForward
+from app.models import GuestAddress, NicConfig, PortForward
 from app.network import render_network_xml
 
 
@@ -49,6 +49,85 @@ class TestRenderNetworkXmlUser:
         xml, mac = render_network_xml(nic)
         assert mac.startswith("52:54:00:")
         assert f'<mac address="{mac}"/>' in xml
+
+    def test_custom_guest_ip(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ips=[GuestAddress("192.168.1.100", 24)],
+        )
+        xml, _ = render_network_xml(nic)
+        assert '<ip family="ipv4" address="192.168.1.100" prefix="24"/>' in xml
+        assert "10.0.2.15" not in xml
+
+    def test_custom_guest_ip_with_prefix(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ips=[GuestAddress("172.16.0.10", 12)],
+        )
+        xml, _ = render_network_xml(nic)
+        assert '<ip family="ipv4" address="172.16.0.10" prefix="12"/>' in xml
+
+    def test_multiple_guest_ips(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ips=[
+                GuestAddress("10.0.2.15", 24),
+                GuestAddress("192.168.1.100", 16),
+            ],
+        )
+        xml, _ = render_network_xml(nic)
+        assert '<ip family="ipv4" address="10.0.2.15" prefix="24"/>' in xml
+        assert '<ip family="ipv4" address="192.168.1.100" prefix="16"/>' in xml
+
+    def test_custom_guest_ip6(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ip6s=[GuestAddress("fd00::1", 64)],
+        )
+        xml, _ = render_network_xml(nic)
+        assert '<ip family="ipv6" address="fd00::1" prefix="64"/>' in xml
+        assert "fec0::2" not in xml
+
+    def test_multiple_guest_ip6s(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ip6s=[
+                GuestAddress("fec0::2", 64),
+                GuestAddress("fd00::1", 128),
+            ],
+        )
+        xml, _ = render_network_xml(nic)
+        assert '<ip family="ipv6" address="fec0::2" prefix="64"/>' in xml
+        assert '<ip family="ipv6" address="fd00::1" prefix="128"/>' in xml
+
+    def test_ipv6_enabled_uses_default(self):
+        nic = NicConfig(mode="user", mac_address="52:54:00:aa:bb:cc")
+        xml, _ = render_network_xml(nic, ipv6_enabled=True)
+        assert '<ip family="ipv6" address="fec0::2" prefix="64"/>' in xml
+
+    def test_ipv6_disabled_no_ipv6(self):
+        nic = NicConfig(mode="user", mac_address="52:54:00:aa:bb:cc")
+        xml, _ = render_network_xml(nic, ipv6_enabled=False)
+        assert "ipv6" not in xml
+
+    def test_explicit_ip6_overrides_ipv6_enabled(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ip6s=[GuestAddress("fd00::5", 48)],
+        )
+        xml, _ = render_network_xml(nic, ipv6_enabled=True)
+        assert '<ip family="ipv6" address="fd00::5" prefix="48"/>' in xml
+        assert "fec0::2" not in xml
+
+    def test_mixed_ipv4_and_ipv6(self):
+        nic = NicConfig(
+            mode="user", mac_address="52:54:00:aa:bb:cc",
+            guest_ips=[GuestAddress("192.168.0.10", 24)],
+            guest_ip6s=[GuestAddress("fd00::10", 64)],
+        )
+        xml, _ = render_network_xml(nic)
+        assert '<ip family="ipv4" address="192.168.0.10" prefix="24"/>' in xml
+        assert '<ip family="ipv6" address="fd00::10" prefix="64"/>' in xml
 
 
 class TestRenderNetworkXmlBridge:

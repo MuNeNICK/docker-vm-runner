@@ -150,6 +150,8 @@ _PARSE_ENV_VARS = [
     "DISK_IO",
     "DISK_CACHE",
     "NETWORK_MTU",
+    "NETWORK_GUEST_IP",
+    "NETWORK_GUEST_IP6",
 ]
 
 

@@ -147,11 +147,13 @@ The guest automatically mounts each tag at `/mnt/<tag>` using cloud-init. Virtio
 | `NETWORK_MAC` | *(auto)* | Override the guest MAC address (`aa:bb:cc:dd:ee:ff`). |
 | `NETWORK_MODEL` | `virtio` | NIC model: `virtio`, `e1000`, `e1000e`, `rtl8139`, `ne2k_pci`, `pcnet`, `vmxnet3`. |
 | `NETWORK_MTU` | *(auto)* | MTU for the guest NIC. Auto-detected from the host default interface; only set in the domain XML when != 1500. |
+| `NETWORK_GUEST_IP` | *(unset)* | Guest IPv4 address(es) in CIDR notation. Comma-separated for multiple addresses (e.g. `10.0.2.15/24,192.168.1.100/16`). Prefix defaults to `/24` when omitted. Only applies to user-mode (NAT). Default: `10.0.2.15/24`. |
+| `NETWORK_GUEST_IP6` | *(unset)* | Guest IPv6 address(es) in CIDR notation. Comma-separated for multiple addresses (e.g. `fec0::2/64,fd00::1/128`). Prefix defaults to `/64` when omitted. Overrides the auto-detected default when set. |
 | `NETWORK_BOOT` | `0` | Set `1` to include this NIC in the boot order (useful for PXE without iPXE). |
 | `IPXE_ENABLE` | `0` | Inject an iPXE ROM on the primary NIC and prioritize `network` in the boot order. |
 | `IPXE_ROM_PATH` | *(auto)* | Override the iPXE ROM path. Auto-selected based on `NETWORK_MODEL` (e.g. `pxe-virtio.rom` for virtio on x86_64). Provide a full path when using a custom build. |
 
-**Multi-NIC:** Append an index after the prefix to define additional NICs: `NETWORK2_MODE`, `NETWORK2_BRIDGE`, `NETWORK2_MAC`, etc. The first NIC uses the base name (no index).
+**Multi-NIC:** Append an index after the prefix to define additional NICs: `NETWORK2_MODE`, `NETWORK2_BRIDGE`, `NETWORK2_MAC`, `NETWORK2_GUEST_IP`, `NETWORK2_GUEST_IP6`, etc. The first NIC uses the base name (no index).
 
 ### Graphics & GUI
 

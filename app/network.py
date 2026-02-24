@@ -6,7 +6,10 @@ from typing import List, Optional, Tuple
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 from app.exceptions import ManagerError
-from app.models import NicConfig, PortForward
+from app.models import GuestAddress, NicConfig, PortForward
+
+_DEFAULT_IPV4 = GuestAddress("10.0.2.15", 24)
+_DEFAULT_IPV6 = GuestAddress("fec0::2", 64)
 from app.utils import random_mac
 
 
@@ -43,9 +46,14 @@ def render_network_xml(
             SubElement(iface, "boot", order=str(boot_order))
         SubElement(iface, "mac", address=mac)
         SubElement(iface, "backend", type="passt")
-        SubElement(iface, "ip", family="ipv4", address="10.0.2.15", prefix="24")
-        if ipv6_enabled:
-            SubElement(iface, "ip", family="ipv6", address="fec0::2", prefix="64")
+        ipv4_addrs = config.guest_ips or [_DEFAULT_IPV4]
+        for addr in ipv4_addrs:
+            SubElement(iface, "ip", family="ipv4", address=addr.address, prefix=str(addr.prefix))
+        if config.guest_ip6s:
+            for addr in config.guest_ip6s:
+                SubElement(iface, "ip", family="ipv6", address=addr.address, prefix=str(addr.prefix))
+        elif ipv6_enabled:
+            SubElement(iface, "ip", family="ipv6", address=_DEFAULT_IPV6.address, prefix=str(_DEFAULT_IPV6.prefix))
         SubElement(iface, "model", type=model)
         _add_mtu(iface, config.mtu)
         if rom_file:
