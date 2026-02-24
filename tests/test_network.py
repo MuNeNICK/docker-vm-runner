@@ -52,7 +52,8 @@ class TestRenderNetworkXmlUser:
 
     def test_custom_guest_ip(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ips=[GuestAddress("192.168.1.100", 24)],
         )
         xml, _ = render_network_xml(nic)
@@ -61,7 +62,8 @@ class TestRenderNetworkXmlUser:
 
     def test_custom_guest_ip_with_prefix(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ips=[GuestAddress("172.16.0.10", 12)],
         )
         xml, _ = render_network_xml(nic)
@@ -69,7 +71,8 @@ class TestRenderNetworkXmlUser:
 
     def test_multiple_guest_ips(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ips=[
                 GuestAddress("10.0.2.15", 24),
                 GuestAddress("192.168.1.100", 16),
@@ -81,7 +84,8 @@ class TestRenderNetworkXmlUser:
 
     def test_custom_guest_ip6(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ip6s=[GuestAddress("fd00::1", 64)],
         )
         xml, _ = render_network_xml(nic)
@@ -90,7 +94,8 @@ class TestRenderNetworkXmlUser:
 
     def test_multiple_guest_ip6s(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ip6s=[
                 GuestAddress("fec0::2", 64),
                 GuestAddress("fd00::1", 128),
@@ -112,7 +117,8 @@ class TestRenderNetworkXmlUser:
 
     def test_explicit_ip6_overrides_ipv6_enabled(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ip6s=[GuestAddress("fd00::5", 48)],
         )
         xml, _ = render_network_xml(nic, ipv6_enabled=True)
@@ -121,7 +127,8 @@ class TestRenderNetworkXmlUser:
 
     def test_mixed_ipv4_and_ipv6(self):
         nic = NicConfig(
-            mode="user", mac_address="52:54:00:aa:bb:cc",
+            mode="user",
+            mac_address="52:54:00:aa:bb:cc",
             guest_ips=[GuestAddress("192.168.0.10", 24)],
             guest_ip6s=[GuestAddress("fd00::10", 64)],
         )

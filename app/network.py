@@ -7,10 +7,10 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 
 from app.exceptions import ManagerError
 from app.models import GuestAddress, NicConfig, PortForward
+from app.utils import random_mac
 
 _DEFAULT_IPV4 = GuestAddress("10.0.2.15", 24)
 _DEFAULT_IPV6 = GuestAddress("fec0::2", 64)
-from app.utils import random_mac
 
 
 def _element_to_str(root: Element) -> str:

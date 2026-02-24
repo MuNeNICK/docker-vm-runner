@@ -251,7 +251,10 @@ def parse_env() -> VMConfig:
         return get_env(f"{prefix}{index}_{rest}")
 
     def _parse_guest_addresses(
-        raw: Optional[str], *, family: int, index: int,
+        raw: Optional[str],
+        *,
+        family: int,
+        index: int,
     ) -> List[GuestAddress]:
         """Parse comma-separated CIDR addresses (e.g. '10.0.2.15/24,192.168.1.100/16')."""
         import ipaddress
@@ -347,11 +350,13 @@ def parse_env() -> VMConfig:
 
         guest_ips = _parse_guest_addresses(
             get_env_indexed("NETWORK_GUEST_IP", index),
-            family=4, index=index,
+            family=4,
+            index=index,
         )
         guest_ip6s = _parse_guest_addresses(
             get_env_indexed("NETWORK_GUEST_IP6", index),
-            family=6, index=index,
+            family=6,
+            index=index,
         )
 
         nic = NicConfig(
