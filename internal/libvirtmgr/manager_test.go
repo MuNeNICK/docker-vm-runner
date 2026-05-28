@@ -41,6 +41,23 @@ func TestEnsureDefinedReplacesStaleManagedDomain(t *testing.T) {
 	}
 }
 
+func TestReconcileStaleDomainIgnoresMissingDomain(t *testing.T) {
+	conn := &fakeConnection{domains: map[string]*fakeDomain{}}
+	if err := New(conn).ReconcileStaleDomain("missing"); err != nil {
+		t.Fatalf("ReconcileStaleDomain returned error: %v", err)
+	}
+}
+
+func TestReconcileStaleDomainRejectsUnmanagedDomain(t *testing.T) {
+	conn := &fakeConnection{domains: map[string]*fakeDomain{
+		"test-vm": {name: "test-vm", xmlText: `<domain><name>test-vm</name></domain>`},
+	}}
+	err := New(conn).ReconcileStaleDomain("test-vm")
+	if err == nil {
+		t.Fatal("expected unmanaged domain error")
+	}
+}
+
 func TestEnsureDefinedUsesNVRAMUndefineForStaleManagedDomain(t *testing.T) {
 	existing := &fakeDomain{name: "test-vm", xmlText: strings.Replace(managedDomainXML("test-vm"), "</metadata>", "</metadata><os><nvram>/state/test.fd</nvram></os>", 1)}
 	conn := &fakeConnection{domains: map[string]*fakeDomain{"test-vm": existing}}
@@ -224,7 +241,7 @@ type fakeConnection struct {
 }
 
 func (c *fakeConnection) LookupDomain(name string) (Domain, error) {
-	if domain, ok := c.domains[name]; ok {
+	if domain, ok := c.domains[name]; ok && !domain.undefined {
 		return domain, nil
 	}
 	return nil, ErrNotFound
@@ -273,6 +290,7 @@ type fakeDomain struct {
 	undefineCalls      int
 	undefineNVRAMCalls int
 	createErr          error
+	undefined          bool
 }
 
 func (d *fakeDomain) Name() string {
@@ -309,11 +327,13 @@ func (d *fakeDomain) Destroy() error {
 
 func (d *fakeDomain) Undefine() error {
 	d.undefineCalls++
+	d.undefined = true
 	return nil
 }
 
 func (d *fakeDomain) UndefineNVRAM() error {
 	d.undefineNVRAMCalls++
+	d.undefined = true
 	return nil
 }
 

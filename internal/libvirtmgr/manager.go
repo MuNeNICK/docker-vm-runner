@@ -61,26 +61,12 @@ func (m *Manager) EnsureDefined(name string, xml string) (Domain, error) {
 	if m.Conn == nil {
 		return nil, fmt.Errorf("libvirt connection not established")
 	}
+	if err := m.ReconcileStaleDomain(name); err != nil {
+		return nil, err
+	}
 	domain, err := m.Conn.LookupDomain(name)
 	if err == nil {
-		inspection, err := inspectDomain(domain, name)
-		if err != nil {
-			return nil, err
-		}
-		if !inspection.Metadata.Managed || inspection.Metadata.VMName != name {
-			return nil, fmt.Errorf("libvirt domain %s already exists and is not managed by docker-vm-runner", name)
-		}
-		if err := m.Cleanup(domain, CleanupOptions{HasNVRAM: inspection.HasNVRAM}); err != nil {
-			return nil, fmt.Errorf("cleanup stale libvirt domain %s: %w", name, err)
-		}
-		domain, err = m.Conn.DefineDomain(xml)
-		if err != nil {
-			return nil, fmt.Errorf("define libvirt domain %s: %w", name, err)
-		}
-		if domain == nil {
-			return nil, fmt.Errorf("failed to define libvirt domain %s", name)
-		}
-		return domain, nil
+		return nil, fmt.Errorf("libvirt domain %s still exists after stale cleanup", name)
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, fmt.Errorf("lookup libvirt domain %s: %w", name, err)
@@ -93,6 +79,30 @@ func (m *Manager) EnsureDefined(name string, xml string) (Domain, error) {
 		return nil, fmt.Errorf("failed to define libvirt domain %s", name)
 	}
 	return domain, nil
+}
+
+func (m *Manager) ReconcileStaleDomain(name string) error {
+	if m.Conn == nil {
+		return fmt.Errorf("libvirt connection not established")
+	}
+	domain, err := m.Conn.LookupDomain(name)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("lookup libvirt domain %s: %w", name, err)
+	}
+	inspection, err := inspectDomain(domain, name)
+	if err != nil {
+		return err
+	}
+	if !inspection.Metadata.Managed || inspection.Metadata.VMName != name {
+		return fmt.Errorf("libvirt domain %s already exists and is not managed by docker-vm-runner", name)
+	}
+	if err := m.Cleanup(domain, CleanupOptions{HasNVRAM: inspection.HasNVRAM}); err != nil {
+		return fmt.Errorf("cleanup stale libvirt domain %s: %w", name, err)
+	}
+	return nil
 }
 
 type domainInspection struct {

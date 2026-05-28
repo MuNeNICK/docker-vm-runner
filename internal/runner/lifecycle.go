@@ -58,6 +58,7 @@ type ConcreteLifecycle struct {
 }
 
 type libvirtManager interface {
+	ReconcileStaleDomain(string) error
 	EnsureDefined(string, string) (libvirtmgr.Domain, error)
 	Start(libvirtmgr.Domain) error
 	Cleanup(libvirtmgr.Domain, libvirtmgr.CleanupOptions) error
@@ -164,6 +165,17 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
 	if err := os.MkdirAll(vmDir, 0o755); err != nil {
 		return fmt.Errorf("create VM directory: %w", err)
+	}
+	if err := l.Manager.ReconcileStaleDomain(cfg.VMName); err != nil {
+		return err
+	}
+	if !cfg.Persist {
+		if err := os.RemoveAll(vmDir); err != nil {
+			return fmt.Errorf("remove stale non-persistent VM directory: %w", err)
+		}
+		if err := os.MkdirAll(vmDir, 0o755); err != nil {
+			return fmt.Errorf("create VM directory: %w", err)
+		}
 	}
 	preparedCfg, err := l.applyPersistentState(vmDir, cfg)
 	if err != nil {

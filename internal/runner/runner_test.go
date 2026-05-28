@@ -756,6 +756,58 @@ func TestConcreteLifecycleCleanupKeepsPersistentVMDir(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareRemovesLeftoverNonPersistentVMDir(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	leftover := filepath.Join(vmDir, "leftover")
+	if err := os.WriteFile(leftover, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write leftover: %v", err)
+	}
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		Persist:        false,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if manager.reconcileCalls != 1 {
+		t.Fatalf("reconcileCalls = %d", manager.reconcileCalls)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("leftover stat err=%v", err)
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -882,6 +934,12 @@ type fakeLibvirtManager struct {
 	definedName      string
 	definedXML       string
 	storagePoolCalls int
+	reconcileCalls   int
+}
+
+func (m *fakeLibvirtManager) ReconcileStaleDomain(string) error {
+	m.reconcileCalls++
+	return nil
 }
 
 func (m *fakeLibvirtManager) EnsureDefined(name string, xml string) (libvirtmgr.Domain, error) {
