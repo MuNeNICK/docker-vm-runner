@@ -385,6 +385,9 @@ func diskController(name string) controller {
 }
 
 func (c controller) dev(index int) string {
+	if c.bus == "nvme" {
+		return fmt.Sprintf("nvme0n%d", index+1)
+	}
 	return c.prefix + string(rune('a'+index))
 }
 

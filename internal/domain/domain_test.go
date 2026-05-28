@@ -83,6 +83,30 @@ func TestRenderMinimalDomainXML(t *testing.T) {
 	}
 }
 
+func TestRenderNVMEDiskTargets(t *testing.T) {
+	vm := testVM()
+	vm.DiskController = "nvme"
+	vm.ExtraDisks = []config.Disk{{Size: "5G", Index: 2, Controller: "nvme"}}
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		VMDir:             "/vm",
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<target dev="nvme0n1" bus="nvme"/>`,
+		`<target dev="nvme0n2" bus="nvme"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+	if strings.Contains(xmlText, `target dev="nvmea"`) {
+		t.Fatalf("XML contains invalid NVMe target:\n%s", xmlText)
+	}
+}
+
 func TestRenderRunnerOwnershipMetadata(t *testing.T) {
 	vm := testVM()
 	xmlText := renderForTest(t, Request{
