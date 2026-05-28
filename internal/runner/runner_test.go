@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -846,6 +847,58 @@ func TestConcreteLifecyclePrepareRemovesLeftoverNonPersistentVMDir(t *testing.T)
 	}
 }
 
+func TestConcreteLifecycleStartVMFallsBackFromPasstBackend(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{
+		domain:    &fakeLibvirtDomain{name: "vm1"},
+		startErrs: []error{errors.New("failed to create passt backend"), nil},
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+	cfg := config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	}
+
+	if err := lifecycle.Prepare(context.Background(), cfg); err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if !strings.Contains(manager.definedXML, `<backend type="passt"/>`) {
+		t.Fatalf("initial XML missing passt backend:\n%s", manager.definedXML)
+	}
+	if err := lifecycle.StartVM(context.Background(), cfg); err != nil {
+		t.Fatalf("StartVM returned error: %v", err)
+	}
+	if manager.startCalls != 2 {
+		t.Fatalf("startCalls = %d", manager.startCalls)
+	}
+	if strings.Contains(manager.definedXML, `<backend type="passt"/>`) {
+		t.Fatalf("fallback XML still contains passt backend:\n%s", manager.definedXML)
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -973,6 +1026,8 @@ type fakeLibvirtManager struct {
 	definedXML       string
 	storagePoolCalls int
 	reconcileCalls   int
+	startCalls       int
+	startErrs        []error
 }
 
 func (m *fakeLibvirtManager) ReconcileStaleDomain(string) error {
@@ -986,7 +1041,15 @@ func (m *fakeLibvirtManager) EnsureDefined(name string, xml string) (libvirtmgr.
 	return m.domain, nil
 }
 
-func (m *fakeLibvirtManager) Start(libvirtmgr.Domain) error { return nil }
+func (m *fakeLibvirtManager) Start(libvirtmgr.Domain) error {
+	m.startCalls++
+	if len(m.startErrs) == 0 {
+		return nil
+	}
+	err := m.startErrs[0]
+	m.startErrs = m.startErrs[1:]
+	return err
+}
 func (m *fakeLibvirtManager) Cleanup(libvirtmgr.Domain, libvirtmgr.CleanupOptions) error {
 	return nil
 }

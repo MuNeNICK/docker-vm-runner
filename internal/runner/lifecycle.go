@@ -53,6 +53,9 @@ type ConcreteLifecycle struct {
 	workImagePath string
 	seedISOPath   string
 	bootISOPath   string
+	vmDir         string
+	currentConfig config.VM
+	disablePasst  bool
 	firmware      firmware.Result
 	tpmProcess    tpm.Process
 }
@@ -222,6 +225,13 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 		}
 		l.tpmProcess = result.Process
 	}
+	l.vmDir = vmDir
+	l.currentConfig = cfg
+	l.disablePasst = false
+	return l.defineDomain(ctx, cfg, vmDir)
+}
+
+func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmDir string) error {
 	xmlText, err := domain.NewRenderer().Render(domain.Request{
 		VM:                cfg,
 		VMDir:             vmDir,
@@ -233,6 +243,7 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 		KVMAvailable:      fileExists("/dev/kvm"),
 		EffectiveCPUModel: cfg.CPUModel,
 		IntelRenderNode:   fileExists("/dev/dri/renderD128"),
+		DisablePasst:      l.disablePasst,
 	})
 	if err != nil {
 		return err
@@ -245,7 +256,26 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	return nil
 }
 
-func (l *ConcreteLifecycle) StartVM(_ context.Context, _ config.VM) error {
+func (l *ConcreteLifecycle) StartVM(ctx context.Context, cfg config.VM) error {
+	err := l.Manager.Start(l.Domain)
+	if err == nil || l.disablePasst || !isPasstStartError(err) {
+		return err
+	}
+	l.disablePasst = true
+	if l.Domain != nil {
+		if cleanupErr := l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{HasNVRAM: l.firmware.VarsPath != ""}); cleanupErr != nil {
+			return cleanupErr
+		}
+	}
+	if l.vmDir == "" {
+		return err
+	}
+	if l.currentConfig.VMName == "" {
+		l.currentConfig = cfg
+	}
+	if defineErr := l.defineDomain(ctx, l.currentConfig, l.vmDir); defineErr != nil {
+		return defineErr
+	}
 	return l.Manager.Start(l.Domain)
 }
 
@@ -737,4 +767,11 @@ func withoutBootDevice(values []string, device string) []string {
 		}
 	}
 	return filtered
+}
+
+func isPasstStartError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "passt")
 }

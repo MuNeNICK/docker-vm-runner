@@ -61,6 +61,15 @@ func requireElement(t *testing.T, doc string, name string, attrs map[string]stri
 	}
 }
 
+func requireNoElement(t *testing.T, doc string, name string) {
+	t.Helper()
+	for _, elem := range collectElements(t, doc) {
+		if elem.Name == name {
+			t.Fatalf("unexpected <%s> in:\n%s", name, doc)
+		}
+	}
+}
+
 func TestRenderUserNetwork(t *testing.T) {
 	doc, mac, err := RenderInterface(Config{Mode: "user", MACAddress: "52:54:00:aa:bb:cc"}, RenderOptions{})
 	if err != nil {
@@ -156,6 +165,17 @@ func TestRenderNetworkMTU(t *testing.T) {
 		t.Fatalf("RenderInterface: %v", err)
 	}
 	requireElement(t, doc, "mtu", map[string]string{"size": "9000"})
+}
+
+func TestRenderUserNetworkCanDisablePasstBackend(t *testing.T) {
+	doc, _, err := RenderInterface(
+		Config{Mode: "user", MACAddress: "52:54:00:aa:bb:cc"},
+		RenderOptions{DisablePasst: true},
+	)
+	if err != nil {
+		t.Fatalf("RenderInterface returned error: %v", err)
+	}
+	requireNoElement(t, doc, "backend")
 }
 
 func TestRenderBridgeNetwork(t *testing.T) {

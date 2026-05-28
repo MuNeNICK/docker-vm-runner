@@ -39,6 +39,7 @@ type RenderOptions struct {
 	ROMFile      string
 	PortForwards []PortForward
 	IPv6Enabled  bool
+	DisablePasst bool
 }
 
 var (
@@ -82,7 +83,9 @@ func RenderInterface(cfg Config, opts RenderOptions) (string, string, error) {
 func renderUser(b *strings.Builder, cfg Config, opts RenderOptions, mac string, model string) {
 	start(b, "interface", attr{"type", "user"})
 	commonLeading(b, opts, mac)
-	empty(b, "backend", attr{"type", "passt"})
+	if !opts.DisablePasst {
+		empty(b, "backend", attr{"type", "passt"})
+	}
 	ipv4 := cfg.GuestIPv4
 	if len(ipv4) == 0 {
 		ipv4 = []GuestAddress{defaultIPv4}

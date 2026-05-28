@@ -205,6 +205,19 @@ func TestRenderIntelGPURequiresRenderNode(t *testing.T) {
 	}
 }
 
+func TestRenderCanDisablePasstBackend(t *testing.T) {
+	vm := testVM()
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+		DisablePasst:      true,
+	})
+	if strings.Contains(xmlText, `<backend type="passt"/>`) {
+		t.Fatalf("XML should not include passt backend:\n%s", xmlText)
+	}
+}
+
 func TestRenderHyperVFeatures(t *testing.T) {
 	vm := testVM()
 	vm.HyperVEnabled = true

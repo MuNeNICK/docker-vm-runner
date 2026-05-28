@@ -34,6 +34,7 @@ type Request struct {
 	EffectiveCPUModel string
 	IPv6Enabled       bool
 	IntelRenderNode   bool
+	DisablePasst      bool
 	BlockSectorSize   func(string) (int, bool)
 }
 
@@ -295,6 +296,7 @@ func renderNetworks(b *strings.Builder, req Request, networkOrder int) error {
 			ROMFile:      req.IPXEROMPath,
 			PortForwards: forwards,
 			IPv6Enabled:  req.IPv6Enabled,
+			DisablePasst: req.DisablePasst,
 		})
 		if err != nil {
 			return err
