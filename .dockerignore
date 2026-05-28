@@ -1,0 +1,8 @@
+local/
+.git/
+bin/
+tmp/
+*.qcow2
+*.img
+*.iso
+*.deb
