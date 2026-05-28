@@ -30,6 +30,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/seediso"
 	"github.com/munenick/docker-vm-runner/internal/services"
 	"github.com/munenick/docker-vm-runner/internal/tpm"
+	"github.com/munenick/docker-vm-runner/internal/units"
 	"github.com/munenick/docker-vm-runner/internal/vmstate"
 	"github.com/munenick/docker-vm-runner/internal/vncproxy"
 )
@@ -322,6 +323,7 @@ func (l *ConcreteLifecycle) applyPersistentState(vmDir string, cfg config.VM) (c
 }
 
 func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, workImage string) error {
+	diskManager := images.NewDiskManager(&l.CommandRunner)
 	if fileExists(workImage) && cfg.Persist {
 		if cfg.BootFrom != "" {
 			source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
@@ -332,7 +334,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 				l.bootISOPath = source
 			}
 		}
-		return nil
+		return l.resizeDiskIfNeeded(ctx, diskManager, workImage, cfg.DiskSize)
 	}
 	if cfg.BlankWorkDisk {
 		if cfg.BootFrom != "" {
@@ -344,7 +346,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 				l.bootISOPath = source
 			}
 		}
-		return images.NewDiskManager(&l.CommandRunner).CreateDisk(ctx, images.CreateDiskRequest{
+		return diskManager.CreateDisk(ctx, images.CreateDiskRequest{
 			Path:        workImage,
 			Format:      defaultString(cfg.ImageFormat, "qcow2"),
 			Size:        cfg.DiskSize,
@@ -372,10 +374,23 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	if err := copyFile(baseImage, workImage); err != nil {
 		return fmt.Errorf("copy base image to work image: %w", err)
 	}
-	if cfg.DiskSize != "" {
-		if err := images.NewDiskManager(&l.CommandRunner).ResizeDisk(ctx, workImage, cfg.DiskSize); err != nil {
-			return err
-		}
+	return l.resizeDiskIfNeeded(ctx, diskManager, workImage, cfg.DiskSize)
+}
+
+func (l *ConcreteLifecycle) resizeDiskIfNeeded(ctx context.Context, diskManager *images.DiskManager, path string, size string) error {
+	if size == "" {
+		return nil
+	}
+	desired, err := units.ParseSizeBytes(size)
+	if err != nil {
+		return err
+	}
+	info, err := diskManager.ImageInfo(ctx, path)
+	if err == nil && info.VirtualSize >= desired {
+		return nil
+	}
+	if err := diskManager.ResizeDisk(ctx, path, size); err != nil {
+		return err
 	}
 	return nil
 }

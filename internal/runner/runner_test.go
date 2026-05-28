@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,6 +251,7 @@ func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	if err := os.WriteFile(workImage, []byte("existing"), 0o644); err != nil {
 		t.Fatalf("write work image: %v", err)
 	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -279,6 +281,132 @@ func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	}
 	if got := readFileString(t, workImage); got != "existing" {
 		t.Fatalf("work image = %q", got)
+	}
+}
+
+func TestConcreteLifecyclePrepareExpandsPersistentWorkImage(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	workImage := filepath.Join(vmDir, "disk.qcow2")
+	if err := os.WriteFile(workImage, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write work image: %v", err)
+	}
+	commandLog := installFakeQEMUImgWithInfo(t, 8*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		Persist:        true,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if got := readFileString(t, commandLog); !strings.Contains(got, "resize "+workImage+" 10G") {
+		t.Fatalf("qemu-img commands = %q", got)
+	}
+}
+
+func TestConcreteLifecyclePrepareDoesNotShrinkPersistentWorkImage(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	workImage := filepath.Join(vmDir, "disk.qcow2")
+	if err := os.WriteFile(workImage, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write work image: %v", err)
+	}
+	commandLog := installFakeQEMUImgWithInfo(t, 20*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		Persist:        true,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if got := readFileString(t, commandLog); strings.Contains(got, "resize") {
+		t.Fatalf("qemu-img should not shrink disk:\n%s", got)
+	}
+}
+
+func TestConcreteLifecyclePrepareDoesNotShrinkCopiedBaseImage(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	commandLog := installFakeQEMUImgWithInfo(t, 20*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if got := readFileString(t, commandLog); strings.Contains(got, "resize") {
+		t.Fatalf("qemu-img should not shrink copied base image:\n%s", got)
 	}
 }
 
@@ -598,6 +726,7 @@ func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	if err := os.WriteFile(extraDisk, []byte("existing-extra"), 0o644); err != nil {
 		t.Fatalf("write extra disk: %v", err)
 	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -850,6 +979,17 @@ func installFakeQEMUImg(t *testing.T) string {
 	t.Helper()
 	return installFakeCommand(t, "qemu-img", func(logPath string) string {
 		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
+	})
+}
+
+func installFakeQEMUImgWithInfo(t *testing.T, virtualSize int64) string {
+	t.Helper()
+	return installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ]; then\n" +
+			"  printf '{\"format\":\"qcow2\",\"virtual-size\":" + fmt.Sprint(virtualSize) + "}\\n'\n" +
+			"fi\n" +
+			"exit 0\n"
 	})
 }
 
