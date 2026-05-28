@@ -56,6 +56,50 @@ func TestRunForwardsFlags(t *testing.T) {
 	}
 }
 
+func TestRunReadsNoConsoleFromEnv(t *testing.T) {
+	original := newRunner
+	defer func() { newRunner = original }()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(key string) (string, bool) {
+		if key == "NO_CONSOLE" {
+			return "yes", true
+		}
+		return "", false
+	})
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
+func TestRunNoConsoleFlagOverridesEnvDefault(t *testing.T) {
+	original := newRunner
+	defer func() { newRunner = original }()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), []string{"--no-console=false"}, &stdout, &stderr, func(key string) (string, bool) {
+		if key == "NO_CONSOLE" {
+			return "1", true
+		}
+		return "", false
+	})
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
 func TestRunReturnsErrorCodeWhenRunnerFails(t *testing.T) {
 	original := newRunner
 	defer func() { newRunner = original }()

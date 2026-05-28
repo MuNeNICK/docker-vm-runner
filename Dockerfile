@@ -140,12 +140,10 @@ cgroup_device_acl = [
 EOF
 
 COPY distros.yaml /config/distros.yaml
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 WORKDIR /
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=3 \
     CMD virsh domstate "$(virsh list --name | head -1)" 2>/dev/null | grep -q running || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-vm-runner"]

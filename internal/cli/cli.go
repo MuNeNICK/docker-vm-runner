@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/munenick/docker-vm-runner/internal/config"
 	"github.com/munenick/docker-vm-runner/internal/runner"
 )
 
@@ -32,10 +33,15 @@ var newRunner = func() appRunner {
 }
 
 func Main(ctx context.Context, args []string) int {
-	return run(ctx, args, os.Stdout, os.Stderr)
+	return runWithEnv(ctx, args, os.Stdout, os.Stderr, config.OSEnv)
 }
 
 func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int {
+	return runWithEnv(ctx, args, stdout, stderr, func(string) (string, bool) { return "", false })
+}
+
+func runWithEnv(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, lookup config.LookupFunc) int {
+	args = applyEnvDefaults(args, lookup)
 	opts, err := parse(args, stderr)
 	if err != nil {
 		return 2
@@ -58,6 +64,17 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return 1
 	}
 	return 0
+}
+
+func applyEnvDefaults(args []string, lookup config.LookupFunc) []string {
+	noConsole, _ := config.BoolFrom(lookup, "NO_CONSOLE", false)
+	if !noConsole {
+		return args
+	}
+	withDefaults := make([]string, 0, len(args)+1)
+	withDefaults = append(withDefaults, "--no-console")
+	withDefaults = append(withDefaults, args...)
+	return withDefaults
 }
 
 func parse(args []string, stderr io.Writer) (options, error) {
