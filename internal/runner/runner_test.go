@@ -203,6 +203,47 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(filepath.Join(layout.VMImagesDir, "vm1"), 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	workImage := filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")
+	if err := os.WriteFile(workImage, []byte("existing"), 0o644); err != nil {
+		t.Fatalf("write work image: %v", err)
+	}
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		Persist:        true,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if got := readFileString(t, workImage); got != "existing" {
+		t.Fatalf("work image = %q", got)
+	}
+}
+
 func TestEmulatorPackageMapsSupportedArchitectures(t *testing.T) {
 	tests := []struct {
 		arch       string
