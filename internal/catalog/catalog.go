@@ -47,6 +47,16 @@ type EOL struct {
 	Note      string `json:"note"`
 }
 
+type Query struct {
+	ID          string
+	Category    string
+	Distro      string
+	Edition     string
+	Arch        string
+	ReleaseType string
+	Status      string
+}
+
 func Load(r io.Reader) (Response, error) {
 	var response Response
 	decoder := json.NewDecoder(r)
@@ -65,6 +75,57 @@ func Load(r io.Reader) (Response, error) {
 	return response, nil
 }
 
+func Filter(images []Image, query Query) []Image {
+	var matches []Image
+	for _, image := range images {
+		if !matchesQuery(image, query) {
+			continue
+		}
+		matches = append(matches, image)
+	}
+	return matches
+}
+
+func Select(response Response, query Query) (Image, error) {
+	matches := Filter(response.Images, query)
+	if len(matches) == 0 {
+		return Image{}, fmt.Errorf("no catalog image matches query")
+	}
+	if len(matches) > 1 {
+		ids := make([]string, 0, len(matches))
+		for _, image := range matches {
+			ids = append(ids, image.ID)
+		}
+		return Image{}, fmt.Errorf("catalog query matched multiple images: %s", strings.Join(ids, ", "))
+	}
+	return matches[0], nil
+}
+
+func matchesQuery(image Image, query Query) bool {
+	if query.ID != "" && image.ID != query.ID {
+		return false
+	}
+	if query.Category != "" && !equalFoldTrim(image.Category, query.Category) {
+		return false
+	}
+	if query.Distro != "" && !equalFoldTrim(image.Distro, query.Distro) {
+		return false
+	}
+	if query.Edition != "" && !equalFoldTrim(image.Edition, query.Edition) {
+		return false
+	}
+	if query.Arch != "" && !sameArchitecture(image.Arch, query.Arch) {
+		return false
+	}
+	if query.ReleaseType != "" && !equalFoldTrim(image.ReleaseType, query.ReleaseType) {
+		return false
+	}
+	if query.Status != "" && !equalFoldTrim(image.Status, query.Status) {
+		return false
+	}
+	return true
+}
+
 func validateImage(image Image) error {
 	required := map[string]string{
 		"id":       image.ID,
@@ -81,4 +142,23 @@ func validateImage(image Image) error {
 		}
 	}
 	return nil
+}
+
+func equalFoldTrim(a string, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+func sameArchitecture(a string, b string) bool {
+	return normalizeCatalogArch(a) == normalizeCatalogArch(b)
+}
+
+func normalizeCatalogArch(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "amd64", "x86_64", "x64":
+		return "amd64"
+	case "arm64", "aarch64":
+		return "arm64"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
 }
