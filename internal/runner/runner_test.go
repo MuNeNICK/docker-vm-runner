@@ -131,6 +131,25 @@ func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
 	}
 }
 
+func TestApplyRuntimeEnvConfiguresConcreteLifecycle(t *testing.T) {
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	applyRuntimeEnv(lifecycle, config.MapEnv{
+		"LIBVIRT_URI":          "qemu+unix:///system?socket=/custom/libvirt.sock",
+		"REDFISH_STORAGE_POOL": "redfish",
+		"REDFISH_STORAGE_PATH": "/var/lib/redfish",
+	})
+
+	if lifecycle.LibvirtURI != "qemu+unix:///system?socket=/custom/libvirt.sock" {
+		t.Fatalf("LibvirtURI = %q", lifecycle.LibvirtURI)
+	}
+	if lifecycle.RedfishPool.Name != "redfish" {
+		t.Fatalf("RedfishPool.Name = %q", lifecycle.RedfishPool.Name)
+	}
+	if lifecycle.RedfishPool.TargetPath != "/var/lib/redfish" {
+		t.Fatalf("RedfishPool.TargetPath = %q", lifecycle.RedfishPool.TargetPath)
+	}
+}
+
 func TestRunWiresHostFileProbeIntoDefaultResolver(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
 	r := New()

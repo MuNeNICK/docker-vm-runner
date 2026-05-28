@@ -12,6 +12,7 @@ import (
 
 	"github.com/munenick/docker-vm-runner/internal/config"
 	"github.com/munenick/docker-vm-runner/internal/hostinfo"
+	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/paths"
 )
@@ -80,7 +81,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if r.Lifecycle == nil {
-		r.Lifecycle = NewConcreteLifecycle(r.layout())
+		r.Lifecycle = r.newConcreteLifecycle()
 	}
 	if opts.Cleanup {
 		return r.runCleanup(ctx, cfg)
@@ -142,6 +143,29 @@ func (r *Runner) applyResolverDefaults() {
 
 func (r *Runner) layout() paths.Layout {
 	return paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), nil)
+}
+
+func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {
+	lifecycle := NewConcreteLifecycle(r.layout())
+	applyRuntimeEnv(lifecycle, r.Env)
+	return lifecycle
+}
+
+func applyRuntimeEnv(lifecycle *ConcreteLifecycle, env config.MapEnv) {
+	if lifecycle == nil {
+		return
+	}
+	if libvirtURI := strings.TrimSpace(env.Get("LIBVIRT_URI", "")); libvirtURI != "" {
+		lifecycle.LibvirtURI = libvirtURI
+	} else if lifecycle.LibvirtURI == "" {
+		lifecycle.LibvirtURI = libvirtmgr.DefaultURI
+	}
+	if pool := strings.TrimSpace(env.Get("REDFISH_STORAGE_POOL", "")); pool != "" {
+		lifecycle.RedfishPool.Name = pool
+	}
+	if targetPath := strings.TrimSpace(env.Get("REDFISH_STORAGE_PATH", "")); targetPath != "" {
+		lifecycle.RedfishPool.TargetPath = targetPath
+	}
 }
 
 func (r *Runner) printDistros(arch string) error {
