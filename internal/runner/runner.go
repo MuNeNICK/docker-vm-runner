@@ -94,7 +94,9 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 	}
 	if opts.DryRun {
 		PrintConfig(r.Stdout, cfg)
-		r.output().Section("Host", normalizedLines(hostinfo.Lines(r.hostInfo(cfg))))
+		info := r.hostInfo(cfg)
+		r.output().Section("Host", normalizedLines(hostinfo.Lines(info)))
+		r.output().Section("Dry Run", DryRunLines(cfg, info))
 		r.output().Section("Access", AccessLines(cfg))
 		return r.validateDryRun(cfg)
 	}
@@ -473,7 +475,50 @@ func PrintConfig(w io.Writer, cfg config.VM) {
 			fmt.Fprintf(w, "  %s: ********\n", name)
 			continue
 		}
-		fmt.Fprintf(w, "  %s: %v\n", name, value.Field(i).Interface())
+		printConfigValue(w, "  ", name, value.Field(i))
+	}
+}
+
+func printConfigValue(w io.Writer, indent string, name string, value reflect.Value) {
+	if value.Kind() == reflect.Slice {
+		if value.Len() == 0 {
+			fmt.Fprintf(w, "%s%s: []\n", indent, name)
+			return
+		}
+		fmt.Fprintf(w, "%s%s:\n", indent, name)
+		for i := 0; i < value.Len(); i++ {
+			item := value.Index(i)
+			if item.Kind() != reflect.Struct && (item.Kind() != reflect.Pointer || item.IsNil() || item.Elem().Kind() != reflect.Struct) {
+				fmt.Fprintf(w, "%s  [%d]: %v\n", indent, i, item.Interface())
+				continue
+			}
+			fmt.Fprintf(w, "%s  [%d]:\n", indent, i)
+			printConfigStructFields(w, indent+"    ", item)
+		}
+		return
+	}
+	fmt.Fprintf(w, "%s%s: %v\n", indent, name, value.Interface())
+}
+
+func printConfigStructFields(w io.Writer, indent string, value reflect.Value) {
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			fmt.Fprintf(w, "%s<nil>\n", indent)
+			return
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		fmt.Fprintf(w, "%s%v\n", indent, value.Interface())
+		return
+	}
+	typ := value.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		printConfigValue(w, indent, toSnake(field.Name), value.Field(i))
 	}
 }
 
@@ -586,6 +631,61 @@ func VMSummaryLines(cfg config.VM) []string {
 	return lines
 }
 
+func DryRunLines(cfg config.VM, info hostinfo.Info) []string {
+	lines := []string{}
+	if info.RuntimeEngine != "" {
+		priv := "unprivileged"
+		if info.RuntimePriv {
+			priv = "privileged"
+		}
+		rootless := ""
+		if info.RuntimeRootless {
+			rootless = ", rootless"
+		}
+		lines = append(lines, fmt.Sprintf("Runtime     %s (%s%s)", info.RuntimeEngine, priv, rootless))
+	} else {
+		lines = append(lines, "Runtime     unknown")
+	}
+	if info.KVMAvailable {
+		lines = append(lines, "KVM         available (/dev/kvm)")
+	} else if cfg.RequireKVM {
+		lines = append(lines, "KVM         NOT available (REQUIRE_KVM=1 will fail)")
+	} else {
+		lines = append(lines, "KVM         NOT available (TCG fallback)")
+	}
+	lines = append(lines, "Boot order  "+strings.Join(cfg.BootOrder, ", "))
+	if cfg.Persist {
+		lines = append(lines, "Persistence enabled")
+	} else {
+		lines = append(lines, "Persistence disabled (ephemeral)")
+	}
+	if cfg.CloudInitEnabled {
+		lines = append(lines, "Cloud-init  enabled (user="+cfg.LoginUser+")")
+	} else {
+		lines = append(lines, "Cloud-init  disabled")
+	}
+	if strings.TrimSpace(cfg.BootFrom) != "" {
+		if isRemoteReference(cfg.BootFrom) {
+			lines = append(lines, "BOOT_FROM   "+cfg.BootFrom+" (will download)")
+		} else if oci.IsReference(cfg.BootFrom) {
+			lines = append(lines, "BOOT_FROM   "+cfg.BootFrom+" (OCI pull)")
+		} else if hostinfo.FileExists(cfg.BootFrom) {
+			lines = append(lines, "BOOT_FROM   "+cfg.BootFrom+" (found)")
+		} else {
+			lines = append(lines, "BOOT_FROM   "+cfg.BootFrom+" (NOT FOUND)")
+		}
+	}
+	for i, nic := range cfg.NICs {
+		mac := strings.TrimSpace(nic.MACAddress)
+		if mac == "" {
+			mac = "auto"
+		}
+		lines = append(lines, fmt.Sprintf("NIC #%d     mode=%s, model=%s, mac=%s", i+1, nic.Mode, nic.Model, mac))
+	}
+	lines = append(lines, "Result      no VM started")
+	return lines
+}
+
 func toSnake(name string) string {
 	var b strings.Builder
 	for i, r := range name {
@@ -616,6 +716,13 @@ func toSnake(name string) string {
 		"i_o":       "io",
 		"h_t_t_p":   "http",
 		"redfish_i": "redfish_i",
+		"u_r_l":     "url",
+		"m_a_c":     "mac",
+		"m_t_u":     "mtu",
+		"i_pv":      "ipv",
+		"k_vm":      "kvm",
+		"i_s_o":     "iso",
+		"n_i_cs":    "nics",
 	}
 	out := b.String()
 	keys := make([]string, 0, len(replacements))

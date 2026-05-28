@@ -85,6 +85,8 @@ func TestPrintConfigMasksSensitiveFields(t *testing.T) {
 		IPXEEnabled:     true,
 		IPXEROMPath:     "/ipxe.rom",
 		RedfishSystemID: "vm1",
+		NICs:            []network.Config{{Mode: "user", Model: "virtio"}},
+		Filesystems:     []config.FilesystemShare{{Source: "/host/share", Target: "share", Driver: "virtiofs"}},
 	})
 
 	text := out.String()
@@ -97,6 +99,18 @@ func TestPrintConfigMasksSensitiveFields(t *testing.T) {
 	for _, want := range []string{"vm_name:", "cpu_model:", "ipxe_enabled:", "ipxe_rom_path:", "redfish_system_id:"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	for _, want := range []string{
+		"nics:\n    [0]:",
+		"      mode: user",
+		"      model: virtio",
+		"filesystems:\n    [0]:",
+		"      source: /host/share",
+		"      target: share",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing nested config %q in:\n%s", want, text)
 		}
 	}
 }
@@ -499,7 +513,7 @@ func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	output := stdout.String()
-	for _, needle := range []string{"vm_name:", "== Host ==", "== Access =="} {
+	for _, needle := range []string{"vm_name:", "== Host ==", "== Dry Run ==", "BOOT_FROM", "NOT FOUND", "Result      no VM started", "== Access =="} {
 		if !strings.Contains(output, needle) {
 			t.Fatalf("dry-run output missing %q:\n%s", needle, output)
 		}
@@ -517,7 +531,7 @@ func TestRunDryRunPrintsHostDiagnostics(t *testing.T) {
 	if err := r.Run(context.Background(), Options{DryRun: true}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Host") || !strings.Contains(stdout.String(), "KVM") {
+	if !strings.Contains(stdout.String(), "Host") || !strings.Contains(stdout.String(), "KVM") || !strings.Contains(stdout.String(), "Boot order") || !strings.Contains(stdout.String(), "Cloud-init") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
@@ -950,6 +964,47 @@ func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) 
 	if content := readFileString(t, got); content != "disk-image" {
 		t.Fatalf("base image content = %q", content)
 	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("user-provided source should not be removed: %v", err)
+	}
+}
+
+func TestConcreteLifecyclePostProcessCleansManagedIntermediates(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(layout.BaseImagesDir, "downloads", "image.raw")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatalf("mkdir downloads: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("raw"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ]; then printf '{\"format\":\"raw\",\"virtual-size\":10737418240}\\n'; fi\n" +
+			"if [ \"$1\" = convert ]; then printf converted > \"$6\"; fi\n" +
+			"exit 0\n"
+	})
+	var status bytes.Buffer
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Status = &status
+	destination := filepath.Join(layout.BaseImagesDir, "custom.qcow2")
+
+	got, err := lifecycle.postProcessImage(context.Background(), source, destination, imagePostProcessOptions{DesiredFormat: "qcow2", SourceFormat: "raw"})
+	if err != nil {
+		t.Fatalf("postProcessImage returned error: %v", err)
+	}
+	if got != destination {
+		t.Fatalf("destination = %s", got)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("managed source should be removed, stat err = %v", err)
+	}
+	if content := readFileString(t, destination); content != "converted" {
+		t.Fatalf("destination content = %q", content)
+	}
+	if !strings.Contains(status.String(), "Converting image") {
+		t.Fatalf("status missing conversion log: %q", status.String())
+	}
 }
 
 func TestConcreteLifecycleResolveBootSourceVerifiesCatalogChecksum(t *testing.T) {
@@ -1247,10 +1302,12 @@ func TestConcreteLifecyclePrepareCreatesBlankWorkDisk(t *testing.T) {
 	layout := testLayout(t)
 	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	var status bytes.Buffer
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
 	lifecycle.TPM = nil
 	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+	lifecycle.Status = &status
 
 	err := lifecycle.Prepare(context.Background(), config.VM{
 		Distro:         "blank",
@@ -1276,6 +1333,9 @@ func TestConcreteLifecyclePrepareCreatesBlankWorkDisk(t *testing.T) {
 	want := "create -f qcow2 " + filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2") + " 8G"
 	if got := readFileString(t, commandLog); !strings.Contains(got, want) {
 		t.Fatalf("qemu-img commands missing %q:\n%s", want, got)
+	}
+	if !strings.Contains(status.String(), "Creating blank disk") {
+		t.Fatalf("status missing disk creation log: %q", status.String())
 	}
 }
 

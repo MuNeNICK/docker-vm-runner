@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/munenick/docker-vm-runner/internal/process"
 )
@@ -13,7 +14,8 @@ type Runner interface {
 }
 
 type DiskManager struct {
-	runner Runner
+	runner   Runner
+	Progress io.Writer
 }
 
 func NewDiskManager(runner Runner) *DiskManager {
@@ -71,8 +73,10 @@ func (m *DiskManager) ResizeDisk(ctx context.Context, path string, size string) 
 
 func (m *DiskManager) ConvertDisk(ctx context.Context, source string, dest string, format string) error {
 	if _, err := m.runner.Run(ctx, process.Command{
-		Name: "qemu-img",
-		Args: []string{"convert", "-p", "-O", format, source, dest},
+		Name:   "qemu-img",
+		Args:   []string{"convert", "-p", "-O", format, source, dest},
+		Stdout: m.Progress,
+		Stderr: m.Progress,
 	}); err != nil {
 		return fmt.Errorf("qemu-img convert %s to %s: %w", source, dest, err)
 	}

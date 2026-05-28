@@ -1,6 +1,7 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -105,5 +106,18 @@ func TestConvertDiskCommand(t *testing.T) {
 	want := process.Command{Name: "qemu-img", Args: []string{"convert", "-p", "-O", "qcow2", "/tmp/source.vmdk", "/images/disk.qcow2"}}
 	if !reflect.DeepEqual(runner.calls[0], want) {
 		t.Fatalf("command = %#v want %#v", runner.calls[0], want)
+	}
+}
+
+func TestConvertDiskStreamsProgress(t *testing.T) {
+	runner := &fakeRunner{}
+	var progress bytes.Buffer
+	manager := NewDiskManager(runner)
+	manager.Progress = &progress
+	if err := manager.ConvertDisk(context.Background(), "/tmp/source.vmdk", "/images/disk.qcow2", "qcow2"); err != nil {
+		t.Fatalf("ConvertDisk returned error: %v", err)
+	}
+	if runner.calls[0].Stdout != &progress || runner.calls[0].Stderr != &progress {
+		t.Fatalf("progress writers not attached: %#v", runner.calls[0])
 	}
 }

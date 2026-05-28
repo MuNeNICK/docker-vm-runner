@@ -193,6 +193,26 @@ func (l *ConcreteLifecycle) warnf(format string, args ...interface{}) {
 	}
 }
 
+func (l *ConcreteLifecycle) infof(format string, args ...interface{}) {
+	if l.Output != nil {
+		l.Output.Info(fmt.Sprintf(format, args...))
+		return
+	}
+	if l.Status != nil {
+		fmt.Fprintf(l.Status, "[INFO] "+format+"\n", args...)
+	}
+}
+
+func (l *ConcreteLifecycle) diskManager() *images.DiskManager {
+	manager := images.NewDiskManager(&l.CommandRunner)
+	if l.Output != nil {
+		manager.Progress = l.Output.Stderr
+	} else {
+		manager.Progress = l.Status
+	}
+	return manager
+}
+
 func (l *ConcreteLifecycle) Connect(ctx context.Context, _ config.VM) error {
 	if l.Manager != nil {
 		return nil
@@ -581,8 +601,10 @@ func (l *ConcreteLifecycle) applyPersistentState(vmDir string, cfg config.VM) (c
 }
 
 func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, workImage string) error {
-	diskManager := images.NewDiskManager(&l.CommandRunner)
+	diskManager := l.diskManager()
+	l.warnDiskPreparationIssues(filepath.Dir(workImage), workImage, cfg.DiskSize)
 	if fileExists(workImage) && cfg.Persist {
+		l.infof("Reusing persistent disk %s", workImage)
 		if cfg.BootFrom != "" {
 			source, err := l.resolveBootSource(ctx, cfg)
 			if err != nil {
@@ -604,6 +626,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 				l.bootISOPath = source
 			}
 		}
+		l.infof("Creating blank disk %s (%s)", workImage, cfg.DiskSize)
 		return diskManager.CreateDisk(ctx, images.CreateDiskRequest{
 			Path:        workImage,
 			Format:      defaultString(cfg.ImageFormat, "qcow2"),
@@ -616,7 +639,8 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 		return err
 	}
 	if l.bootISOPath != "" {
-		return images.NewDiskManager(&l.CommandRunner).CreateDisk(ctx, images.CreateDiskRequest{
+		l.infof("Creating blank disk %s (%s) for boot media", workImage, cfg.DiskSize)
+		return l.diskManager().CreateDisk(ctx, images.CreateDiskRequest{
 			Path:        workImage,
 			Format:      defaultString(cfg.ImageFormat, "qcow2"),
 			Size:        cfg.DiskSize,
@@ -629,6 +653,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	if err := os.MkdirAll(filepath.Dir(workImage), 0o755); err != nil {
 		return fmt.Errorf("create work image directory: %w", err)
 	}
+	l.infof("Creating working disk %s from %s", workImage, baseImage)
 	if err := copyFile(baseImage, workImage); err != nil {
 		return fmt.Errorf("copy base image to work image: %w", err)
 	}
@@ -645,30 +670,48 @@ func (l *ConcreteLifecycle) resizeDiskIfNeeded(ctx context.Context, diskManager 
 	}
 	info, err := diskManager.ImageInfo(ctx, path)
 	if err == nil && info.VirtualSize >= desired {
+		l.infof("Disk already %.1f GiB (>= %s); skip resize", float64(info.VirtualSize)/(1024*1024*1024), size)
 		return nil
 	}
+	l.infof("Resizing disk %s to %s", path, size)
 	if err := diskManager.ResizeDisk(ctx, path, size); err != nil {
 		return err
 	}
 	return nil
 }
 
+func (l *ConcreteLifecycle) warnDiskPreparationIssues(vmDir string, workImage string, diskSize string) {
+	if diskSize != "" && diskSize != "0" {
+		if requested, err := units.ParseSizeBytes(diskSize); err == nil {
+			available := hostinfo.AvailableDiskBytes(vmDir)
+			if available > 0 && available < requested {
+				l.warnf("Storage may be too small for requested disk size: %.1f GiB free at %s, requested %s", float64(available)/(1024*1024*1024), vmDir, diskSize)
+			}
+		}
+	}
+	if hostinfo.NativeDiskIOUnsafe(workImage) {
+		l.warnf("Filesystem may not support native disk I/O safely; disk cache/io fallback will be used for %s", workImage)
+	}
+}
+
 func (l *ConcreteLifecycle) prepareExtraDisks(ctx context.Context, cfg config.VM, vmDir string) error {
 	if len(cfg.ExtraDisks) == 0 {
 		return nil
 	}
-	diskManager := images.NewDiskManager(&l.CommandRunner)
+	diskManager := l.diskManager()
 	format := defaultString(cfg.ImageFormat, "qcow2")
 	for _, disk := range cfg.ExtraDisks {
 		path := filepath.Join(vmDir, fmt.Sprintf("disk%d.%s", disk.Index, format))
 		if fileExists(path) {
 			if cfg.Persist {
+				l.infof("Reusing persistent extra disk %s", path)
 				continue
 			}
 			if err := os.Remove(path); err != nil {
 				return fmt.Errorf("replace extra disk %s: %w", path, err)
 			}
 		}
+		l.infof("Creating extra disk %s (%s)", path, disk.Size)
 		if err := diskManager.CreateDisk(ctx, images.CreateDiskRequest{
 			Path:        path,
 			Format:      format,
@@ -822,55 +865,96 @@ type imagePostProcessOptions struct {
 
 func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, opts imagePostProcessOptions) (string, error) {
 	current := source
+	intermediates := []string{source}
 	extractor := archive.NewExtractor()
 	extractor.MaxBytes = opts.MaxExtractBytes
 	if shouldExtractByMetadata(current, opts.SourceCompression) {
+		l.infof("Extracting compressed image %s", current)
 		result, err := extractor.ExtractCompressedStream(ctx, current, filepath.Dir(current), opts.SourceFormat, opts.SourceCompression)
 		if err != nil {
 			return "", err
 		}
 		current = result.Path
+		intermediates = append(intermediates, current)
 	}
 	if shouldExtractArchiveByMetadata(current, opts.SourceFormat) {
+		l.infof("Extracting archive image %s", current)
 		result, err := extractor.ExtractByFormat(ctx, current, filepath.Dir(current), opts.SourceFormat)
 		if err != nil {
 			return "", err
 		}
 		current = result.Path
+		intermediates = append(intermediates, current)
 	}
 	for isArchive(current) {
+		l.infof("Extracting image archive %s", current)
 		result, err := extractor.ExtractWithResult(ctx, current, filepath.Dir(current))
 		if err != nil {
 			return "", err
 		}
 		current = result.Path
+		intermediates = append(intermediates, current)
 	}
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return "", fmt.Errorf("create base image directory: %w", err)
 	}
 	desiredFormat := defaultString(opts.DesiredFormat, "qcow2")
-	diskManager := images.NewDiskManager(&l.CommandRunner)
+	diskManager := l.diskManager()
 	info, err := diskManager.ImageInfo(ctx, current)
 	currentFormat := normalizedImageFormat(opts.SourceFormat)
 	if err == nil && info.Format != "" {
 		currentFormat = info.Format
 	}
 	if currentFormat != "" && currentFormat != desiredFormat {
+		l.infof("Converting image %s from %s to %s", current, currentFormat, desiredFormat)
 		if err := diskManager.ConvertDisk(ctx, current, destination, desiredFormat); err != nil {
 			return "", err
 		}
+		l.cleanupIntermediateImages(intermediates, destination)
 		return destination, nil
 	}
 	if current != destination {
+		l.infof("Placing base image %s", destination)
 		if err := copyFile(current, destination); err != nil {
 			return "", fmt.Errorf("place base image: %w", err)
 		}
 	}
+	l.cleanupIntermediateImages(intermediates, destination)
 	return destination, nil
 }
 
+func (l *ConcreteLifecycle) cleanupIntermediateImages(paths []string, destination string) {
+	seen := map[string]bool{}
+	for _, path := range paths {
+		if !l.shouldCleanupIntermediate(path, destination) || seen[path] {
+			continue
+		}
+		seen[path] = true
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			l.warnf("Could not remove intermediate image %s: %v", path, err)
+		}
+	}
+}
+
+func (l *ConcreteLifecycle) shouldCleanupIntermediate(path string, destination string) bool {
+	if path == "" || path == destination {
+		return false
+	}
+	base := filepath.Clean(l.Layout.BaseImagesDir)
+	cleaned := filepath.Clean(path)
+	if cleaned == base {
+		return false
+	}
+	rel, err := filepath.Rel(base, cleaned)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return false
+	}
+	first := strings.Split(rel, string(os.PathSeparator))[0]
+	return first == "downloads" || first == "boot" || first == "oci"
+}
+
 func (l *ConcreteLifecycle) validateCachedImage(ctx context.Context, path string, desiredFormat string) error {
-	info, err := images.NewDiskManager(&l.CommandRunner).ImageInfo(ctx, path)
+	info, err := l.diskManager().ImageInfo(ctx, path)
 	if err != nil {
 		return err
 	}
