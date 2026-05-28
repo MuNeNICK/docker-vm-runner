@@ -3,9 +3,13 @@ package runner
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -445,6 +449,30 @@ func TestConcreteLifecyclePreparePassesIPv6Availability(t *testing.T) {
 	}
 	if !strings.Contains(manager.definedXML, `<ip family="ipv6" address="fec0::2" prefix="64"/>`) {
 		t.Fatalf("domain XML missing default IPv6:\n%s", manager.definedXML)
+	}
+}
+
+func TestConcreteLifecycleResolveBaseImageVerifiesChecksum(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("base-image"))
+	}))
+	defer server.Close()
+	sum := sha256.Sum256([]byte("different"))
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+
+	_, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
+		Distro:                 "ubuntu-24.04-server",
+		ImageURL:               server.URL,
+		ImageChecksumAlgorithm: "sha256",
+		ImageChecksumValue:     hex.EncodeToString(sum[:]),
+		ImageFormat:            "qcow2",
+		DownloadRetries:        1,
+	})
+	if err == nil {
+		t.Fatal("expected checksum mismatch")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -2,12 +2,15 @@ package download
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,6 +36,48 @@ func TestDownloadSuccess(t *testing.T) {
 	if string(content) != "hello-world" {
 		t.Fatalf("destination content = %q", content)
 	}
+}
+
+func TestDownloadChecksumSuccess(t *testing.T) {
+	body := []byte("hello-world")
+	sum := sha256.Sum256(body)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	dest := filepath.Join(t.TempDir(), "image.iso")
+	err := NewDownloader(nil).DownloadChecked(context.Background(), server.URL, dest, Checksum{
+		Algorithm: "sha256",
+		Value:     hex.EncodeToString(sum[:]),
+	})
+	if err != nil {
+		t.Fatalf("DownloadChecked returned error: %v", err)
+	}
+}
+
+func TestDownloadChecksumMismatchCleansTempFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("hello-world"))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "image.iso")
+	err := NewDownloader(nil).DownloadChecked(context.Background(), server.URL, dest, Checksum{
+		Algorithm: "sha256",
+		Value:     "0000",
+	})
+	if err == nil {
+		t.Fatal("expected checksum error")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("destination stat error = %v", statErr)
+	}
+	assertNoTempFiles(t, dir)
 }
 
 func TestDownloadHTTPErrorDoesNotLeaveDestinationOrTempFile(t *testing.T) {

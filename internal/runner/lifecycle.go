@@ -593,7 +593,10 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 		return "", fmt.Errorf("image URL is empty and base image is missing: %s", baseImage)
 	}
 	downloadPath := filepath.Join(l.Layout.BaseImagesDir, "downloads", cacheName(cfg.ImageURL))
-	if err := download.NewDownloader(nil).DownloadWithRetry(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries); err != nil {
+	if err := download.NewDownloader(nil).DownloadWithRetryChecked(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries, download.Checksum{
+		Algorithm: cfg.ImageChecksumAlgorithm,
+		Value:     cfg.ImageChecksumValue,
+	}); err != nil {
 		return "", err
 	}
 	return l.postProcessImage(ctx, downloadPath, baseImage, defaultString(cfg.ImageFormat, "qcow2"))

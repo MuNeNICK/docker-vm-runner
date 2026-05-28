@@ -39,62 +39,64 @@ type BlockDevice struct {
 }
 
 type VM struct {
-	Distro                string
-	ImageURL              string
-	LoginUser             string
-	ImageFormat           string
-	DistroName            string
-	MemoryMB              int
-	CPUs                  int
-	DiskSize              string
-	Display               string
-	GraphicsType          string
-	Arch                  string
-	CPUModel              string
-	ExtraArgs             string
-	NoVNCEnabled          bool
-	VNCPort               int
-	VNCKeymap             string
-	NoVNCPort             int
-	BootFrom              string
-	BlankWorkDisk         bool
-	BootOrder             []string
-	IPXEEnabled           bool
-	IPXEROMPath           string
-	CloudInitEnabled      bool
-	CloudInitUserDataPath string
-	Password              string
-	SSHPort               int
-	VMName                string
-	Persist               bool
-	ForceISO              bool
-	SSHPubkey             string
-	RedfishUser           string
-	RedfishPassword       string
-	RedfishPort           int
-	RedfishSystemID       string
-	RedfishEnabled        bool
-	NICs                  []network.Config
-	PortForwards          []network.PortForward
-	Filesystems           []FilesystemShare
-	BootMode              string
-	TPMEnabled            bool
-	MachineType           string
-	ExtraDisks            []Disk
-	BlockDevices          []BlockDevice
-	DiskController        string
-	DiskPreallocate       bool
-	DiskIO                string
-	DiskCache             string
-	IOThread              bool
-	BalloonEnabled        bool
-	RNGEnabled            bool
-	USBController         bool
-	HyperVEnabled         bool
-	GPUPassthrough        string
-	RequireKVM            bool
-	LoginShell            string
-	DownloadRetries       int
+	Distro                 string
+	ImageURL               string
+	ImageChecksumAlgorithm string
+	ImageChecksumValue     string
+	LoginUser              string
+	ImageFormat            string
+	DistroName             string
+	MemoryMB               int
+	CPUs                   int
+	DiskSize               string
+	Display                string
+	GraphicsType           string
+	Arch                   string
+	CPUModel               string
+	ExtraArgs              string
+	NoVNCEnabled           bool
+	VNCPort                int
+	VNCKeymap              string
+	NoVNCPort              int
+	BootFrom               string
+	BlankWorkDisk          bool
+	BootOrder              []string
+	IPXEEnabled            bool
+	IPXEROMPath            string
+	CloudInitEnabled       bool
+	CloudInitUserDataPath  string
+	Password               string
+	SSHPort                int
+	VMName                 string
+	Persist                bool
+	ForceISO               bool
+	SSHPubkey              string
+	RedfishUser            string
+	RedfishPassword        string
+	RedfishPort            int
+	RedfishSystemID        string
+	RedfishEnabled         bool
+	NICs                   []network.Config
+	PortForwards           []network.PortForward
+	Filesystems            []FilesystemShare
+	BootMode               string
+	TPMEnabled             bool
+	MachineType            string
+	ExtraDisks             []Disk
+	BlockDevices           []BlockDevice
+	DiskController         string
+	DiskPreallocate        bool
+	DiskIO                 string
+	DiskCache              string
+	IOThread               bool
+	BalloonEnabled         bool
+	RNGEnabled             bool
+	USBController          bool
+	HyperVEnabled          bool
+	GPUPassthrough         string
+	RequireKVM             bool
+	LoginShell             string
+	DownloadRetries        int
 }
 
 func (r *Resolver) Resolve(env MapEnv) (VM, error) {
@@ -274,62 +276,64 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	}
 
 	return VM{
-		Distro:                distro,
-		ImageURL:              distroInfo.URL,
-		LoginUser:             loginUser,
-		ImageFormat:           "qcow2",
-		DistroName:            distroName,
-		MemoryMB:              memoryMB,
-		CPUs:                  cpus,
-		DiskSize:              diskSize,
-		Display:               display,
-		GraphicsType:          graphicsType,
-		Arch:                  arch,
-		CPUModel:              env.Get("CPU_MODEL", "host"),
-		ExtraArgs:             env.Get("EXTRA_ARGS", ""),
-		NoVNCEnabled:          novncEnabled,
-		VNCPort:               vncPort,
-		VNCKeymap:             strings.TrimSpace(env.Get("VNC_KEYMAP", "")),
-		NoVNCPort:             novncPort,
-		BootFrom:              bootFrom,
-		BlankWorkDisk:         blankDisk,
-		BootOrder:             bootOrder,
-		IPXEEnabled:           networkConfig.IPXEEnabled,
-		IPXEROMPath:           networkConfig.IPXEROMPath,
-		CloudInitEnabled:      cloudInit.Enabled,
-		CloudInitUserDataPath: cloudInit.UserDataPath,
-		Password:              env.Get("GUEST_PASSWORD", "password"),
-		SSHPort:               sshPort,
-		VMName:                vmName,
-		Persist:               persist,
-		ForceISO:              forceISO,
-		SSHPubkey:             env.Get("SSH_PUBKEY", ""),
-		RedfishUser:           env.Get("REDFISH_USERNAME", "admin"),
-		RedfishPassword:       env.Get("REDFISH_PASSWORD", "password"),
-		RedfishPort:           redfishPort,
-		RedfishSystemID:       env.Get("REDFISH_SYSTEM_ID", vmName),
-		RedfishEnabled:        redfishEnabled,
-		NICs:                  networkConfig.NICs,
-		PortForwards:          networkConfig.PortForwards,
-		Filesystems:           filesystems,
-		BootMode:              bootMode,
-		TPMEnabled:            tpmEnabled,
-		MachineType:           machineType,
-		ExtraDisks:            extraDisks,
-		BlockDevices:          blockDevices,
-		DiskController:        diskController,
-		DiskPreallocate:       diskPreallocate,
-		DiskIO:                diskIO,
-		DiskCache:             diskCache,
-		IOThread:              ioThread,
-		BalloonEnabled:        balloon,
-		RNGEnabled:            rng,
-		USBController:         usb,
-		HyperVEnabled:         hyperv,
-		GPUPassthrough:        gpu,
-		RequireKVM:            requireKVM,
-		LoginShell:            loginShell,
-		DownloadRetries:       downloadRetries,
+		Distro:                 distro,
+		ImageURL:               distroInfo.URL,
+		ImageChecksumAlgorithm: distroInfo.ChecksumAlgorithm,
+		ImageChecksumValue:     distroInfo.ChecksumValue,
+		LoginUser:              loginUser,
+		ImageFormat:            "qcow2",
+		DistroName:             distroName,
+		MemoryMB:               memoryMB,
+		CPUs:                   cpus,
+		DiskSize:               diskSize,
+		Display:                display,
+		GraphicsType:           graphicsType,
+		Arch:                   arch,
+		CPUModel:               env.Get("CPU_MODEL", "host"),
+		ExtraArgs:              env.Get("EXTRA_ARGS", ""),
+		NoVNCEnabled:           novncEnabled,
+		VNCPort:                vncPort,
+		VNCKeymap:              strings.TrimSpace(env.Get("VNC_KEYMAP", "")),
+		NoVNCPort:              novncPort,
+		BootFrom:               bootFrom,
+		BlankWorkDisk:          blankDisk,
+		BootOrder:              bootOrder,
+		IPXEEnabled:            networkConfig.IPXEEnabled,
+		IPXEROMPath:            networkConfig.IPXEROMPath,
+		CloudInitEnabled:       cloudInit.Enabled,
+		CloudInitUserDataPath:  cloudInit.UserDataPath,
+		Password:               env.Get("GUEST_PASSWORD", "password"),
+		SSHPort:                sshPort,
+		VMName:                 vmName,
+		Persist:                persist,
+		ForceISO:               forceISO,
+		SSHPubkey:              env.Get("SSH_PUBKEY", ""),
+		RedfishUser:            env.Get("REDFISH_USERNAME", "admin"),
+		RedfishPassword:        env.Get("REDFISH_PASSWORD", "password"),
+		RedfishPort:            redfishPort,
+		RedfishSystemID:        env.Get("REDFISH_SYSTEM_ID", vmName),
+		RedfishEnabled:         redfishEnabled,
+		NICs:                   networkConfig.NICs,
+		PortForwards:           networkConfig.PortForwards,
+		Filesystems:            filesystems,
+		BootMode:               bootMode,
+		TPMEnabled:             tpmEnabled,
+		MachineType:            machineType,
+		ExtraDisks:             extraDisks,
+		BlockDevices:           blockDevices,
+		DiskController:         diskController,
+		DiskPreallocate:        diskPreallocate,
+		DiskIO:                 diskIO,
+		DiskCache:              diskCache,
+		IOThread:               ioThread,
+		BalloonEnabled:         balloon,
+		RNGEnabled:             rng,
+		USBController:          usb,
+		HyperVEnabled:          hyperv,
+		GPUPassthrough:         gpu,
+		RequireKVM:             requireKVM,
+		LoginShell:             loginShell,
+		DownloadRetries:        downloadRetries,
 	}, nil
 }
 

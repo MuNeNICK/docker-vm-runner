@@ -48,6 +48,9 @@ func TestResolveDefaultConfig(t *testing.T) {
 	if cfg.ImageURL != "https://example.com/ubuntu.iso" {
 		t.Fatalf("ImageURL = %q", cfg.ImageURL)
 	}
+	if cfg.ImageChecksumAlgorithm != "sha256" || cfg.ImageChecksumValue != "abc123" {
+		t.Fatalf("Image checksum = %q %q", cfg.ImageChecksumAlgorithm, cfg.ImageChecksumValue)
+	}
 	if cfg.LoginUser != "user" {
 		t.Fatalf("LoginUser = %q", cfg.LoginUser)
 	}
