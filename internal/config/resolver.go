@@ -534,7 +534,7 @@ func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitRes
 			if err := yaml.Unmarshal(content, &parsed); err != nil {
 				return cloudInitResolution{}, fmt.Errorf("CLOUD_INIT_USER_DATA contains invalid YAML: %w", err)
 			}
-			if _, ok := parsed.(map[string]any); parsed != nil && !ok {
+			if _, ok := parsed.(map[string]any); !ok {
 				warnings = append(warnings, "CLOUD_INIT_USER_DATA #cloud-config content is not a YAML mapping; cloud-init may ignore it")
 			}
 		} else if firstLine != "" && !isKnownCloudInitHeader(firstLine) {

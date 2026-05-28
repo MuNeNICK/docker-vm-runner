@@ -341,6 +341,22 @@ func TestResolveCloudConfigWarnsWhenNotMapping(t *testing.T) {
 	}
 }
 
+func TestResolveCloudConfigWarnsWhenNull(t *testing.T) {
+	resolver, _ := testResolver(t)
+	userData := filepath.Join(t.TempDir(), "user-data.yaml")
+	if err := os.WriteFile(userData, []byte("#cloud-config\n"), 0o644); err != nil {
+		t.Fatalf("write user-data: %v", err)
+	}
+
+	cfg, err := resolver.Resolve(MapEnv{"CLOUD_INIT_USER_DATA": userData})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !containsWarning(cfg.Warnings, "not a YAML mapping") {
+		t.Fatalf("Warnings = %#v", cfg.Warnings)
+	}
+}
+
 func containsWarning(warnings []string, needle string) bool {
 	for _, warning := range warnings {
 		if strings.Contains(warning, needle) {

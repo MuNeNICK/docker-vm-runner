@@ -61,6 +61,9 @@ func TestStartServesHTTPSWithSelectedAssets(t *testing.T) {
 	if result.AssetRoot != root {
 		t.Fatalf("AssetRoot = %q", result.AssetRoot)
 	}
+	if filepath.Base(result.CertPath) != "sushy.crt" || filepath.Base(result.KeyPath) != "sushy.key" {
+		t.Fatalf("cert paths = %q %q", result.CertPath, result.KeyPath)
+	}
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	resp, err := client.Get("https://" + result.ListenAddress + "/vnc.html")
 	if err != nil {

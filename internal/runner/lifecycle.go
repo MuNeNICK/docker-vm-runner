@@ -411,7 +411,7 @@ func (l *ConcreteLifecycle) startConsoleResizeSync(ctx context.Context, cfg conf
 	notify(signals, syscall.SIGWINCH)
 	done := make(chan struct{})
 	go func() {
-		l.syncConsoleSize(ctx, cfg)
+		l.syncConsoleSize(ctx, cfg, false)
 		for {
 			select {
 			case <-ctx.Done():
@@ -419,7 +419,7 @@ func (l *ConcreteLifecycle) startConsoleResizeSync(ctx context.Context, cfg conf
 			case <-done:
 				return
 			case <-signals:
-				l.syncConsoleSize(ctx, cfg)
+				l.syncConsoleSize(ctx, cfg, true)
 			}
 		}
 	}()
@@ -429,7 +429,7 @@ func (l *ConcreteLifecycle) startConsoleResizeSync(ctx context.Context, cfg conf
 	}
 }
 
-func (l *ConcreteLifecycle) syncConsoleSize(ctx context.Context, cfg config.VM) {
+func (l *ConcreteLifecycle) syncConsoleSize(ctx context.Context, cfg config.VM, warn bool) {
 	rows, cols, ok := l.consoleTerminalSize()
 	if !ok {
 		return
@@ -451,10 +451,12 @@ func (l *ConcreteLifecycle) syncConsoleSize(ctx context.Context, cfg config.VM) 
 		Args: []string{"-c", command},
 	})
 	if err != nil {
-		l.warnf("Could not sync console terminal size: %v", err)
+		if warn {
+			l.warnf("Could not sync console terminal size: %v", err)
+		}
 		return
 	}
-	if result.ExitCode != 0 {
+	if warn && result.ExitCode != 0 {
 		l.warnf("Could not sync console terminal size: stty exited with status %d", result.ExitCode)
 	}
 }

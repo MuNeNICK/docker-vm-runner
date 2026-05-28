@@ -1771,6 +1771,61 @@ func TestConcreteLifecycleAttachConsoleSyncsTerminalSizeOnSigwinch(t *testing.T)
 	}
 }
 
+func TestConcreteLifecycleAttachConsoleKeepsInitialResizeFailureSilent(t *testing.T) {
+	client := &fakeGuestExecClient{
+		responses: []guestExecResponse{
+			{err: guestexec.ErrAgentWaitTimeout},
+			{err: guestexec.ErrAgentWaitTimeout},
+		},
+	}
+	secondAttempt := make(chan struct{})
+	var attempts int
+	var attemptsMu sync.Mutex
+	client.commandHook = func(guestexec.Command) {
+		attemptsMu.Lock()
+		defer attemptsMu.Unlock()
+		attempts++
+		if attempts == 2 {
+			close(secondAttempt)
+		}
+	}
+	signals := make(chan os.Signal, 1)
+	started := make(chan struct{})
+	var status bytes.Buffer
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.GuestClient = client
+	lifecycle.Status = &status
+	lifecycle.Console = fakeConsoleRunnerFunc(func(context.Context, string) (int, error) {
+		close(started)
+		signals <- syscall.SIGWINCH
+		select {
+		case <-secondAttempt:
+		case <-time.After(time.Second):
+			return 1, errors.New("timed out waiting for second resize attempt")
+		}
+		return 0, nil
+	})
+	lifecycle.TerminalSize = func() (int, int, bool) { return 40, 120, true }
+	lifecycle.Notify = func(ch chan<- os.Signal, _ ...os.Signal) {
+		go func() {
+			<-started
+			for sig := range signals {
+				ch <- sig
+			}
+		}()
+	}
+	lifecycle.StopNotify = func(chan<- os.Signal) { close(signals) }
+	lifecycle.Sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := lifecycle.AttachConsole(context.Background(), config.VM{VMName: "vm1"}); err != nil {
+		t.Fatalf("AttachConsole returned error: %v", err)
+	}
+	warnings := strings.Count(status.String(), "Could not sync console terminal size")
+	if warnings != 1 {
+		t.Fatalf("warnings = %d status = %q", warnings, status.String())
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")

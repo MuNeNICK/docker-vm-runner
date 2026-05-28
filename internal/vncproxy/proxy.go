@@ -86,8 +86,8 @@ func (p *Proxy) Start(ctx context.Context, req Request) (Result, error) {
 	if listenAddress == "" {
 		listenAddress = net.JoinHostPort("0.0.0.0", strconv.Itoa(defaultPort(req.NoVNCPort, 6080)))
 	}
-	certPath := filepath.Join(p.Options.CertDir, "novnc.crt")
-	keyPath := filepath.Join(p.Options.CertDir, "novnc.key")
+	certPath := filepath.Join(p.Options.CertDir, "sushy.crt")
+	keyPath := filepath.Join(p.Options.CertDir, "sushy.key")
 	if err := certs.EnsureSelfSigned(certs.Request{CertPath: certPath, KeyPath: keyPath}); err != nil {
 		return Result{}, err
 	}
