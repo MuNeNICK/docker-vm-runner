@@ -771,7 +771,8 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 			l.bootISOPath = source
 			return "", nil
 		}
-		return l.postProcessImage(ctx, source, filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2")), imagePostProcessOptions{
+		vmName := defaultString(cfg.VMName, cfg.Distro)
+		return l.postProcessImage(ctx, source, filepath.Join(l.Layout.VMImagesDir, vmName, "boot."+defaultString(cfg.ImageFormat, "qcow2")), imagePostProcessOptions{
 			DesiredFormat:     defaultString(cfg.ImageFormat, "qcow2"),
 			SourceFormat:      cfg.SourceImageFormat,
 			SourceCompression: cfg.SourceImageCompression,
@@ -813,8 +814,10 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 		destination := filepath.Join(l.Layout.BaseImagesDir, "boot", cacheName(ref))
 		checksum := download.Checksum{Algorithm: cfg.BootChecksumAlgorithm, Value: cfg.BootChecksumValue}
 		if fileExists(destination) {
-			if err := download.VerifyChecksum(destination, checksum); err == nil {
-				return destination, nil
+			if isNonEmptyFile(destination) {
+				if err := download.VerifyChecksum(destination, checksum); err == nil {
+					return destination, nil
+				}
 			}
 			_ = os.Remove(destination)
 		}
@@ -1102,11 +1105,16 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+func isNonEmptyFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
+}
+
 func (l *ConcreteLifecycle) kvmAvailable() bool {
 	if l.KVMAvailable != nil {
 		return l.KVMAvailable()
 	}
-	return fileExists("/dev/kvm")
+	return hostinfo.KVMAvailable()
 }
 
 func (l *ConcreteLifecycle) guestClient() guestexec.Client {
@@ -1226,5 +1234,6 @@ func isPasstStartError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "passt")
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "passt") || strings.Contains(message, "backend")
 }

@@ -131,7 +131,7 @@ func TestAccessLinesIncludeConsoleRedfishAndPublish(t *testing.T) {
 	text := strings.Join(lines, "\n")
 	for _, needle := range []string{
 		"SSH      ssh -p 2222 user@localhost",
-		"Console  https://localhost:6080/vnc.html",
+		"Console  https://localhost:6080/vnc.html?autoconnect=1&resize=scale",
 		"Redfish  https://localhost:8443/",
 		"Ports    8080->80",
 		"Publish  ",
@@ -950,6 +950,7 @@ func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) 
 
 	got, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
 		Distro:                 "custom",
+		VMName:                 "vm1",
 		BootFrom:               source,
 		ImageFormat:            "qcow2",
 		SourceImageFormat:      "qcow2",
@@ -958,7 +959,7 @@ func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) 
 	if err != nil {
 		t.Fatalf("resolveBaseImage returned error: %v", err)
 	}
-	if filepath.Base(got) != "custom.qcow2" {
+	if got != filepath.Join(layout.VMImagesDir, "vm1", "boot.qcow2") {
 		t.Fatalf("base image path = %s", got)
 	}
 	if content := readFileString(t, got); content != "disk-image" {
@@ -966,6 +967,39 @@ func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) 
 	}
 	if _, err := os.Stat(source); err != nil {
 		t.Fatalf("user-provided source should not be removed: %v", err)
+	}
+}
+
+func TestConcreteLifecycleResolveBaseImageDoesNotOverwriteDistroCacheForBootFromDisk(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	baseImage := filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2")
+	if err := os.WriteFile(baseImage, []byte("catalog-base"), 0o644); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	source := filepath.Join(t.TempDir(), "custom.qcow2")
+	if err := os.WriteFile(source, []byte("custom-disk"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	lifecycle := NewConcreteLifecycle(layout)
+
+	got, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
+		Distro:      "ubuntu",
+		VMName:      "vm1",
+		BootFrom:    source,
+		ImageFormat: "qcow2",
+	})
+	if err != nil {
+		t.Fatalf("resolveBaseImage returned error: %v", err)
+	}
+	if got != filepath.Join(layout.VMImagesDir, "vm1", "boot.qcow2") {
+		t.Fatalf("boot source base = %s", got)
+	}
+	if content := readFileString(t, baseImage); content != "catalog-base" {
+		t.Fatalf("distro cache was overwritten: %q", content)
 	}
 }
 
@@ -1064,10 +1098,46 @@ func TestConcreteLifecycleResolveBootSourceRechecksCachedChecksum(t *testing.T) 
 	}
 }
 
+func TestConcreteLifecycleResolveBootSourceRedownloadsZeroByteCache(t *testing.T) {
+	body := []byte("boot-iso")
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+	ref := server.URL + "/installer.iso"
+	layout := testLayout(t)
+	destination := filepath.Join(layout.BaseImagesDir, "boot", cacheName(ref))
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatalf("mkdir boot cache: %v", err)
+	}
+	if err := os.WriteFile(destination, nil, 0o644); err != nil {
+		t.Fatalf("write zero cache: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+
+	got, err := lifecycle.resolveBootSource(context.Background(), config.VM{BootFrom: ref, DownloadRetries: 1})
+	if err != nil {
+		t.Fatalf("resolveBootSource returned error: %v", err)
+	}
+	if got != destination {
+		t.Fatalf("boot source = %s", got)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d", requests)
+	}
+	if content := readFileString(t, destination); content != string(body) {
+		t.Fatalf("cached content = %q", content)
+	}
+}
+
 func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
 	layout := testLayout(t)
 	installFakeCommand(t, "genisoimage", func(logPath string) string {
-		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"cp \"$9\" \"$(dirname \"$2\")/vendor-data.captured\"\n" +
+			"exit 0\n"
 	})
 	lifecycle := NewConcreteLifecycle(layout)
 	output := filepath.Join(layout.VMImagesDir, "vm1", "seed.iso")
@@ -1085,7 +1155,7 @@ func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareSeedISO returned error: %v", err)
 	}
-	vendorData := readFileString(t, filepath.Join(filepath.Dir(output), "vendor-data"))
+	vendorData := readFileString(t, filepath.Join(filepath.Dir(output), "vendor-data.captured"))
 	for _, want := range []string{
 		"- data",
 		"- /mnt/data",
@@ -1754,7 +1824,7 @@ func TestConcreteLifecycleStartVMFallsBackFromPasstBackend(t *testing.T) {
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{
 		domain:    &fakeLibvirtDomain{name: "vm1"},
-		startErrs: []error{errors.New("failed to create passt backend"), nil},
+		startErrs: []error{errors.New("failed to create network backend"), nil},
 	}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager

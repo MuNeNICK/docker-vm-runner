@@ -273,6 +273,9 @@ func TestParseNetworkIPXEOverride(t *testing.T) {
 	if !cfg.NICs[0].Boot {
 		t.Fatal("primary NIC boot flag is false")
 	}
+	if !containsWarning(cfg.Warnings, "user-mode DHCP/TFTP") {
+		t.Fatalf("Warnings = %#v", cfg.Warnings)
+	}
 }
 
 func TestParseNetworkIPXERequiresROM(t *testing.T) {

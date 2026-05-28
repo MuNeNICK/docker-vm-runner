@@ -29,16 +29,21 @@ func (b *Builder) Build(ctx context.Context, outputPath string, content SeedCont
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create seed ISO directory: %w", err)
 	}
-	metaPath := filepath.Join(dir, "meta-data")
-	userPath := filepath.Join(dir, "user-data")
-	vendorPath := filepath.Join(dir, "vendor-data")
+	buildDir, err := os.MkdirTemp(dir, ".seediso-*")
+	if err != nil {
+		return fmt.Errorf("create seed ISO build directory: %w", err)
+	}
+	defer os.RemoveAll(buildDir)
+	metaPath := filepath.Join(buildDir, "meta-data")
+	userPath := filepath.Join(buildDir, "user-data")
+	vendorPath := filepath.Join(buildDir, "vendor-data")
 	if err := os.WriteFile(metaPath, []byte(content.MetaData), 0o644); err != nil {
 		return fmt.Errorf("write meta-data: %w", err)
 	}
-	if err := os.WriteFile(userPath, []byte(content.UserData), 0o644); err != nil {
+	if err := os.WriteFile(userPath, []byte(content.UserData), 0o600); err != nil {
 		return fmt.Errorf("write user-data: %w", err)
 	}
-	if err := os.WriteFile(vendorPath, []byte(content.VendorData), 0o644); err != nil {
+	if err := os.WriteFile(vendorPath, []byte(content.VendorData), 0o600); err != nil {
 		return fmt.Errorf("write vendor-data: %w", err)
 	}
 	cmd := GenISOCommand(GenISORequest{

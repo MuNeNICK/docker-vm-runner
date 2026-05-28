@@ -111,7 +111,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 
 func (r *Runner) validateDryRun(cfg config.VM) error {
 	var failures []string
-	if cfg.RequireKVM && !hostinfo.FileExists("/dev/kvm") {
+	if cfg.RequireKVM && !hostinfo.KVMAvailable() {
 		failures = append(failures, "REQUIRE_KVM=1 requires /dev/kvm")
 	}
 	if cfg.BootFrom != "" && !isRemoteReference(cfg.BootFrom) && !oci.IsReference(cfg.BootFrom) && !hostinfo.FileExists(cfg.BootFrom) {
@@ -219,7 +219,7 @@ func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
 		FirmwareLoader:    fw.LoaderPath,
 		FirmwareVars:      fw.VarsPath,
 		IPXEROMPath:       cfg.IPXEROMPath,
-		KVMAvailable:      hostinfo.FileExists("/dev/kvm"),
+		KVMAvailable:      hostinfo.KVMAvailable(),
 		EffectiveCPUModel: cfg.CPUModel,
 		IPv6Enabled:       hostinfo.IPv6Available(),
 		IntelRenderNode:   hostinfo.FileExists("/dev/dri/renderD128"),
@@ -563,7 +563,7 @@ func AccessLines(cfg config.VM) []string {
 		lines = append(lines, fmt.Sprintf("Login    %s / %s", cfg.LoginUser, cfg.Password))
 	}
 	if cfg.NoVNCEnabled {
-		lines = append(lines, fmt.Sprintf("Console  https://localhost:%d/vnc.html", cfg.NoVNCPort))
+		lines = append(lines, fmt.Sprintf("Console  https://localhost:%d/vnc.html?autoconnect=1&resize=scale", cfg.NoVNCPort))
 		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.NoVNCPort, cfg.NoVNCPort))
 	} else if cfg.GraphicsType == "vnc" {
 		lines = append(lines, fmt.Sprintf("VNC      localhost:%d", cfg.VNCPort))

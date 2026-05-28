@@ -19,6 +19,7 @@ type NetworkConfig struct {
 	PortForwards []network.PortForward
 	IPXEEnabled  bool
 	IPXEROMPath  string
+	Warnings     []string
 }
 
 type NetworkParseOptions struct {
@@ -75,6 +76,9 @@ func ParseNetwork(env MapEnv, opts NetworkParseOptions) (NetworkConfig, error) {
 		result.IPXEEnabled = true
 		result.IPXEROMPath = rom
 		result.NICs[0].Boot = true
+		if result.NICs[0].Mode == "user" {
+			result.Warnings = append(result.Warnings, "IPXE_ENABLE=1 with NETWORK_MODE=nat relies on user-mode DHCP/TFTP; for real PXE environments prefer bridge or direct networking")
+		}
 	}
 	return result, nil
 }

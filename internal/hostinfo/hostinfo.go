@@ -40,7 +40,7 @@ func Detect(diskPath string) Info {
 		MemAvailBytes:   memAvail,
 		DiskAvailBytes:  diskAvailable(diskPath),
 		DiskPath:        diskPath,
-		KVMAvailable:    fileExists("/dev/kvm"),
+		KVMAvailable:    KVMAvailable(),
 		Kernel:          kernelRelease(),
 		RuntimeEngine:   runtimeEngine,
 		RuntimeRootless: runtimeRootlessFromUIDMap(readFile("/proc/self/uid_map"), os.Geteuid()),
@@ -109,6 +109,19 @@ func IsBlockDevice(path string) bool {
 
 func IsMount(path string) bool {
 	return isMount(path, "/proc/self/mountinfo", os.ReadFile)
+}
+
+func KVMAvailable() bool {
+	return kvmAvailable("/dev/kvm", os.Open)
+}
+
+func kvmAvailable(path string, open func(string) (*os.File, error)) bool {
+	file, err := open(path)
+	if err != nil {
+		return false
+	}
+	_ = file.Close()
+	return true
 }
 
 func NativeDiskIOUnsafe(path string) bool {

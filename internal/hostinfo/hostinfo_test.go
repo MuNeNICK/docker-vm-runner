@@ -137,6 +137,25 @@ func TestIsMountReadsMountInfo(t *testing.T) {
 	}
 }
 
+func TestKVMAvailableRequiresOpenableDevice(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kvm")
+	if err := os.WriteFile(path, []byte{}, 0o600); err != nil {
+		t.Fatalf("write kvm file: %v", err)
+	}
+	if !kvmAvailable(path, os.Open) {
+		t.Fatal("openable path should be available")
+	}
+	if kvmAvailable(filepath.Join(dir, "missing"), os.Open) {
+		t.Fatal("missing path should not be available")
+	}
+	if kvmAvailable(path, func(string) (*os.File, error) {
+		return nil, os.ErrPermission
+	}) {
+		t.Fatal("permission error should not be available")
+	}
+}
+
 func TestBlockSectorSizeReadsSysfs(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "vdb", "queue")

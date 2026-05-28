@@ -409,7 +409,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		DownloadRetries:        downloadRetries,
 		DownloadMaxBytes:       downloadMaxBytes,
 		ExtractMaxBytes:        extractMaxBytes,
-		Warnings:               cloudInit.Warnings,
+		Warnings:               append(cloudInit.Warnings, networkConfig.Warnings...),
 	}, nil
 }
 
