@@ -30,6 +30,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/seediso"
 	"github.com/munenick/docker-vm-runner/internal/services"
 	"github.com/munenick/docker-vm-runner/internal/tpm"
+	"github.com/munenick/docker-vm-runner/internal/vmstate"
 	"github.com/munenick/docker-vm-runner/internal/vncproxy"
 )
 
@@ -163,6 +164,11 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	if err := os.MkdirAll(vmDir, 0o755); err != nil {
 		return fmt.Errorf("create VM directory: %w", err)
 	}
+	preparedCfg, err := l.applyPersistentState(vmDir, cfg)
+	if err != nil {
+		return err
+	}
+	cfg = preparedCfg
 	l.workImagePath = filepath.Join(vmDir, "disk."+defaultString(cfg.ImageFormat, "qcow2"))
 	if err := l.prepareDisk(ctx, cfg, l.workImagePath); err != nil {
 		return err
@@ -265,7 +271,7 @@ func (l *ConcreteLifecycle) AttachConsole(ctx context.Context, cfg config.VM) (i
 
 func (l *ConcreteLifecycle) MarkInstalled(_ context.Context, cfg config.VM) error {
 	vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
-	return os.WriteFile(filepath.Join(vmDir, ".installed"), []byte("ok\n"), 0o644)
+	return vmstate.MarkInstalled(vmDir, time.Now().UTC())
 }
 
 func (l *ConcreteLifecycle) Cleanup(ctx context.Context, _ config.VM) error {
@@ -295,7 +301,39 @@ func (l *ConcreteLifecycle) StopServices(ctx context.Context, _ config.VM) error
 	return l.Service.Stop(ctx)
 }
 
+func (l *ConcreteLifecycle) applyPersistentState(vmDir string, cfg config.VM) (config.VM, error) {
+	if !cfg.Persist || cfg.ForceISO || cfg.BootFrom == "" {
+		return cfg, nil
+	}
+	state, err := vmstate.Read(vmDir)
+	if err != nil {
+		return config.VM{}, err
+	}
+	if !vmstate.IsInstalled(state) {
+		return cfg, nil
+	}
+	cfg.BootFrom = ""
+	cfg.BlankWorkDisk = false
+	cfg.BootOrder = withoutBootDevice(cfg.BootOrder, "cdrom")
+	if len(cfg.BootOrder) == 0 {
+		cfg.BootOrder = []string{"hd"}
+	}
+	return cfg, nil
+}
+
 func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, workImage string) error {
+	if fileExists(workImage) && cfg.Persist {
+		if cfg.BootFrom != "" {
+			source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
+			if err != nil {
+				return err
+			}
+			if isISO(source) {
+				l.bootISOPath = source
+			}
+		}
+		return nil
+	}
 	if cfg.BlankWorkDisk {
 		if cfg.BootFrom != "" {
 			source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
@@ -312,9 +350,6 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 			Size:        cfg.DiskSize,
 			Preallocate: cfg.DiskPreallocate,
 		})
-	}
-	if fileExists(workImage) && cfg.Persist {
-		return nil
 	}
 	baseImage, err := l.resolveBaseImage(ctx, cfg)
 	if err != nil {
@@ -639,4 +674,14 @@ func defaultString(value string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func withoutBootDevice(values []string, device string) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != device {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }
