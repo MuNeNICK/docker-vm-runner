@@ -103,11 +103,11 @@ func (o Output) DownloadProgress(progress download.Progress) {
 
 func (o Output) terminalSection(title string, lines []string) {
 	width := sectionWidth(title, lines, 68)
-	top := "┌─ " + title + " " + strings.Repeat("─", max(0, width-len(title)-3)) + "┐"
-	bottom := "└" + strings.Repeat("─", width) + "┘"
+	top := "┌─ " + title + " " + strings.Repeat("─", max(0, width-visibleWidth(title)-1)) + "┐"
+	bottom := "└" + strings.Repeat("─", width+2) + "┘"
 	fmt.Fprintln(o.Stdout, top)
 	for _, line := range lines {
-		fmt.Fprintf(o.Stdout, "│ %-*s │\n", width-3, line)
+		fmt.Fprintf(o.Stdout, "│ %-*s │\n", width, line)
 	}
 	fmt.Fprintln(o.Stdout, bottom)
 }
@@ -237,16 +237,20 @@ func normalizedLines(lines []string) []string {
 }
 
 func sectionWidth(title string, lines []string, minWidth int) int {
-	width := len(title) + 4
+	width := visibleWidth(title) + 1
 	for _, line := range lines {
-		if len(line)+3 > width {
-			width = len(line) + 3
+		if visibleWidth(line) > width {
+			width = visibleWidth(line)
 		}
 	}
 	if width < minWidth {
 		width = minWidth
 	}
 	return width
+}
+
+func visibleWidth(value string) int {
+	return len([]rune(value))
 }
 
 func formatMiB(value int64) string {

@@ -169,6 +169,22 @@ func TestOutputRendersTerminalSection(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", needle, text)
 		}
 	}
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("lines = %#v", lines)
+	}
+	width := len([]rune(lines[0]))
+	for _, line := range lines[1:] {
+		if len([]rune(line)) != width {
+			t.Fatalf("terminal section has uneven line widths:\n%s", text)
+		}
+	}
+	for _, line := range lines {
+		runes := []rune(line)
+		if runes[len(runes)-1] != '┐' && runes[len(runes)-1] != '┘' && runes[len(runes)-1] != '│' {
+			t.Fatalf("line missing right border: %q", line)
+		}
+	}
 }
 
 func TestOutputRendersLogDownloadProgress(t *testing.T) {
