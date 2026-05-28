@@ -1004,8 +1004,12 @@ func TestConcreteLifecycleResolveBaseImageDoesNotOverwriteDistroCacheForBootFrom
 	if err != nil {
 		t.Fatalf("resolveBaseImage returned error: %v", err)
 	}
-	if got != filepath.Join(layout.VMImagesDir, "vm1", "boot.qcow2") {
+	if got != source {
 		t.Fatalf("boot source base = %s", got)
+	}
+	vmBootImage := filepath.Join(layout.VMImagesDir, "vm1", "boot.qcow2")
+	if _, err := os.Stat(vmBootImage); !os.IsNotExist(err) {
+		t.Fatalf("local boot source should not be duplicated at %s: %v", vmBootImage, err)
 	}
 	if content := readFileString(t, baseImage); content != "catalog-base" {
 		t.Fatalf("distro cache was overwritten: %q", content)

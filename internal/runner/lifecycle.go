@@ -907,9 +907,6 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 		current = result.Path
 		intermediates = append(intermediates, current)
 	}
-	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-		return "", fmt.Errorf("create base image directory: %w", err)
-	}
 	desiredFormat := defaultString(opts.DesiredFormat, "qcow2")
 	diskManager := l.diskManager()
 	info, err := diskManager.ImageInfo(ctx, current)
@@ -917,8 +914,14 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	if err == nil && info.Format != "" {
 		currentFormat = info.Format
 	}
+	if current == source && !l.shouldCleanupIntermediate(current, destination) && currentFormat == desiredFormat {
+		return current, nil
+	}
 	if currentFormat != "" && currentFormat != desiredFormat {
 		l.infof("Converting image %s from %s to %s", current, currentFormat, desiredFormat)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return "", fmt.Errorf("create base image directory: %w", err)
+		}
 		if err := diskManager.ConvertDisk(ctx, current, destination, desiredFormat); err != nil {
 			return "", err
 		}
@@ -927,6 +930,9 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	}
 	if current != destination {
 		l.infof("Placing base image %s", destination)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return "", fmt.Errorf("create base image directory: %w", err)
+		}
 		if err := copyFile(current, destination); err != nil {
 			return "", fmt.Errorf("place base image: %w", err)
 		}
