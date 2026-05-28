@@ -1,12 +1,16 @@
 package libvirtmgr
 
 import (
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
 var ErrNotFound = errors.New("libvirt domain not found")
+
+const runnerMetadataNamespace = "https://github.com/munenick/docker-qemu/v2"
 
 type Connection interface {
 	LookupDomain(name string) (Domain, error)
@@ -21,6 +25,7 @@ type StorageConnection interface {
 
 type Domain interface {
 	Name() string
+	XML() (string, error)
 	IsActive() (bool, error)
 	Create() error
 	Shutdown() error
@@ -58,6 +63,23 @@ func (m *Manager) EnsureDefined(name string, xml string) (Domain, error) {
 	}
 	domain, err := m.Conn.LookupDomain(name)
 	if err == nil {
+		inspection, err := inspectDomain(domain, name)
+		if err != nil {
+			return nil, err
+		}
+		if !inspection.Metadata.Managed || inspection.Metadata.VMName != name {
+			return nil, fmt.Errorf("libvirt domain %s already exists and is not managed by docker-vm-runner", name)
+		}
+		if err := m.Cleanup(domain, CleanupOptions{HasNVRAM: inspection.HasNVRAM}); err != nil {
+			return nil, fmt.Errorf("cleanup stale libvirt domain %s: %w", name, err)
+		}
+		domain, err = m.Conn.DefineDomain(xml)
+		if err != nil {
+			return nil, fmt.Errorf("define libvirt domain %s: %w", name, err)
+		}
+		if domain == nil {
+			return nil, fmt.Errorf("failed to define libvirt domain %s", name)
+		}
 		return domain, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -71,6 +93,70 @@ func (m *Manager) EnsureDefined(name string, xml string) (Domain, error) {
 		return nil, fmt.Errorf("failed to define libvirt domain %s", name)
 	}
 	return domain, nil
+}
+
+type domainInspection struct {
+	Metadata RunnerMetadata
+	HasNVRAM bool
+}
+
+func inspectDomain(domain Domain, name string) (domainInspection, error) {
+	xmlText, err := domain.XML()
+	if err != nil {
+		return domainInspection{}, fmt.Errorf("read libvirt domain %s XML: %w", name, err)
+	}
+	metadata, err := ParseRunnerMetadata(xmlText)
+	if err != nil {
+		return domainInspection{}, fmt.Errorf("parse libvirt domain %s metadata: %w", name, err)
+	}
+	return domainInspection{Metadata: metadata, HasNVRAM: domainHasNVRAM(xmlText)}, nil
+}
+
+type RunnerMetadata struct {
+	Managed bool
+	VMName  string
+}
+
+func domainHasNVRAM(xmlText string) bool {
+	decoder := xml.NewDecoder(strings.NewReader(xmlText))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		start, ok := token.(xml.StartElement)
+		if ok && start.Name.Local == "nvram" {
+			return true
+		}
+	}
+}
+
+func ParseRunnerMetadata(xmlText string) (RunnerMetadata, error) {
+	decoder := xml.NewDecoder(strings.NewReader(xmlText))
+	var metadata RunnerMetadata
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return metadata, nil
+			}
+			return RunnerMetadata{}, err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Space != runnerMetadataNamespace {
+			continue
+		}
+		var value string
+		if err := decoder.DecodeElement(&value, &start); err != nil {
+			return RunnerMetadata{}, err
+		}
+		switch start.Name.Local {
+		case "managed":
+			metadata.Managed = strings.EqualFold(strings.TrimSpace(value), "true")
+		case "vm-name":
+			metadata.VMName = strings.TrimSpace(value)
+		}
+	}
 }
 
 func (m *Manager) Start(domain Domain) error {

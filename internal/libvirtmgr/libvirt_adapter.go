@@ -76,6 +76,10 @@ func (d *LibvirtDomain) Name() string {
 	return name
 }
 
+func (d *LibvirtDomain) XML() (string, error) {
+	return d.domain.GetXMLDesc(0)
+}
+
 func (d *LibvirtDomain) IsActive() (bool, error) {
 	return d.domain.IsActive()
 }

@@ -83,6 +83,26 @@ func TestRenderMinimalDomainXML(t *testing.T) {
 	}
 }
 
+func TestRenderRunnerOwnershipMetadata(t *testing.T) {
+	vm := testVM()
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		KVMAvailable:      false,
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<metadata>`,
+		`<dvr:managed xmlns:dvr="https://github.com/munenick/docker-qemu/v2">true</dvr:managed>`,
+		`<dvr:vm-name xmlns:dvr="https://github.com/munenick/docker-qemu/v2">test-xml-vm</dvr:vm-name>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
 func TestRenderKVMDomainXML(t *testing.T) {
 	vm := testVM()
 	xmlText := renderForTest(t, Request{

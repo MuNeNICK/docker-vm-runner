@@ -6,21 +6,70 @@ import (
 	"testing"
 )
 
-func TestEnsureDefinedUsesExistingDomain(t *testing.T) {
+func TestEnsureDefinedRejectsExistingUnmanagedDomain(t *testing.T) {
 	conn := &fakeConnection{domains: map[string]*fakeDomain{
-		"test-vm": {name: "test-vm"},
+		"test-vm": {name: "test-vm", xmlText: `<domain><name>test-vm</name></domain>`},
 	}}
 	manager := New(conn)
 
-	domain, err := manager.EnsureDefined("test-vm", "<domain/>")
+	_, err := manager.EnsureDefined("test-vm", "<domain/>")
+	if err == nil {
+		t.Fatal("expected unmanaged existing domain error")
+	}
+	if conn.defineCalls != 0 {
+		t.Fatalf("defineCalls = %d", conn.defineCalls)
+	}
+}
+
+func TestEnsureDefinedReplacesStaleManagedDomain(t *testing.T) {
+	existing := &fakeDomain{name: "test-vm", active: true, xmlText: managedDomainXML("test-vm")}
+	conn := &fakeConnection{domains: map[string]*fakeDomain{"test-vm": existing}}
+	manager := New(conn)
+
+	domain, err := manager.EnsureDefined("test-vm", managedDomainXML("test-vm"))
 	if err != nil {
 		t.Fatalf("EnsureDefined returned error: %v", err)
 	}
 	if domain.Name() != "test-vm" {
 		t.Fatalf("domain name = %q", domain.Name())
 	}
-	if conn.defineCalls != 0 {
+	if existing.destroyCalls != 1 || existing.undefineCalls != 1 {
+		t.Fatalf("destroyCalls=%d undefineCalls=%d", existing.destroyCalls, existing.undefineCalls)
+	}
+	if conn.defineCalls != 1 {
 		t.Fatalf("defineCalls = %d", conn.defineCalls)
+	}
+}
+
+func TestEnsureDefinedUsesNVRAMUndefineForStaleManagedDomain(t *testing.T) {
+	existing := &fakeDomain{name: "test-vm", xmlText: strings.Replace(managedDomainXML("test-vm"), "</metadata>", "</metadata><os><nvram>/state/test.fd</nvram></os>", 1)}
+	conn := &fakeConnection{domains: map[string]*fakeDomain{"test-vm": existing}}
+
+	if _, err := New(conn).EnsureDefined("test-vm", managedDomainXML("test-vm")); err != nil {
+		t.Fatalf("EnsureDefined returned error: %v", err)
+	}
+	if existing.undefineNVRAMCalls != 1 {
+		t.Fatalf("undefineNVRAMCalls = %d", existing.undefineNVRAMCalls)
+	}
+}
+
+func TestParseRunnerMetadata(t *testing.T) {
+	metadata, err := ParseRunnerMetadata(managedDomainXML("vm1"))
+	if err != nil {
+		t.Fatalf("ParseRunnerMetadata returned error: %v", err)
+	}
+	if !metadata.Managed || metadata.VMName != "vm1" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
+func TestParseRunnerMetadataIgnoresUnmanagedXML(t *testing.T) {
+	metadata, err := ParseRunnerMetadata(`<domain><name>vm1</name></domain>`)
+	if err != nil {
+		t.Fatalf("ParseRunnerMetadata returned error: %v", err)
+	}
+	if metadata.Managed || metadata.VMName != "" {
+		t.Fatalf("metadata = %#v", metadata)
 	}
 }
 
@@ -217,6 +266,7 @@ func (c *fakeConnection) DefineStoragePool(xml string) (StoragePool, error) {
 
 type fakeDomain struct {
 	name               string
+	xmlText            string
 	active             bool
 	createCalls        int
 	destroyCalls       int
@@ -227,6 +277,10 @@ type fakeDomain struct {
 
 func (d *fakeDomain) Name() string {
 	return d.name
+}
+
+func (d *fakeDomain) XML() (string, error) {
+	return d.xmlText, nil
 }
 
 func (d *fakeDomain) IsActive() (bool, error) {
@@ -261,6 +315,10 @@ func (d *fakeDomain) Undefine() error {
 func (d *fakeDomain) UndefineNVRAM() error {
 	d.undefineNVRAMCalls++
 	return nil
+}
+
+func managedDomainXML(name string) string {
+	return `<domain><name>` + name + `</name><metadata><dvr:managed xmlns:dvr="https://github.com/munenick/docker-qemu/v2">true</dvr:managed><dvr:vm-name xmlns:dvr="https://github.com/munenick/docker-qemu/v2">` + name + `</dvr:vm-name></metadata></domain>`
 }
 
 type fakeStoragePool struct {

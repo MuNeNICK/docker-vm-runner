@@ -109,6 +109,14 @@ type VirshDomain struct {
 
 func (d *VirshDomain) Name() string { return d.NameValue }
 
+func (d *VirshDomain) XML() (string, error) {
+	result, err := d.Conn.virsh("dumpxml", d.NameValue)
+	if err != nil {
+		return "", err
+	}
+	return result.Stdout, nil
+}
+
 func (d *VirshDomain) IsActive() (bool, error) {
 	result, err := d.Conn.virsh("domstate", d.NameValue)
 	if err != nil {

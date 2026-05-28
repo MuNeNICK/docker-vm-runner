@@ -82,6 +82,24 @@ func TestVirshDomainIsActive(t *testing.T) {
 	}
 }
 
+func TestVirshDomainXML(t *testing.T) {
+	runner := &fakeVirshRunner{results: []process.Result{{Stdout: "<domain><name>vm1</name></domain>"}}}
+	conn := NewVirshConnection(context.Background(), "", runner)
+	domain := &VirshDomain{NameValue: "vm1", Conn: conn}
+
+	xmlText, err := domain.XML()
+	if err != nil {
+		t.Fatalf("XML returned error: %v", err)
+	}
+	if xmlText != "<domain><name>vm1</name></domain>" {
+		t.Fatalf("xml = %q", xmlText)
+	}
+	want := []string{"-c", DefaultURI, "dumpxml", "vm1"}
+	if strings.Join(runner.commands[0].Args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("command = %#v", runner.commands[0])
+	}
+}
+
 func TestVirshStoragePoolLifecycle(t *testing.T) {
 	runner := &fakeVirshRunner{results: []process.Result{
 		{Stdout: "State: inactive\n"},

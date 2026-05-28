@@ -906,6 +906,7 @@ type fakeLibvirtDomain struct {
 }
 
 func (d *fakeLibvirtDomain) Name() string                  { return d.name }
+func (d *fakeLibvirtDomain) XML() (string, error)          { return managedDomainXML(d.name), nil }
 func (d *fakeLibvirtDomain) IsActive() (bool, error)       { return d.active, nil }
 func (d *fakeLibvirtDomain) Create() error                 { d.active = true; return nil }
 func (d *fakeLibvirtDomain) Shutdown() error               { d.active = false; return nil }
@@ -1059,4 +1060,8 @@ func containsCall(calls []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func managedDomainXML(name string) string {
+	return `<domain><name>` + name + `</name><metadata><dvr:managed xmlns:dvr="https://github.com/munenick/docker-qemu/v2">true</dvr:managed><dvr:vm-name xmlns:dvr="https://github.com/munenick/docker-qemu/v2">` + name + `</dvr:vm-name></metadata></domain>`
 }

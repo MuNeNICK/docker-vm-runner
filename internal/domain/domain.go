@@ -13,6 +13,8 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/network"
 )
 
+const MetadataNamespace = "https://github.com/munenick/docker-qemu/v2"
+
 type Renderer struct{}
 
 func NewRenderer() *Renderer {
@@ -55,6 +57,7 @@ func (r *Renderer) Render(req Request) (string, error) {
 	}
 	start(&b, "domain", rootAttrs...)
 	textElement(&b, "name", vm.VMName)
+	renderMetadata(&b, vm)
 	textElementAttrs(&b, "memory", strconv.Itoa(vm.MemoryMB), attr{"unit", "MiB"})
 	textElementAttrs(&b, "vcpu", strconv.Itoa(vm.CPUs), attr{"placement", "static"})
 	if vm.IOThread {
@@ -121,6 +124,17 @@ func (r *Renderer) Render(req Request) (string, error) {
 	}
 	end(&b, "domain")
 	return b.String(), nil
+}
+
+func renderMetadata(b *strings.Builder, vm config.VM) {
+	start(b, "metadata")
+	start(b, "dvr:managed", attr{"xmlns:dvr", MetadataNamespace})
+	b.WriteString("true")
+	end(b, "dvr:managed")
+	start(b, "dvr:vm-name", attr{"xmlns:dvr", MetadataNamespace})
+	xml.EscapeText(b, []byte(vm.VMName))
+	end(b, "dvr:vm-name")
+	end(b, "metadata")
 }
 
 func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) error {
