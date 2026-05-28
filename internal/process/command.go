@@ -5,15 +5,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
 
 type Command struct {
-	Name string
-	Args []string
-	Dir  string
-	Env  []string
+	Name   string
+	Args   []string
+	Dir    string
+	Env    []string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
 }
 
 type Result struct {
@@ -50,8 +54,17 @@ func (r *CommandRunner) Run(ctx context.Context, command Command) (Result, error
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdin = command.Stdin
+	if command.Stdout != nil {
+		cmd.Stdout = io.MultiWriter(command.Stdout, &stdout)
+	} else {
+		cmd.Stdout = &stdout
+	}
+	if command.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(command.Stderr, &stderr)
+	} else {
+		cmd.Stderr = &stderr
+	}
 
 	err := cmd.Run()
 	result := Result{

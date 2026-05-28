@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -21,6 +22,9 @@ type Process interface {
 
 type Runner struct {
 	LibvirtURI string
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
 	Start      func(context.Context, process.Command) (Process, error)
 	Notify     func(chan<- os.Signal, ...os.Signal)
 	StopNotify func(chan<- os.Signal)
@@ -44,7 +48,11 @@ func Command(libvirtURI string, vmName string) process.Command {
 
 func (r *Runner) Run(ctx context.Context, vmName string) (int, error) {
 	r.applyDefaults()
-	proc, err := r.Start(ctx, Command(r.LibvirtURI, vmName))
+	command := Command(r.LibvirtURI, vmName)
+	command.Stdin = r.Stdin
+	command.Stdout = r.Stdout
+	command.Stderr = r.Stderr
+	proc, err := r.Start(ctx, command)
 	if err != nil {
 		return 0, fmt.Errorf("start console: %w", err)
 	}
@@ -83,6 +91,15 @@ func (r *Runner) applyDefaults() {
 	if r.LibvirtURI == "" {
 		r.LibvirtURI = defaultLibvirtURI
 	}
+	if r.Stdin == nil {
+		r.Stdin = os.Stdin
+	}
+	if r.Stdout == nil {
+		r.Stdout = os.Stdout
+	}
+	if r.Stderr == nil {
+		r.Stderr = os.Stderr
+	}
 	if r.Start == nil {
 		r.Start = startProcess
 	}
@@ -111,6 +128,9 @@ func startProcess(ctx context.Context, command process.Command) (Process, error)
 	if len(command.Env) > 0 {
 		cmd.Env = append(os.Environ(), command.Env...)
 	}
+	cmd.Stdin = command.Stdin
+	cmd.Stdout = command.Stdout
+	cmd.Stderr = command.Stderr
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}

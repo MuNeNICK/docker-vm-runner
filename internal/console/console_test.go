@@ -1,6 +1,7 @@
 package console
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -37,6 +38,36 @@ func TestRunWaitsForConsoleExit(t *testing.T) {
 	}
 	if code != 3 {
 		t.Fatalf("code = %d", code)
+	}
+}
+
+func TestRunPassesStdioToConsoleProcess(t *testing.T) {
+	proc := &fakeProcess{waitCode: 0, waitReady: make(chan struct{})}
+	close(proc.waitReady)
+	stdin := strings.NewReader("input")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	runner := NewRunner()
+	runner.Stdin = stdin
+	runner.Stdout = &stdout
+	runner.Stderr = &stderr
+	runner.Start = func(_ context.Context, cmd process.Command) (Process, error) {
+		if cmd.Stdin != stdin {
+			t.Fatalf("Stdin was not passed")
+		}
+		if cmd.Stdout != &stdout {
+			t.Fatalf("Stdout was not passed")
+		}
+		if cmd.Stderr != &stderr {
+			t.Fatalf("Stderr was not passed")
+		}
+		return proc, nil
+	}
+	runner.Notify = func(chan<- os.Signal, ...os.Signal) {}
+	runner.StopNotify = func(chan<- os.Signal) {}
+
+	if _, err := runner.Run(context.Background(), "vm1"); err != nil {
+		t.Fatalf("Run returned error: %v", err)
 	}
 }
 

@@ -242,6 +242,7 @@ func (r *Runner) printDistros(opts Options) error {
 func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) (retErr error) {
 	vmStarted := false
 	vmStopped := false
+	r.printStatus("Starting VM services")
 	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
 		stopCtx, cancel := lifecycleCleanupContext()
 		defer cancel()
@@ -272,15 +273,18 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 			retErr = err
 		}
 	}()
+	r.printStatus("Preparing VM image and configuration")
 	if err := r.Lifecycle.Prepare(ctx, cfg); err != nil {
 		return err
 	}
+	r.printStatus("Starting VM")
 	if err := r.Lifecycle.StartVM(ctx, cfg); err != nil {
 		return err
 	}
 	vmStarted = true
 	PrintAccess(r.Stdout, cfg)
 	if opts.NoConsole {
+		r.printStatus("Waiting for VM shutdown")
 		if cfg.CloudInitEnabled {
 			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
 				return err
@@ -291,6 +295,7 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 		vmStopped = true
 	} else {
+		r.printStatus("Attaching VM console")
 		if code, err := r.Lifecycle.AttachConsole(ctx, cfg); err != nil {
 			return err
 		} else if code != 0 {
@@ -303,6 +308,13 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 	}
 	return nil
+}
+
+func (r *Runner) printStatus(message string) {
+	if r.Stderr == nil {
+		return
+	}
+	fmt.Fprintf(r.Stderr, "docker-vm-runner: %s\n", message)
 }
 
 func shouldMarkInstalled(cfg config.VM, vmStarted bool, vmStopped bool) bool {
