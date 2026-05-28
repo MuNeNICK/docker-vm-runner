@@ -137,9 +137,42 @@ func TestRunLifecycleNoConsole(t *testing.T) {
 	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	want := "start-services,connect,prepare,start-vm,wait-guest-ready,wait-stopped,mark-installed,cleanup,close,stop-services"
+	want := "start-services,connect,prepare,start-vm,wait-guest-ready,wait-stopped,cleanup,close,stop-services"
 	if got := strings.Join(lifecycle.calls, ","); got != want {
 		t.Fatalf("calls = %s want %s", got, want)
+	}
+}
+
+func TestRunLifecycleMarksISOInstalledAfterNoConsoleStop(t *testing.T) {
+	lifecycle := &fakeLifecycle{}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "fedora-42-arm64", "PERSIST": "1"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := "start-services,connect,prepare,start-vm,wait-stopped,mark-installed,cleanup,close,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+}
+
+func TestRunLifecycleDoesNotMarkISOInstalledOnConsoleDetach(t *testing.T) {
+	lifecycle := &fakeLifecycle{}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "fedora-42-arm64", "PERSIST": "1"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if containsCall(lifecycle.calls, "mark-installed") {
+		t.Fatalf("calls include mark-installed: %s", strings.Join(lifecycle.calls, ","))
 	}
 }
 
@@ -154,8 +187,8 @@ func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
 	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if !containsCall(lifecycle.calls, "mark-installed") {
-		t.Fatalf("calls = %s", strings.Join(lifecycle.calls, ","))
+	if containsCall(lifecycle.calls, "mark-installed") {
+		t.Fatalf("cloud image should not be marked installed: %s", strings.Join(lifecycle.calls, ","))
 	}
 }
 

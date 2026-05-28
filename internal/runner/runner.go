@@ -241,6 +241,7 @@ func (r *Runner) printDistros(opts Options) error {
 
 func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) (retErr error) {
 	vmStarted := false
+	vmStopped := false
 	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
 		stopCtx, cancel := lifecycleCleanupContext()
 		defer cancel()
@@ -288,6 +289,7 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
 			return err
 		}
+		vmStopped = true
 	} else {
 		if code, err := r.Lifecycle.AttachConsole(ctx, cfg); err != nil {
 			return err
@@ -295,12 +297,24 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 			return fmt.Errorf("console exited with status %d", code)
 		}
 	}
-	if vmStarted && cfg.Persist {
+	if shouldMarkInstalled(cfg, vmStarted, vmStopped) {
 		if err := r.Lifecycle.MarkInstalled(ctx, cfg); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func shouldMarkInstalled(cfg config.VM, vmStarted bool, vmStopped bool) bool {
+	if !vmStarted || !vmStopped || !cfg.Persist {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(cfg.SourceImageType), "iso") || isISOBootReference(cfg.BootFrom)
+}
+
+func isISOBootReference(value string) bool {
+	cleaned := strings.Split(strings.Split(value, "?")[0], "#")[0]
+	return strings.HasSuffix(strings.ToLower(cleaned), ".iso")
 }
 
 func (r *Runner) runCleanup(ctx context.Context, cfg config.VM) (retErr error) {
