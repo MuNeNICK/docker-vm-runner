@@ -448,6 +448,41 @@ func TestRunShowXMLAttachesISOAsCDROM(t *testing.T) {
 	}
 }
 
+func TestRunShowXMLIncludesUEFIFirmware(t *testing.T) {
+	dataDir := t.TempDir()
+	firmwareDir := t.TempDir()
+	loader := filepath.Join(firmwareDir, "OVMF_CODE.fd")
+	varsTemplate := filepath.Join(firmwareDir, "OVMF_VARS.fd")
+	originalProfile := config.SupportedArchitectures["x86_64"]
+	profile := originalProfile
+	profile.Firmware = map[string]config.FirmwareProfile{
+		"uefi": {Loader: loader, VarsTemplate: varsTemplate},
+	}
+	config.SupportedArchitectures["x86_64"] = profile
+	t.Cleanup(func() { config.SupportedArchitectures["x86_64"] = originalProfile })
+
+	var stdout bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.Stderr = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "DATA_DIR": dataDir}
+
+	if err := r.Run(context.Background(), Options{ShowXML: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	output := stdout.String()
+	wantVars := filepath.Join(dataDir, "state", "firmware", "ubuntu-24.04-server-vars.fd")
+	for _, want := range []string{
+		`<loader readonly="yes" secure="no" type="pflash">` + loader + `</loader>`,
+		`<nvram>` + wantVars + `</nvram>`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("show XML output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
 	var stdout bytes.Buffer
 	r := New()

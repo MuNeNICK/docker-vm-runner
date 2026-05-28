@@ -34,6 +34,21 @@ func NewPreparer(stateDir string) *Preparer {
 	}
 }
 
+func Preview(stateDir string, req Request) (Result, error) {
+	profile, needed, err := firmwareProfile(req)
+	if err != nil {
+		return Result{}, err
+	}
+	if !needed {
+		return Result{}, nil
+	}
+	return Result{
+		Needed:     true,
+		LoaderPath: profile.Loader,
+		VarsPath:   filepath.Join(stateDir, "firmware", req.VMName+"-vars.fd"),
+	}, nil
+}
+
 func (p *Preparer) Prepare(req Request) (Result, error) {
 	profile, needed, err := firmwareProfile(req)
 	if err != nil {

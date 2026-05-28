@@ -49,6 +49,14 @@ type fsAttr struct {
 	value string
 }
 
+var attrEscaper = strings.NewReplacer(
+	"&", "&amp;",
+	"<", "&lt;",
+	">", "&gt;",
+	`"`, "&#34;",
+	"'", "&#39;",
+)
+
 func writeStart(b *strings.Builder, name string, attrs ...fsAttr) {
 	b.WriteByte('<')
 	b.WriteString(name)
@@ -74,7 +82,11 @@ func writeFSAttrs(b *strings.Builder, attrs []fsAttr) {
 		b.WriteByte(' ')
 		b.WriteString(attr.name)
 		b.WriteString(`="`)
-		b.WriteString(attr.value)
+		b.WriteString(escapeAttr(attr.value))
 		b.WriteByte('"')
 	}
+}
+
+func escapeAttr(value string) string {
+	return attrEscaper.Replace(value)
 }

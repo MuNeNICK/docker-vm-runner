@@ -14,6 +14,7 @@ import (
 
 	"github.com/munenick/docker-vm-runner/internal/config"
 	"github.com/munenick/docker-vm-runner/internal/domain"
+	"github.com/munenick/docker-vm-runner/internal/firmware"
 	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
@@ -198,12 +199,23 @@ func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
 		seedISOPath = filepath.Join(vmDir, "seed.iso")
 	}
 	bootISOPath := showXMLBootISOPath(cfg, layout)
+	fw, err := firmware.Preview(layout.StateDir, firmware.Request{
+		Arch:     cfg.Arch,
+		BootMode: cfg.BootMode,
+		VMName:   cfg.VMName,
+		Profile:  config.SupportedArchitectures[cfg.Arch],
+	})
+	if err != nil {
+		return "", err
+	}
 	return domain.NewRenderer().Render(domain.Request{
 		VM:                cfg,
 		VMDir:             vmDir,
 		WorkImagePath:     filepath.Join(vmDir, "disk."+imageFormat),
 		SeedISOPath:       seedISOPath,
 		BootISOPath:       bootISOPath,
+		FirmwareLoader:    fw.LoaderPath,
+		FirmwareVars:      fw.VarsPath,
 		IPXEROMPath:       cfg.IPXEROMPath,
 		KVMAvailable:      hostinfo.FileExists("/dev/kvm"),
 		EffectiveCPUModel: cfg.CPUModel,

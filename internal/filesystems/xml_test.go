@@ -42,6 +42,22 @@ func TestRender9P(t *testing.T) {
 	}
 }
 
+func TestRenderEscapesAttributeValues(t *testing.T) {
+	source := `/host/a&b<"share"`
+	target := `target&<"dir"`
+	doc, err := RenderXML(Share{
+		Source:     source,
+		Target:     target,
+		Driver:     "virtiofs",
+		AccessMode: "passthrough",
+	})
+	if err != nil {
+		t.Fatalf("RenderXML returned error: %v", err)
+	}
+	requireXMLElement(t, doc, "source", map[string]string{"dir": source})
+	requireXMLElement(t, doc, "target", map[string]string{"dir": target})
+}
+
 func TestRenderRejectsMissingFields(t *testing.T) {
 	if _, err := RenderXML(Share{Target: "share", Driver: "virtiofs", AccessMode: "passthrough"}); err == nil {
 		t.Fatal("expected source error")
