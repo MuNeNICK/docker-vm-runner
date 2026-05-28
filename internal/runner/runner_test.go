@@ -384,6 +384,47 @@ func TestConcreteLifecyclePreparePassesBlockSectorSize(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePreparePassesIPv6Availability(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+	lifecycle.IPv6Available = func() bool { return true }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if !strings.Contains(manager.definedXML, `<ip family="ipv6" address="fec0::2" prefix="64"/>`) {
+		t.Fatalf("domain XML missing default IPv6:\n%s", manager.definedXML)
+	}
+}
+
 func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
 	layout := testLayout(t)
 	installFakeCommand(t, "genisoimage", func(logPath string) string {

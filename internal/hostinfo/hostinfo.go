@@ -99,6 +99,18 @@ func BlockSectorSize(path string) (int, bool) {
 	return blockSectorSize(path, "/sys/class/block", os.ReadFile)
 }
 
+func IPv6Available() bool {
+	return ipv6Available("/proc/sys/net/ipv6/conf/all/disable_ipv6", os.ReadFile)
+}
+
+func ipv6Available(path string, readFile func(string) ([]byte, error)) bool {
+	content, err := readFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(content)) == "0"
+}
+
 func blockSectorSize(path string, sysClassBlock string, readFile func(string) ([]byte, error)) (int, bool) {
 	name := filepath.Base(filepath.Clean(path))
 	if name == "." || name == "/" || name == "" {

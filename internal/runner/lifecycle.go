@@ -53,6 +53,7 @@ type ConcreteLifecycle struct {
 	EnsureEmulator  func(context.Context, string) error
 	KVMAvailable    func() bool
 	BlockSectorSize func(string) (int, bool)
+	IPv6Available   func() bool
 
 	workImagePath string
 	seedISOPath   string
@@ -251,6 +252,7 @@ func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmD
 		IPXEROMPath:       cfg.IPXEROMPath,
 		KVMAvailable:      kvmAvailable,
 		EffectiveCPUModel: cfg.CPUModel,
+		IPv6Enabled:       l.ipv6Available(),
 		IntelRenderNode:   fileExists("/dev/dri/renderD128"),
 		DisablePasst:      l.disablePasst,
 		BlockSectorSize:   l.blockSectorSize,
@@ -767,6 +769,13 @@ func (l *ConcreteLifecycle) blockSectorSize(path string) (int, bool) {
 		return l.BlockSectorSize(path)
 	}
 	return hostinfo.BlockSectorSize(path)
+}
+
+func (l *ConcreteLifecycle) ipv6Available() bool {
+	if l.IPv6Available != nil {
+		return l.IPv6Available()
+	}
+	return hostinfo.IPv6Available()
 }
 
 func isISO(path string) bool {

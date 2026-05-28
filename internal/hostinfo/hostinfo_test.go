@@ -100,6 +100,17 @@ func TestBlockSectorSizeIgnoresInvalidSysfs(t *testing.T) {
 	}
 }
 
+func TestIPv6AvailableReadsDisableFlag(t *testing.T) {
+	readFile := func(string) ([]byte, error) { return []byte("0\n"), nil }
+	if !ipv6Available("/proc/test", readFile) {
+		t.Fatal("ipv6Available = false")
+	}
+	readFile = func(string) ([]byte, error) { return []byte("1\n"), nil }
+	if ipv6Available("/proc/test", readFile) {
+		t.Fatal("ipv6Available = true")
+	}
+}
+
 func TestAvailableDiskBytesUsesExistingParent(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing", "vms")
 	if got := AvailableDiskBytes(missing); got <= 0 {
