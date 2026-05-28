@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/munenick/docker-vm-runner/internal/network"
@@ -22,7 +23,19 @@ type Resolver struct {
 	ROMExists            func(string) bool
 	FileExists           func(string) bool
 	IsFile               func(string) bool
+	IsBlockDevice        func(string) bool
 	ReadFile             func(string) ([]byte, error)
+}
+
+type Disk struct {
+	Size       string
+	Index      int
+	Controller string
+}
+
+type BlockDevice struct {
+	Path  string
+	Index int
 }
 
 type VM struct {
@@ -61,6 +74,23 @@ type VM struct {
 	RedfishEnabled        bool
 	NICs                  []network.Config
 	PortForwards          []network.PortForward
+	BootMode              string
+	TPMEnabled            bool
+	MachineType           string
+	ExtraDisks            []Disk
+	BlockDevices          []BlockDevice
+	DiskController        string
+	DiskPreallocate       bool
+	DiskIO                string
+	DiskCache             string
+	IOThread              bool
+	BalloonEnabled        bool
+	RNGEnabled            bool
+	USBController         bool
+	HyperVEnabled         bool
+	GPUPassthrough        string
+	LoginShell            string
+	DownloadRetries       int
 }
 
 func (r *Resolver) Resolve(env MapEnv) (VM, error) {
@@ -151,6 +181,59 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	persist, _ := env.Bool("PERSIST", persistDefault)
 	forceISO, _ := env.Bool("FORCE_ISO", false)
 	redfishEnabled, _ := env.Bool("REDFISH_ENABLE", false)
+	bootMode, err := resolveBootModeSetting(env.Get("BOOT_MODE", "uefi"))
+	if err != nil {
+		return VM{}, err
+	}
+	tpmEnabled := bootMode == "secure"
+	if _, ok := env.Lookup("TPM"); ok {
+		tpmEnabled, _ = env.Bool("TPM", false)
+	}
+	machineType, err := resolveMachineType(env.Get("MACHINE", ""), arch)
+	if err != nil {
+		return VM{}, err
+	}
+	diskController, err := resolveChoice("DISK_TYPE", env.Get("DISK_TYPE", "virtio"), DiskControllers)
+	if err != nil {
+		return VM{}, err
+	}
+	diskIO, err := resolveChoice("DISK_IO", env.Get("DISK_IO", "native"), DiskIOModes)
+	if err != nil {
+		return VM{}, err
+	}
+	diskCache, err := resolveChoice("DISK_CACHE", env.Get("DISK_CACHE", "none"), DiskCacheModes)
+	if err != nil {
+		return VM{}, err
+	}
+	diskPreallocate, _ := env.Bool("ALLOCATE", false)
+	extraDisks, err := resolveExtraDisks(env, diskController)
+	if err != nil {
+		return VM{}, err
+	}
+	blockDevices, err := r.resolveBlockDevices(env)
+	if err != nil {
+		return VM{}, err
+	}
+	gpu, err := resolveGPU(env.Get("GPU", "off"))
+	if err != nil {
+		return VM{}, err
+	}
+	usb, _ := env.Bool("USB", true)
+	hyperv, _ := env.Bool("HYPERV", false)
+	balloon, _ := env.Bool("BALLOON", true)
+	rng, _ := env.Bool("RNG", true)
+	ioThread, _ := env.Bool("IO_THREAD", true)
+	downloadRetries, err := env.Int("DOWNLOAD_RETRIES", "3", 1, ptr(10))
+	if err != nil {
+		return VM{}, err
+	}
+	loginShell := strings.TrimSpace(env.Get("SHELL", ""))
+	if loginShell == "" {
+		loginShell = distroInfo.Shell
+	}
+	if loginShell == "" {
+		loginShell = "/bin/bash"
+	}
 
 	activePorts := map[string]int{"SSH_PORT": sshPort}
 	if graphicsType == "vnc" || novncEnabled {
@@ -214,6 +297,23 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		RedfishEnabled:        redfishEnabled,
 		NICs:                  networkConfig.NICs,
 		PortForwards:          networkConfig.PortForwards,
+		BootMode:              bootMode,
+		TPMEnabled:            tpmEnabled,
+		MachineType:           machineType,
+		ExtraDisks:            extraDisks,
+		BlockDevices:          blockDevices,
+		DiskController:        diskController,
+		DiskPreallocate:       diskPreallocate,
+		DiskIO:                diskIO,
+		DiskCache:             diskCache,
+		IOThread:              ioThread,
+		BalloonEnabled:        balloon,
+		RNGEnabled:            rng,
+		USBController:         usb,
+		HyperVEnabled:         hyperv,
+		GPUPassthrough:        gpu,
+		LoginShell:            loginShell,
+		DownloadRetries:       downloadRetries,
 	}, nil
 }
 
@@ -235,6 +335,9 @@ func (r *Resolver) setDefaults() {
 	}
 	if r.ROMExists == nil {
 		r.ROMExists = func(string) bool { return false }
+	}
+	if r.IsBlockDevice == nil {
+		r.IsBlockDevice = func(string) bool { return false }
 	}
 }
 
@@ -396,4 +499,117 @@ func workImageDir(layout paths.Layout) string {
 		return layout.VMImagesDir
 	}
 	return filepath.Join(layout.ImagesDir, "vms")
+}
+
+var DiskControllers = map[string]bool{
+	"virtio": true,
+	"scsi":   true,
+	"nvme":   true,
+	"ide":    true,
+	"usb":    true,
+}
+
+var DiskIOModes = map[string]bool{
+	"native":   true,
+	"threads":  true,
+	"io_uring": true,
+}
+
+var DiskCacheModes = map[string]bool{
+	"none":         true,
+	"writeback":    true,
+	"writethrough": true,
+	"directsync":   true,
+	"unsafe":       true,
+}
+
+func resolveBootModeSetting(raw string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		value = "uefi"
+	}
+	if value != "legacy" && value != "uefi" && value != "secure" {
+		return "", fmt.Errorf("Invalid BOOT_MODE %q. Supported: legacy, uefi, secure", raw)
+	}
+	return value, nil
+}
+
+func resolveMachineType(raw string, arch string) (string, error) {
+	if strings.TrimSpace(raw) != "" {
+		value := strings.ToLower(strings.TrimSpace(raw))
+		if value != "q35" && value != "pc" {
+			return "", fmt.Errorf("Invalid MACHINE %q. Supported: q35, pc", raw)
+		}
+		return value, nil
+	}
+	if profile, ok := SupportedArchitectures[arch]; ok && profile.Machine != "" {
+		return profile.Machine, nil
+	}
+	return "q35", nil
+}
+
+func resolveChoice(name string, raw string, allowed map[string]bool) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if !allowed[value] {
+		return "", fmt.Errorf("Invalid %s %q. Supported: %s", name, raw, sortedKeys(allowed))
+	}
+	return value, nil
+}
+
+func resolveExtraDisks(env MapEnv, controller string) ([]Disk, error) {
+	var disks []Disk
+	for index := 2; index <= 6; index++ {
+		key := fmt.Sprintf("DISK%d_SIZE", index)
+		raw := strings.TrimSpace(env.Get(key, ""))
+		if raw == "" {
+			continue
+		}
+		if err := units.ValidateDiskSize(raw); err != nil {
+			return nil, fmt.Errorf("invalid %s: %w", key, err)
+		}
+		disks = append(disks, Disk{Size: raw, Index: index, Controller: controller})
+	}
+	return disks, nil
+}
+
+func (r *Resolver) resolveBlockDevices(env MapEnv) ([]BlockDevice, error) {
+	var devices []BlockDevice
+	for index := 1; index <= 6; index++ {
+		key := "DEVICE"
+		if index != 1 {
+			key = fmt.Sprintf("DEVICE%d", index)
+		}
+		path := strings.TrimSpace(env.Get(key, ""))
+		if path == "" {
+			continue
+		}
+		if r.FileExists != nil && !r.FileExists(path) {
+			return nil, fmt.Errorf("%s=%s does not exist", key, path)
+		}
+		if !r.IsBlockDevice(path) {
+			return nil, fmt.Errorf("%s=%s is not a block device", key, path)
+		}
+		devices = append(devices, BlockDevice{Path: path, Index: index})
+	}
+	return devices, nil
+}
+
+func resolveGPU(raw string) (string, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		value = "off"
+	}
+	if value != "off" && value != "intel" {
+		return "", fmt.Errorf("Invalid GPU %q. Supported: off, intel", raw)
+	}
+	return value, nil
+}
+
+func sortedKeys(values map[string]bool) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
 }

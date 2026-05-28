@@ -255,3 +255,223 @@ func TestResolvePortForwardAndConflict(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestResolveDataDirDefaultsPersist(t *testing.T) {
+	resolver, _ := testResolver(t)
+	resolver.Layout = paths.ResolveLayout("/data", func(string) bool { return false })
+	cfg, err := resolver.Resolve(MapEnv{})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !cfg.Persist {
+		t.Fatal("Persist = false")
+	}
+
+	cfg, err = resolver.Resolve(MapEnv{"PERSIST": "0"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.Persist {
+		t.Fatal("Persist override = true")
+	}
+}
+
+func TestResolveBootModeAndTPM(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{"BOOT_MODE": "secure"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.BootMode != "secure" {
+		t.Fatalf("BootMode = %q", cfg.BootMode)
+	}
+	if !cfg.TPMEnabled {
+		t.Fatal("TPMEnabled = false")
+	}
+
+	cfg, err = resolver.Resolve(MapEnv{"BOOT_MODE": "secure", "TPM": "0"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.TPMEnabled {
+		t.Fatal("TPM override = true")
+	}
+}
+
+func TestResolveInvalidBootMode(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"BOOT_MODE": "bad"})
+	if err == nil {
+		t.Fatal("expected boot mode error")
+	}
+	if !strings.Contains(err.Error(), "Invalid BOOT_MODE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveMachineType(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{"MACHINE": "pc"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.MachineType != "pc" {
+		t.Fatalf("MachineType = %q", cfg.MachineType)
+	}
+
+	_, err = resolver.Resolve(MapEnv{"MACHINE": "bad"})
+	if err == nil {
+		t.Fatal("expected machine error")
+	}
+}
+
+func TestResolveDiskOptions(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"DISK_TYPE":  "scsi",
+		"DISK_IO":    "threads",
+		"DISK_CACHE": "writeback",
+		"ALLOCATE":   "1",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.DiskController != "scsi" {
+		t.Fatalf("DiskController = %q", cfg.DiskController)
+	}
+	if cfg.DiskIO != "threads" {
+		t.Fatalf("DiskIO = %q", cfg.DiskIO)
+	}
+	if cfg.DiskCache != "writeback" {
+		t.Fatalf("DiskCache = %q", cfg.DiskCache)
+	}
+	if !cfg.DiskPreallocate {
+		t.Fatal("DiskPreallocate = false")
+	}
+}
+
+func TestResolveInvalidDiskOptions(t *testing.T) {
+	resolver, _ := testResolver(t)
+	tests := []MapEnv{
+		{"DISK_TYPE": "bogus"},
+		{"DISK_IO": "bogus"},
+		{"DISK_CACHE": "bogus"},
+	}
+	for _, env := range tests {
+		if _, err := resolver.Resolve(env); err == nil {
+			t.Fatalf("expected error for env %#v", env)
+		}
+	}
+}
+
+func TestResolveExtraDisks(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{"DISK2_SIZE": "10G", "DISK6_SIZE": "1T"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(cfg.ExtraDisks) != 2 {
+		t.Fatalf("ExtraDisks count = %d", len(cfg.ExtraDisks))
+	}
+	if cfg.ExtraDisks[0].Index != 2 || cfg.ExtraDisks[0].Size != "10G" {
+		t.Fatalf("first extra disk = %#v", cfg.ExtraDisks[0])
+	}
+	if cfg.ExtraDisks[1].Index != 6 || cfg.ExtraDisks[1].Size != "1T" {
+		t.Fatalf("second extra disk = %#v", cfg.ExtraDisks[1])
+	}
+}
+
+func TestResolveBlockDevice(t *testing.T) {
+	resolver, _ := testResolver(t)
+	device := "/dev/testblk"
+	resolver.FileExists = func(path string) bool { return path == device }
+	resolver.IsBlockDevice = func(path string) bool { return path == device }
+
+	cfg, err := resolver.Resolve(MapEnv{"DEVICE": device})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(cfg.BlockDevices) != 1 {
+		t.Fatalf("BlockDevices count = %d", len(cfg.BlockDevices))
+	}
+	if cfg.BlockDevices[0].Path != device || cfg.BlockDevices[0].Index != 1 {
+		t.Fatalf("BlockDevice = %#v", cfg.BlockDevices[0])
+	}
+}
+
+func TestResolveBlockDeviceMustExistAndBeBlockDevice(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"DEVICE": "/dev/missing"})
+	if err == nil {
+		t.Fatal("expected missing device error")
+	}
+
+	file := filepath.Join(t.TempDir(), "not-block")
+	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	_, err = resolver.Resolve(MapEnv{"DEVICE": file})
+	if err == nil {
+		t.Fatal("expected block device error")
+	}
+	if !strings.Contains(err.Error(), "is not a block device") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveFeatureFlags(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"GPU":       "intel",
+		"USB":       "0",
+		"HYPERV":    "1",
+		"BALLOON":   "0",
+		"RNG":       "0",
+		"IO_THREAD": "0",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.GPUPassthrough != "intel" {
+		t.Fatalf("GPUPassthrough = %q", cfg.GPUPassthrough)
+	}
+	if cfg.USBController {
+		t.Fatal("USBController = true")
+	}
+	if !cfg.HyperVEnabled {
+		t.Fatal("HyperVEnabled = false")
+	}
+	if cfg.BalloonEnabled || cfg.RNGEnabled || cfg.IOThread {
+		t.Fatalf("performance flags = balloon %v rng %v iothread %v", cfg.BalloonEnabled, cfg.RNGEnabled, cfg.IOThread)
+	}
+}
+
+func TestResolveInvalidGPU(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"GPU": "nvidia"})
+	if err == nil {
+		t.Fatal("expected GPU error")
+	}
+}
+
+func TestResolveShellAndRetries(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{"SHELL": "/bin/zsh", "DOWNLOAD_RETRIES": "5"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.LoginShell != "/bin/zsh" {
+		t.Fatalf("LoginShell = %q", cfg.LoginShell)
+	}
+	if cfg.DownloadRetries != 5 {
+		t.Fatalf("DownloadRetries = %d", cfg.DownloadRetries)
+	}
+}
+
+func TestResolveInvalidRetries(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"DOWNLOAD_RETRIES": "99"})
+	if err == nil {
+		t.Fatal("expected retries error")
+	}
+}
