@@ -47,6 +47,7 @@ type ConcreteLifecycle struct {
 	NoVNC          novncProxy
 	TPM            tpmSupervisor
 	Console        consoleRunner
+	GuestClient    guestexec.Client
 	Sleep          func(context.Context, time.Duration) error
 	EnsureEmulator func(context.Context, string) error
 	KVMAvailable   func() bool
@@ -285,18 +286,47 @@ func (l *ConcreteLifecycle) StartVM(ctx context.Context, cfg config.VM) error {
 	return l.Manager.Start(l.Domain)
 }
 
-func (l *ConcreteLifecycle) WaitForGuestReady(ctx context.Context, _ config.VM) error {
-	client := guestexec.NewVirshClient(&l.CommandRunner)
+func (l *ConcreteLifecycle) WaitForGuestReady(ctx context.Context, cfg config.VM) error {
+	client := l.guestClient()
+	domainName := l.Domain.Name()
 	return waitFor(ctx, l.Sleep, 120*time.Second, 2*time.Second, func() (bool, error) {
-		_, err := client.Execute(ctx, l.Domain.Name(), guestexec.Command{Execute: "guest-ping"})
-		if err == nil {
+		if _, err := client.Execute(ctx, domainName, guestexec.Command{Execute: "guest-ping"}); err != nil {
+			if errors.Is(err, guestexec.ErrAgentNotConnected) {
+				return false, nil
+			}
+			return false, err
+		}
+		if !cfg.CloudInitEnabled {
 			return true, nil
 		}
-		if errors.Is(err, guestexec.ErrAgentNotConnected) {
-			return false, nil
+		if err := l.waitForCloudInit(ctx, client, domainName); err != nil {
+			return false, err
 		}
-		return false, err
+		return true, nil
 	})
+}
+
+func (l *ConcreteLifecycle) waitForCloudInit(ctx context.Context, client guestexec.Client, domainName string) error {
+	executor := guestexec.NewExecutor(client)
+	executor.Sleep = l.Sleep
+	result, err := executor.RunOnDomain(ctx, domainName, guestexec.Invocation{
+		Path: "/bin/sh",
+		Args: []string{"-c", "cloud-init status --wait"},
+	})
+	if err != nil {
+		return fmt.Errorf("wait for cloud-init: %w", err)
+	}
+	if result.ExitCode != 0 {
+		output := strings.TrimSpace(string(result.Stderr))
+		if output == "" {
+			output = strings.TrimSpace(string(result.Stdout))
+		}
+		if output != "" {
+			return fmt.Errorf("cloud-init status --wait exited with status %d: %s", result.ExitCode, output)
+		}
+		return fmt.Errorf("cloud-init status --wait exited with status %d", result.ExitCode)
+	}
+	return nil
 }
 
 func (l *ConcreteLifecycle) WaitUntilStopped(ctx context.Context, _ config.VM) error {
@@ -720,6 +750,13 @@ func (l *ConcreteLifecycle) kvmAvailable() bool {
 		return l.KVMAvailable()
 	}
 	return fileExists("/dev/kvm")
+}
+
+func (l *ConcreteLifecycle) guestClient() guestexec.Client {
+	if l.GuestClient != nil {
+		return l.GuestClient
+	}
+	return guestexec.NewVirshClient(&l.CommandRunner)
 }
 
 func isISO(path string) bool {

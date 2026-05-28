@@ -69,6 +69,23 @@ func TestRunDiscoversDomainAndExecutesCommand(t *testing.T) {
 	}
 }
 
+func TestRunOnDomainExecutesKnownDomain(t *testing.T) {
+	client := &fakeClient{}
+	client.responses = []response{
+		{raw: rawJSON(t, `{"pid":42}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
+	}
+	executor := NewExecutor(client)
+	executor.Sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := executor.RunOnDomain(context.Background(), "vm1", Invocation{Path: "true"}); err != nil {
+		t.Fatalf("RunOnDomain returned error: %v", err)
+	}
+	if len(client.domainsRequested) != 0 {
+		t.Fatalf("ListRunningDomains was called: %#v", client.domainsRequested)
+	}
+}
+
 func TestRunWaitsForAgentWhenRequested(t *testing.T) {
 	client := &fakeClient{domains: []string{"test-vm"}}
 	client.responses = []response{
@@ -184,12 +201,14 @@ type response struct {
 }
 
 type fakeClient struct {
-	domains   []string
-	responses []response
-	commands  []Command
+	domains          []string
+	domainsRequested []struct{}
+	responses        []response
+	commands         []Command
 }
 
 func (c *fakeClient) ListRunningDomains(context.Context) ([]string, error) {
+	c.domainsRequested = append(c.domainsRequested, struct{}{})
 	return c.domains, nil
 }
 

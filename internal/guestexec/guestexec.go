@@ -100,6 +100,11 @@ func (e *Executor) Run(ctx context.Context, inv Invocation) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	return e.RunOnDomain(ctx, domain, inv)
+}
+
+func (e *Executor) RunOnDomain(ctx context.Context, domain string, inv Invocation) (Result, error) {
+	e.applyDefaults()
 	if inv.Wait {
 		if err := e.waitForAgent(ctx, domain); err != nil {
 			return Result{}, err

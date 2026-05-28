@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/munenick/docker-vm-runner/internal/config"
+	"github.com/munenick/docker-vm-runner/internal/guestexec"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/paths"
@@ -1014,6 +1016,40 @@ func TestConcreteLifecycleStartVMFallsBackFromPasstBackend(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleWaitForGuestReadyWaitsForCloudInit(t *testing.T) {
+	client := &fakeGuestExecClient{
+		responses: []guestExecResponse{
+			{raw: json.RawMessage(`{}`)},
+			{raw: json.RawMessage(`{"pid":17}`)},
+			{raw: json.RawMessage(`{"exited":true,"exitcode":0}`)},
+		},
+	}
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.GuestClient = client
+	lifecycle.Sleep = func(context.Context, time.Duration) error { return nil }
+
+	if err := lifecycle.WaitForGuestReady(context.Background(), config.VM{CloudInitEnabled: true}); err != nil {
+		t.Fatalf("WaitForGuestReady returned error: %v", err)
+	}
+	if len(client.commands) != 3 {
+		t.Fatalf("commands = %#v", client.commands)
+	}
+	if client.commands[0].Execute != "guest-ping" {
+		t.Fatalf("first command = %#v", client.commands[0])
+	}
+	args := client.commands[1].Arguments.(map[string]any)
+	if client.commands[1].Execute != "guest-exec" || args["path"] != "/bin/sh" {
+		t.Fatalf("cloud-init exec command = %#v", client.commands[1])
+	}
+	if got := strings.Join(args["arg"].([]string), " "); got != "-c cloud-init status --wait" {
+		t.Fatalf("cloud-init args = %q", got)
+	}
+	if client.commands[2].Execute != "guest-exec-status" {
+		t.Fatalf("status command = %#v", client.commands[2])
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -1118,6 +1154,30 @@ type fakeRedfishManager struct {
 func (m *fakeRedfishManager) Start(context.Context, redfish.Request) (redfish.Result, error) {
 	m.started = true
 	return redfish.Result{Started: true}, nil
+}
+
+type guestExecResponse struct {
+	raw json.RawMessage
+	err error
+}
+
+type fakeGuestExecClient struct {
+	responses []guestExecResponse
+	commands  []guestexec.Command
+}
+
+func (c *fakeGuestExecClient) ListRunningDomains(context.Context) ([]string, error) {
+	return []string{"vm1"}, nil
+}
+
+func (c *fakeGuestExecClient) Execute(_ context.Context, _ string, command guestexec.Command) (json.RawMessage, error) {
+	c.commands = append(c.commands, command)
+	if len(c.responses) == 0 {
+		return nil, errors.New("unexpected guest command")
+	}
+	resp := c.responses[0]
+	c.responses = c.responses[1:]
+	return resp.raw, resp.err
 }
 
 type fakeNoVNCProxy struct {
