@@ -415,6 +415,24 @@ func TestResolvePortForwardAndConflict(t *testing.T) {
 	}
 }
 
+func TestResolveWarnsWhenPortForwardingCannotApplyWithoutUserNIC(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"NETWORK_MODE":   "bridge",
+		"NETWORK_BRIDGE": "br0",
+		"PORT_FWD":       "8080:80",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !containsWarning(cfg.Warnings, "SSH_PORT=2222") {
+		t.Fatalf("Warnings missing SSH warning: %#v", cfg.Warnings)
+	}
+	if !containsWarning(cfg.Warnings, "PORT_FWD is set") {
+		t.Fatalf("Warnings missing PORT_FWD warning: %#v", cfg.Warnings)
+	}
+}
+
 func TestResolveDataDirDefaultsPersist(t *testing.T) {
 	resolver, _ := testResolver(t)
 	resolver.Layout = paths.ResolveLayout("/data", func(string) bool { return false })

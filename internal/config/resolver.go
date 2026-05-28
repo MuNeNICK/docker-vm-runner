@@ -204,6 +204,13 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if networkConfig.IPXEEnabled {
 		bootOrder = moveBootDeviceFirst(bootOrder, "network")
 	}
+	networkWarnings := append([]string(nil), networkConfig.Warnings...)
+	if !hasUserNIC(networkConfig.NICs) && sshPort != 0 {
+		networkWarnings = append(networkWarnings, fmt.Sprintf("SSH_PORT=%d is set but no user-mode NIC; SSH port forwarding not active", sshPort))
+	}
+	if !hasUserNIC(networkConfig.NICs) && len(networkConfig.PortForwards) > 0 {
+		networkWarnings = append(networkWarnings, "PORT_FWD is set but no user-mode NIC; port forwarding not active")
+	}
 	filesystems, err := ParseFilesystems(env, FilesystemParseOptions{})
 	if err != nil {
 		return VM{}, err
@@ -409,8 +416,17 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		DownloadRetries:        downloadRetries,
 		DownloadMaxBytes:       downloadMaxBytes,
 		ExtractMaxBytes:        extractMaxBytes,
-		Warnings:               append(cloudInit.Warnings, networkConfig.Warnings...),
+		Warnings:               append(cloudInit.Warnings, networkWarnings...),
 	}, nil
+}
+
+func hasUserNIC(nics []network.Config) bool {
+	for _, nic := range nics {
+		if nic.Mode == "user" {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Resolver) setDefaults() {

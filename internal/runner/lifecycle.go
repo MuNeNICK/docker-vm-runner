@@ -226,7 +226,16 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	if l.Manager == nil {
 		return fmt.Errorf("libvirt manager is not connected")
 	}
-	if cfg.RequireKVM && !l.kvmAvailable() {
+	kvmAvailable := l.kvmAvailable()
+	if !kvmAvailable {
+		l.warnf("/dev/kvm is not available; running in software emulation mode (TCG). Performance will be 10-50x slower. Add --device /dev/kvm:/dev/kvm to enable KVM.")
+		if model := strings.ToLower(strings.TrimSpace(cfg.CPUModel)); model == "host" || model == "host-passthrough" {
+			if profile, ok := config.SupportedArchitectures[cfg.Arch]; ok && profile.TCGFallback != "" {
+				l.warnf("CPU_MODEL=%s is not compatible with TCG on %s; using %s instead", cfg.CPUModel, cfg.Arch, profile.TCGFallback)
+			}
+		}
+	}
+	if cfg.RequireKVM && !kvmAvailable {
 		return fmt.Errorf("REQUIRE_KVM=1 requires /dev/kvm")
 	}
 	vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)

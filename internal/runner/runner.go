@@ -628,6 +628,20 @@ func VMSummaryLines(cfg config.VM) []string {
 	if len(features) > 0 {
 		lines = append(lines, "Features "+strings.Join(features, ", "))
 	}
+	if len(cfg.ExtraDisks) > 0 {
+		diskLines := make([]string, 0, len(cfg.ExtraDisks))
+		for _, disk := range cfg.ExtraDisks {
+			diskLines = append(diskLines, fmt.Sprintf("disk%d=%s", disk.Index, disk.Size))
+		}
+		lines = append(lines, "Extra    "+strings.Join(diskLines, ", "))
+	}
+	if len(cfg.BlockDevices) > 0 {
+		devices := make([]string, 0, len(cfg.BlockDevices))
+		for _, device := range cfg.BlockDevices {
+			devices = append(devices, device.Path)
+		}
+		lines = append(lines, "Devices  "+strings.Join(devices, ", "))
+	}
 	return lines
 }
 

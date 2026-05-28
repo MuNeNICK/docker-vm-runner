@@ -170,10 +170,14 @@ func TestVMSummaryLines(t *testing.T) {
 		TPMEnabled:     true,
 		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
 		BootOrder:      []string{"hd"},
+		ExtraDisks:     []config.Disk{{Index: 2, Size: "10G"}},
+		BlockDevices:   []config.BlockDevice{{Path: "/dev/vdb", Index: 1}},
 	})
 	text := strings.Join(lines, "\n")
-	if !strings.Contains(text, "Compute  2 vCPU / 4096 MiB RAM") || !strings.Contains(text, "Features TPM") {
-		t.Fatalf("summary = %q", text)
+	for _, needle := range []string{"Compute  2 vCPU / 4096 MiB RAM", "Features TPM", "Extra    disk2=10G", "Devices  /dev/vdb"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("summary missing %q:\n%s", needle, text)
+		}
 	}
 }
 
@@ -750,6 +754,8 @@ func TestConcreteLifecyclePrepareRequiresKVM(t *testing.T) {
 	lifecycle := NewConcreteLifecycle(testLayout(t))
 	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle.KVMAvailable = func() bool { return false }
+	var status bytes.Buffer
+	lifecycle.Status = &status
 
 	err := lifecycle.Prepare(context.Background(), config.VM{
 		VMName:     "vm1",
@@ -760,6 +766,9 @@ func TestConcreteLifecyclePrepareRequiresKVM(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "REQUIRE_KVM=1 requires /dev/kvm") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(status.String(), "software emulation mode") {
+		t.Fatalf("status missing TCG warning: %q", status.String())
 	}
 }
 
