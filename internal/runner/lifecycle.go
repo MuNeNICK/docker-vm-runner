@@ -2,19 +2,27 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/munenick/docker-vm-runner/internal/archive"
 	"github.com/munenick/docker-vm-runner/internal/config"
 	"github.com/munenick/docker-vm-runner/internal/console"
 	"github.com/munenick/docker-vm-runner/internal/domain"
+	"github.com/munenick/docker-vm-runner/internal/download"
 	"github.com/munenick/docker-vm-runner/internal/firmware"
 	"github.com/munenick/docker-vm-runner/internal/guestexec"
 	"github.com/munenick/docker-vm-runner/internal/images"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
+	"github.com/munenick/docker-vm-runner/internal/oci"
 	"github.com/munenick/docker-vm-runner/internal/password"
 	"github.com/munenick/docker-vm-runner/internal/paths"
 	"github.com/munenick/docker-vm-runner/internal/process"
@@ -282,21 +290,107 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	if fileExists(workImage) && cfg.Persist {
 		return nil
 	}
-	baseImage := filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2"))
+	baseImage, err := l.resolveBaseImage(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if l.bootISOPath != "" {
+		return images.NewDiskManager(&l.CommandRunner).CreateDisk(ctx, images.CreateDiskRequest{
+			Path:        workImage,
+			Format:      defaultString(cfg.ImageFormat, "qcow2"),
+			Size:        cfg.DiskSize,
+			Preallocate: cfg.DiskPreallocate,
+		})
+	}
 	if !fileExists(baseImage) {
-		return fmt.Errorf("base image not found at %s; image download pipeline is not wired into lifecycle yet", baseImage)
+		return fmt.Errorf("base image not found at %s", baseImage)
 	}
 	if err := os.MkdirAll(filepath.Dir(workImage), 0o755); err != nil {
 		return fmt.Errorf("create work image directory: %w", err)
 	}
-	input, err := os.ReadFile(baseImage)
-	if err != nil {
-		return fmt.Errorf("read base image: %w", err)
-	}
-	if err := os.WriteFile(workImage, input, 0o644); err != nil {
-		return fmt.Errorf("write work image: %w", err)
+	if err := copyFile(baseImage, workImage); err != nil {
+		return fmt.Errorf("copy base image to work image: %w", err)
 	}
 	return nil
+}
+
+func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM) (string, error) {
+	if cfg.BootFrom != "" {
+		source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
+		if err != nil {
+			return "", err
+		}
+		if isISO(source) {
+			l.bootISOPath = source
+			return "", nil
+		}
+		return l.postProcessImage(ctx, source, filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2")), defaultString(cfg.ImageFormat, "qcow2"))
+	}
+	baseImage := filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2"))
+	if fileExists(baseImage) {
+		return baseImage, nil
+	}
+	if cfg.ImageURL == "" {
+		return "", fmt.Errorf("image URL is empty and base image is missing: %s", baseImage)
+	}
+	downloadPath := filepath.Join(l.Layout.BaseImagesDir, "downloads", cacheName(cfg.ImageURL))
+	if err := download.NewDownloader(nil).DownloadWithRetry(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries); err != nil {
+		return "", err
+	}
+	return l.postProcessImage(ctx, downloadPath, baseImage, defaultString(cfg.ImageFormat, "qcow2"))
+}
+
+func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, ref string, retries int) (string, error) {
+	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
+		destination := filepath.Join(l.Layout.BaseImagesDir, "boot", cacheName(ref))
+		if fileExists(destination) {
+			return destination, nil
+		}
+		if err := download.NewDownloader(nil).DownloadWithRetry(ctx, ref, destination, retries); err != nil {
+			return "", err
+		}
+		return destination, nil
+	}
+	if oci.IsReference(ref) {
+		result, err := oci.NewPuller().Pull(ctx, ref, filepath.Join(l.Layout.BaseImagesDir, "oci"))
+		if err != nil {
+			return "", err
+		}
+		return result.Path, nil
+	}
+	if !fileExists(ref) {
+		return "", fmt.Errorf("BOOT_FROM path not found: %s", ref)
+	}
+	return ref, nil
+}
+
+func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, desiredFormat string) (string, error) {
+	current := source
+	extractor := archive.NewExtractor()
+	for isArchive(current) {
+		result, err := extractor.ExtractWithResult(ctx, current, filepath.Dir(current))
+		if err != nil {
+			return "", err
+		}
+		current = result.Path
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return "", fmt.Errorf("create base image directory: %w", err)
+	}
+	diskManager := images.NewDiskManager(&l.CommandRunner)
+	info, err := diskManager.ImageInfo(ctx, current)
+	if err == nil && info.Format != "" && info.Format != desiredFormat {
+		if err := diskManager.ConvertDisk(ctx, current, destination, desiredFormat); err != nil {
+			return "", err
+		}
+		return destination, nil
+	}
+	if current != destination {
+		if err := copyFile(current, destination); err != nil {
+			return "", fmt.Errorf("place base image: %w", err)
+		}
+	}
+	return destination, nil
 }
 
 func (l *ConcreteLifecycle) prepareSeedISO(ctx context.Context, cfg config.VM, outputPath string) error {
@@ -383,6 +477,65 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func isISO(path string) bool {
+	return strings.EqualFold(filepath.Ext(path), ".iso")
+}
+
+func isArchive(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".gz", ".xz", ".bz2", ".zip", ".tar", ".ova", ".7z", ".rar":
+		return true
+	default:
+		return false
+	}
+}
+
+func cacheName(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	prefix := hex.EncodeToString(sum[:])[:12]
+	name := filepath.Base(value)
+	if parsed, err := url.Parse(value); err == nil && parsed.Path != "" {
+		name = filepath.Base(parsed.Path)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == "/" {
+		name = "image"
+	}
+	return prefix + "-" + safeFilename(name)
+}
+
+func safeFilename(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+func copyFile(source string, destination string) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		return err
+	}
+	output, err := os.Create(destination)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	if _, err := io.Copy(output, input); err != nil {
+		return err
+	}
+	return output.Close()
 }
 
 func defaultString(value string, fallback string) string {
