@@ -77,7 +77,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if r.Lifecycle == nil {
-		return nil
+		r.Lifecycle = NewConcreteLifecycle(paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), nil))
 	}
 	return r.runLifecycle(ctx, cfg, opts)
 }

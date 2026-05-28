@@ -9,7 +9,12 @@ import (
 	"testing"
 
 	"github.com/munenick/docker-vm-runner/internal/config"
+	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
+	"github.com/munenick/docker-vm-runner/internal/paths"
+	"github.com/munenick/docker-vm-runner/internal/redfish"
+	"github.com/munenick/docker-vm-runner/internal/tpm"
+	"github.com/munenick/docker-vm-runner/internal/vncproxy"
 )
 
 func TestListDistrosFiltersByArch(t *testing.T) {
@@ -123,10 +128,156 @@ func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleStartsServices(t *testing.T) {
+	service := &fakeServiceSupervisor{}
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	redfishManager := &fakeRedfishManager{}
+	novnc := &fakeNoVNCProxy{}
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Service = service
+	lifecycle.Manager = manager
+	lifecycle.Redfish = redfishManager
+	lifecycle.NoVNC = novnc
+	lifecycle.RedfishPool = libvirtmgr.StoragePoolRequest{Name: "default", TargetPath: filepath.Join(t.TempDir(), "pool")}
+
+	err := lifecycle.StartServices(context.Background(), config.VM{
+		RedfishEnabled:  true,
+		RedfishUser:     "admin",
+		RedfishPassword: "secret",
+		RedfishPort:     8443,
+		NoVNCEnabled:    true,
+		NoVNCPort:       6080,
+		VNCPort:         5900,
+	})
+	if err != nil {
+		t.Fatalf("StartServices returned error: %v", err)
+	}
+	if service.startCalls != 1 || manager.storagePoolCalls != 1 || !redfishManager.started || !novnc.started {
+		t.Fatalf("service=%d storage=%d redfish=%v novnc=%v", service.startCalls, manager.storagePoolCalls, redfishManager.started, novnc.started)
+	}
+}
+
+func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if manager.definedName != "vm1" || !strings.Contains(manager.definedXML, `<domain type=`) {
+		t.Fatalf("definedName=%q xml=%s", manager.definedName, manager.definedXML)
+	}
+	if got := readFileString(t, filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")); got != "base" {
+		t.Fatalf("work image = %q", got)
+	}
+}
+
 type fakeLifecycle struct {
 	calls      []string
 	prepareErr error
 }
+
+type fakeServiceSupervisor struct {
+	startCalls int
+	stopCalls  int
+}
+
+func (s *fakeServiceSupervisor) Start(context.Context) error {
+	s.startCalls++
+	return nil
+}
+
+func (s *fakeServiceSupervisor) Stop(context.Context) error {
+	s.stopCalls++
+	return nil
+}
+
+type fakeRedfishManager struct {
+	started bool
+}
+
+func (m *fakeRedfishManager) Start(context.Context, redfish.Request) (redfish.Result, error) {
+	m.started = true
+	return redfish.Result{Started: true}, nil
+}
+
+type fakeNoVNCProxy struct {
+	started bool
+	stopped bool
+}
+
+func (p *fakeNoVNCProxy) Start(context.Context, vncproxy.Request) (vncproxy.Result, error) {
+	p.started = true
+	return vncproxy.Result{Started: true}, nil
+}
+
+func (p *fakeNoVNCProxy) Stop(context.Context) error {
+	p.stopped = true
+	return nil
+}
+
+type fakeLibvirtManager struct {
+	domain           libvirtmgr.Domain
+	definedName      string
+	definedXML       string
+	storagePoolCalls int
+}
+
+func (m *fakeLibvirtManager) EnsureDefined(name string, xml string) (libvirtmgr.Domain, error) {
+	m.definedName = name
+	m.definedXML = xml
+	return m.domain, nil
+}
+
+func (m *fakeLibvirtManager) Start(libvirtmgr.Domain) error { return nil }
+func (m *fakeLibvirtManager) Cleanup(libvirtmgr.Domain, libvirtmgr.CleanupOptions) error {
+	return nil
+}
+func (m *fakeLibvirtManager) EnsureStoragePool(libvirtmgr.StoragePoolRequest) (libvirtmgr.StoragePool, error) {
+	m.storagePoolCalls++
+	return nil, nil
+}
+func (m *fakeLibvirtManager) Close() error { return nil }
+
+type fakeLibvirtDomain struct {
+	name   string
+	active bool
+}
+
+func (d *fakeLibvirtDomain) Name() string                  { return d.name }
+func (d *fakeLibvirtDomain) IsActive() (bool, error)       { return d.active, nil }
+func (d *fakeLibvirtDomain) Create() error                 { d.active = true; return nil }
+func (d *fakeLibvirtDomain) Shutdown() error               { d.active = false; return nil }
+func (d *fakeLibvirtDomain) Destroy() error                { d.active = false; return nil }
+func (d *fakeLibvirtDomain) Undefine() error               { return nil }
+func (d *fakeLibvirtDomain) UndefineNVRAM() error          { return nil }
+func (d *fakeLibvirtDomain) unusedTpmReference(tpm.Result) {}
 
 func (l *fakeLifecycle) StartServices(context.Context, config.VM) error {
 	l.calls = append(l.calls, "start-services")
@@ -193,4 +344,25 @@ distributions:
 		t.Fatalf("write distro config: %v", err)
 	}
 	return path
+}
+
+func testLayout(t *testing.T) paths.Layout {
+	t.Helper()
+	root := t.TempDir()
+	return paths.Layout{
+		DataDir:       root,
+		ImagesDir:     root,
+		BaseImagesDir: filepath.Join(root, "base"),
+		VMImagesDir:   filepath.Join(root, "vms"),
+		StateDir:      filepath.Join(root, "state"),
+	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(content)
 }
