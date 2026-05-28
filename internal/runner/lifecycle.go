@@ -635,7 +635,7 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 		return "", fmt.Errorf("image URL is empty and base image is missing: %s", baseImage)
 	}
 	downloadPath := filepath.Join(l.Layout.BaseImagesDir, "downloads", cacheName(cfg.ImageURL))
-	downloader := l.newDownloader(cfg)
+	downloader := l.newDownloader(cfg, "Downloading base image")
 	if err := downloader.DownloadWithRetryChecked(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries, download.Checksum{
 		Algorithm: cfg.ImageChecksumAlgorithm,
 		Value:     cfg.ImageChecksumValue,
@@ -661,7 +661,7 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 			}
 			_ = os.Remove(destination)
 		}
-		downloader := l.newDownloader(cfg)
+		downloader := l.newDownloader(cfg, "Downloading boot source")
 		if checksum.Algorithm != "" || checksum.Value != "" {
 			if err := downloader.DownloadWithRetryChecked(ctx, ref, destination, cfg.DownloadRetries, checksum); err != nil {
 				return "", err
@@ -686,9 +686,10 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 	return ref, nil
 }
 
-func (l *ConcreteLifecycle) newDownloader(cfg config.VM) *download.Downloader {
+func (l *ConcreteLifecycle) newDownloader(cfg config.VM, label string) *download.Downloader {
 	downloader := download.NewDownloader(nil)
 	downloader.MaxBytes = cfg.DownloadMaxBytes
+	downloader.Label = label
 	downloader.Progress = l.reportDownloadProgress
 	return downloader
 }
@@ -698,31 +699,69 @@ func (l *ConcreteLifecycle) reportDownloadProgress(progress download.Progress) {
 		return
 	}
 	if progress.RetryDelay > 0 && progress.Err != nil {
-		fmt.Fprintf(l.Status, "\ndocker-vm-runner: download failed on attempt %d/%d, retrying in %s: %v\n", progress.Attempt, progress.Attempts, progress.RetryDelay, progress.Err)
+		fmt.Fprintf(l.Status, "\n[WARN] Download failed (attempt %d/%d), retrying in %s: %v\n", progress.Attempt, progress.Attempts, progress.RetryDelay, progress.Err)
 		return
 	}
+	label := progress.Label
+	if label == "" {
+		label = "Downloading"
+	}
+	if progress.Written == 0 && !progress.Done {
+		fmt.Fprintf(l.Status, "[INFO] %s: %s\n", label, progress.URL)
+	}
 	if progress.Done {
-		fmt.Fprintf(l.Status, "\rdocker-vm-runner: download complete: %s\n", shortURL(progress.URL))
+		fmt.Fprintf(l.Status, "\r  %s\n", progressLine(progress, true))
+		fmt.Fprintf(l.Status, "[SUCCESS] Downloaded %s in %s\n", formatBytes(progress.Written), formatDuration(progress.Elapsed))
 		return
+	}
+	fmt.Fprintf(l.Status, "\r  %s", progressLine(progress, false))
+}
+
+func progressLine(progress download.Progress, done bool) string {
+	speed := float64(0)
+	if progress.Elapsed > 0 {
+		speed = float64(progress.Written) / progress.Elapsed.Seconds()
 	}
 	if progress.Total > 0 {
 		percent := float64(progress.Written) * 100 / float64(progress.Total)
-		fmt.Fprintf(l.Status, "\rdocker-vm-runner: downloading %s [%6.2f%%] %s/%s", shortURL(progress.URL), percent, formatBytes(progress.Written), formatBytes(progress.Total))
-		return
+		if done {
+			percent = 100
+		}
+		return fmt.Sprintf("[%s] %5.1f%% %s/%s (%s/s, ETA %s)",
+			progressBar(progress.Written, progress.Total, 30),
+			percent,
+			formatMiB(progress.Written),
+			formatMiB(progress.Total),
+			formatMiB(int64(speed)),
+			eta(progress, speed),
+		)
 	}
-	fmt.Fprintf(l.Status, "\rdocker-vm-runner: downloading %s %s", shortURL(progress.URL), formatBytes(progress.Written))
+	return fmt.Sprintf("%s downloaded (%s/s)", formatMiB(progress.Written), formatMiB(int64(speed)))
 }
 
-func shortURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Host == "" {
-		return raw
+func progressBar(written int64, total int64, width int) string {
+	if width <= 0 {
+		return ""
 	}
-	name := filepath.Base(parsed.Path)
-	if name == "." || name == "/" || name == "" {
-		return parsed.Host
+	if total <= 0 {
+		return strings.Repeat("-", width)
 	}
-	return parsed.Host + "/" + name
+	filled := int(float64(width) * float64(written) / float64(total))
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > width {
+		filled = width
+	}
+	return strings.Repeat("#", filled) + strings.Repeat("-", width-filled)
+}
+
+func eta(progress download.Progress, speed float64) string {
+	if progress.Total <= 0 || speed <= 0 || progress.Written >= progress.Total {
+		return "00:00"
+	}
+	remaining := time.Duration(float64(progress.Total-progress.Written)/speed) * time.Second
+	return formatDuration(remaining)
 }
 
 func formatBytes(value int64) string {
@@ -739,6 +778,20 @@ func formatBytes(value int64) string {
 		}
 	}
 	return fmt.Sprintf("%.1f PiB", v/unit)
+}
+
+func formatMiB(value int64) string {
+	return fmt.Sprintf("%.1f MiB", float64(value)/(1024*1024))
+}
+
+func formatDuration(value time.Duration) string {
+	if value < 0 {
+		value = 0
+	}
+	totalSeconds := int(value.Round(time.Second).Seconds())
+	minutes := totalSeconds / 60
+	seconds := totalSeconds % 60
+	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
 type imagePostProcessOptions struct {

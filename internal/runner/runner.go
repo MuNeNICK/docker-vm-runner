@@ -267,7 +267,9 @@ func (r *Runner) printDistros(opts Options) error {
 func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) (retErr error) {
 	vmStarted := false
 	vmStopped := false
-	r.printStatus("Starting VM services")
+	PrintHost(r.Stdout, cfg)
+	PrintVMSummary(r.Stdout, cfg)
+	r.printInfo("Starting VM services")
 	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
 		stopCtx, cancel := lifecycleCleanupContext()
 		defer cancel()
@@ -298,21 +300,22 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 			retErr = err
 		}
 	}()
-	r.printStatus("Preparing VM image and configuration")
+	r.printInfo("Preparing VM image and configuration")
 	if err := r.Lifecycle.Prepare(ctx, cfg); err != nil {
 		return err
 	}
-	r.printStatus("Starting VM")
+	r.printInfo("Starting VM")
 	if err := r.Lifecycle.StartVM(ctx, cfg); err != nil {
 		return err
 	}
 	vmStarted = true
+	r.printSuccess("VM started")
 	PrintAccess(r.Stdout, cfg)
 	if opts.NoConsole {
-		r.printStatus("Waiting for VM shutdown")
+		r.printInfo("Waiting for VM shutdown")
 		if cfg.CloudInitEnabled {
 			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
-				r.printStatus(fmt.Sprintf("guest readiness check did not complete; VM will keep running: %v", err))
+				r.printWarn(fmt.Sprintf("Guest readiness check did not complete; VM will keep running: %v", err))
 			}
 		}
 		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
@@ -320,7 +323,7 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 		vmStopped = true
 	} else {
-		r.printStatus("Attaching VM console")
+		r.printInfo("Attaching to VM console (Ctrl+] to exit)")
 		if code, err := r.Lifecycle.AttachConsole(ctx, cfg); err != nil {
 			return err
 		} else if code != 0 {
@@ -335,11 +338,23 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 	return nil
 }
 
-func (r *Runner) printStatus(message string) {
+func (r *Runner) printInfo(message string) {
+	r.printStatus("INFO", message)
+}
+
+func (r *Runner) printWarn(message string) {
+	r.printStatus("WARN", message)
+}
+
+func (r *Runner) printSuccess(message string) {
+	r.printStatus("SUCCESS", message)
+}
+
+func (r *Runner) printStatus(level string, message string) {
 	if r.Stderr == nil {
 		return
 	}
-	fmt.Fprintf(r.Stderr, "docker-vm-runner: %s\n", message)
+	fmt.Fprintf(r.Stderr, "[%s] %s\n", level, message)
 }
 
 func shouldMarkInstalled(cfg config.VM, vmStarted bool, vmStopped bool) bool {
@@ -405,6 +420,11 @@ func PrintAccess(w io.Writer, cfg config.VM) {
 
 func PrintHost(w io.Writer, cfg config.VM) {
 	printBlock(w, "Host", hostinfo.Lines(hostinfo.Detect(workImageProbePath(cfg))))
+}
+
+func PrintVMSummary(w io.Writer, cfg config.VM) {
+	title := fmt.Sprintf("%s (%s)", cfg.VMName, cfg.DistroName)
+	printBlock(w, title, VMSummaryLines(cfg))
 }
 
 func workImageProbePath(cfg config.VM) string {
@@ -500,10 +520,23 @@ func VMSummaryLines(cfg config.VM) []string {
 }
 
 func printBlock(w io.Writer, title string, lines []string) {
-	fmt.Fprintf(w, "== %s ==\n", title)
+	width := len(title)
 	for _, line := range lines {
-		fmt.Fprintln(w, line)
+		if len(line) > width {
+			width = len(line)
+		}
 	}
+	if width < 56 {
+		width = 56
+	}
+	border := "+" + strings.Repeat("-", width+2) + "+"
+	fmt.Fprintln(w, border)
+	fmt.Fprintf(w, "| %-*s |\n", width, title)
+	fmt.Fprintln(w, border)
+	for _, line := range lines {
+		fmt.Fprintf(w, "| %-*s |\n", width, line)
+	}
+	fmt.Fprintln(w, border)
 }
 
 func toSnake(name string) string {

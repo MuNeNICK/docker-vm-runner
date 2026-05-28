@@ -24,6 +24,7 @@ type Downloader struct {
 	Client           *http.Client
 	Sleep            func(context.Context, time.Duration) error
 	MaxBytes         int64
+	Label            string
 	Progress         func(Progress)
 	ProgressInterval time.Duration
 }
@@ -34,11 +35,13 @@ type Checksum struct {
 }
 
 type Progress struct {
+	Label      string
 	URL        string
 	Written    int64
 	Total      int64
 	Attempt    int
 	Attempts   int
+	Elapsed    time.Duration
 	Done       bool
 	RetryDelay time.Duration
 	Err        error
@@ -99,11 +102,14 @@ func (d *Downloader) downloadChecked(ctx context.Context, url string, destinatio
 		}
 	}()
 
+	started := time.Now()
 	if _, err := copyWithLimit(tmp, resp.Body, d.MaxBytes, "download "+url, progressWriter{
+		Label:    d.Label,
 		URL:      url,
 		Total:    resp.ContentLength,
 		Attempt:  attempt,
 		Attempts: attempts,
+		Started:  started,
 		Interval: d.ProgressInterval,
 		Progress: d.Progress,
 	}); err != nil {
@@ -120,7 +126,7 @@ func (d *Downloader) downloadChecked(ctx context.Context, url string, destinatio
 		return fmt.Errorf("move download into place: %w", err)
 	}
 	keepTemp = true
-	d.reportProgress(Progress{URL: url, Written: fileSize(destination), Total: resp.ContentLength, Attempt: attempt, Attempts: attempts, Done: true})
+	d.reportProgress(Progress{Label: d.Label, URL: url, Written: fileSize(destination), Total: resp.ContentLength, Attempt: attempt, Attempts: attempts, Elapsed: time.Since(started), Done: true})
 	return nil
 }
 
@@ -141,7 +147,7 @@ func (d *Downloader) DownloadWithRetryChecked(ctx context.Context, url string, d
 				break
 			}
 			delay := delays[min(attempt-1, len(delays)-1)]
-			d.reportProgress(Progress{URL: url, Attempt: attempt, Attempts: retries, Err: err, RetryDelay: delay})
+			d.reportProgress(Progress{Label: d.Label, URL: url, Attempt: attempt, Attempts: retries, Err: err, RetryDelay: delay})
 			if sleepErr := d.Sleep(ctx, delay); sleepErr != nil {
 				return sleepErr
 			}
@@ -199,10 +205,12 @@ func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string, p
 }
 
 type progressWriter struct {
+	Label        string
 	URL          string
 	Total        int64
 	Attempt      int
 	Attempts     int
+	Started      time.Time
 	Interval     time.Duration
 	Progress     func(Progress)
 	written      int64
@@ -246,11 +254,13 @@ func (p *progressWriter) report(written int64, done bool) {
 	}
 	p.lastReported = now
 	p.Progress(Progress{
+		Label:    p.Label,
 		URL:      p.URL,
 		Written:  written,
 		Total:    p.Total,
 		Attempt:  p.Attempt,
 		Attempts: p.Attempts,
+		Elapsed:  now.Sub(p.Started),
 		Done:     done,
 	})
 }

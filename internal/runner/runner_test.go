@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/munenick/docker-vm-runner/internal/config"
+	"github.com/munenick/docker-vm-runner/internal/download"
 	"github.com/munenick/docker-vm-runner/internal/guestexec"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
@@ -109,6 +110,23 @@ func TestAccessLinesIncludeConsoleRedfishAndPublish(t *testing.T) {
 	}
 }
 
+func TestPrintAccessUsesReadableBlock(t *testing.T) {
+	var out bytes.Buffer
+	PrintAccess(&out, config.VM{
+		LoginUser:        "user",
+		Password:         "password",
+		CloudInitEnabled: true,
+		SSHPort:          2222,
+		NICs:             []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	text := out.String()
+	for _, needle := range []string{"+", "| Access", "| SSH:     ssh -p 2222 user@localhost"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("missing %q in:\n%s", needle, text)
+		}
+	}
+}
+
 func TestVMSummaryLines(t *testing.T) {
 	lines := VMSummaryLines(config.VM{
 		CPUs:           2,
@@ -124,6 +142,19 @@ func TestVMSummaryLines(t *testing.T) {
 	text := strings.Join(lines, "\n")
 	if !strings.Contains(text, "2 vCPU | 4096 MiB RAM | 20G disk") || !strings.Contains(text, "TPM") {
 		t.Fatalf("summary = %q", text)
+	}
+}
+
+func TestProgressLineIncludesBarSpeedAndETA(t *testing.T) {
+	line := progressLine(download.Progress{
+		Written: 5 * 1024 * 1024,
+		Total:   10 * 1024 * 1024,
+		Elapsed: time.Second,
+	}, false)
+	for _, needle := range []string{"[###############---------------]", "50.0%", "5.0 MiB/10.0 MiB", "5.0 MiB/s", "ETA 00:01"} {
+		if !strings.Contains(line, needle) {
+			t.Fatalf("missing %q in %q", needle, line)
+		}
 	}
 }
 
@@ -161,7 +192,7 @@ func TestRunLifecycleTreatsGuestReadyFailureAsWarningInNoConsole(t *testing.T) {
 	if got := strings.Join(lifecycle.calls, ","); got != want {
 		t.Fatalf("calls = %s want %s", got, want)
 	}
-	if !strings.Contains(stderr.String(), "guest readiness check did not complete") {
+	if !strings.Contains(stderr.String(), "Guest readiness check did not complete") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
