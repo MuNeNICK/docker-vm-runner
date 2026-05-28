@@ -100,6 +100,86 @@ func TestRenderKVMDomainXML(t *testing.T) {
 	}
 }
 
+func TestRenderCPUFallbackWithoutKVM(t *testing.T) {
+	vm := testVM()
+	vm.CPUModel = "host"
+	xmlText := renderForTest(t, Request{
+		VM:            vm,
+		WorkImagePath: "/vm/disk.qcow2",
+		KVMAvailable:  false,
+	})
+
+	if !strings.Contains(xmlText, `<model fallback="allow">qemu64</model>`) {
+		t.Fatalf("XML missing TCG CPU fallback:\n%s", xmlText)
+	}
+}
+
+func TestRenderArchitectureFirmwareXML(t *testing.T) {
+	vm := testVM()
+	vm.Arch = "aarch64"
+	vm.BootMode = "uefi"
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "cortex-a72",
+		FirmwareLoader:    "/firmware/AAVMF_CODE.fd",
+		FirmwareVars:      "/state/test-vm-vars.fd",
+	})
+
+	for _, want := range []string{
+		`<type arch="aarch64" machine="virt">hvm</type>`,
+		`<loader readonly="yes" secure="no" type="pflash">/firmware/AAVMF_CODE.fd</loader>`,
+		`<nvram>/state/test-vm-vars.fd</nvram>`,
+		`<acpi/>`,
+		`<model fallback="allow">cortex-a72</model>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
+func TestRenderSecureBootLoaderXML(t *testing.T) {
+	vm := testVM()
+	vm.BootMode = "secure"
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+		FirmwareLoader:    "/firmware/OVMF_CODE.secure.fd",
+		FirmwareVars:      "/state/test-vm-vars.fd",
+	})
+
+	if !strings.Contains(xmlText, `secure="yes"`) {
+		t.Fatalf("XML missing secure loader flag:\n%s", xmlText)
+	}
+}
+
+func TestRenderHyperVFeatures(t *testing.T) {
+	vm := testVM()
+	vm.HyperVEnabled = true
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<hyperv mode="passthrough">`,
+		`<relaxed state="on"/>`,
+		`<spinlocks state="on" retries="8191"/>`,
+		`<clock offset="localtime">`,
+		`<timer name="hypervclock" present="yes"/>`,
+		`<qemu:arg value="-global"/>`,
+		`<qemu:arg value="ICH9-LPC.disable_s3=1"/>`,
+		`<qemu:arg value="ICH9-LPC.disable_s4=1"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
 func TestRenderDomainWithGraphics(t *testing.T) {
 	vm := testVM()
 	vm.GraphicsType = "vnc"
@@ -167,6 +247,30 @@ func TestRenderDomainWithFilesystemShare(t *testing.T) {
 		`<binary path="/usr/lib/qemu/virtiofsd"/>`,
 		`<source dir="/host/data"/>`,
 		`<target dir="data"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
+func TestRenderDomainOptionalDevices(t *testing.T) {
+	vm := testVM()
+	vm.TPMEnabled = true
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<controller type="usb" model="qemu-xhci"/>`,
+		`<input type="tablet" bus="usb"/>`,
+		`<tpm model="tpm-crb">`,
+		`<backend type="emulator" version="2.0"/>`,
+		`<memballoon model="virtio"/>`,
+		`<rng model="virtio">`,
+		`<backend model="random">/dev/urandom</backend>`,
 	} {
 		if !strings.Contains(xmlText, want) {
 			t.Fatalf("XML missing %q:\n%s", want, xmlText)
