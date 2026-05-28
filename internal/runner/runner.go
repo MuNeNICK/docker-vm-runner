@@ -204,7 +204,7 @@ func applyRuntimeEnv(lifecycle *ConcreteLifecycle, env config.MapEnv) {
 }
 
 func (r *Runner) printDistros(arch string) error {
-	distros, normalizedArch, err := config.ListDistros(r.DistroConfigPath, arch)
+	distros, normalizedArch, err := config.ListDistrosFromSource(config.ResolveCatalogSource(r.Env, r.DistroConfigPath), arch)
 	if err != nil {
 		return err
 	}

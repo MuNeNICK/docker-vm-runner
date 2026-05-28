@@ -39,14 +39,17 @@ func TestResolveDefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if cfg.Distro != "ubuntu-24.04-server" {
+	if cfg.Distro != "ubuntu-24.04-cloud-amd64" {
 		t.Fatalf("Distro = %q", cfg.Distro)
 	}
-	if cfg.DistroName != "Ubuntu 24.04 LTS Server" {
+	if cfg.DistroName != "Ubuntu 24.04 LTS Cloud" {
 		t.Fatalf("DistroName = %q", cfg.DistroName)
 	}
-	if cfg.ImageURL != "https://example.com/ubuntu.iso" {
+	if cfg.ImageURL != "https://example.com/ubuntu.qcow2" {
 		t.Fatalf("ImageURL = %q", cfg.ImageURL)
+	}
+	if cfg.SourceImageType != "cloud-image" || cfg.SourceImageFormat != "qcow2" || cfg.SourceImageCompression != "none" {
+		t.Fatalf("source metadata = %q %q %q", cfg.SourceImageType, cfg.SourceImageFormat, cfg.SourceImageCompression)
 	}
 	if cfg.ImageChecksumAlgorithm != "sha256" || cfg.ImageChecksumValue != "abc123" {
 		t.Fatalf("Image checksum = %q %q", cfg.ImageChecksumAlgorithm, cfg.ImageChecksumValue)
@@ -167,6 +170,38 @@ func TestResolveISOAutoDisablesCloudInit(t *testing.T) {
 	}
 	if cfg.DistroName != "Custom ISO" {
 		t.Fatalf("DistroName = %q", cfg.DistroName)
+	}
+	if cfg.BootChecksumAlgorithm != "" || cfg.BootChecksumValue != "" {
+		t.Fatalf("custom ISO boot checksum = %q %q", cfg.BootChecksumAlgorithm, cfg.BootChecksumValue)
+	}
+}
+
+func TestResolveCatalogISOUsesBootMediaAndBlankDisk(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{"DISTRO": "ubuntu-24.04-server"})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.ImageURL != "" {
+		t.Fatalf("ImageURL = %q", cfg.ImageURL)
+	}
+	if cfg.BootFrom != "https://example.com/ubuntu.iso" {
+		t.Fatalf("BootFrom = %q", cfg.BootFrom)
+	}
+	if cfg.BootChecksumAlgorithm != "sha256" || cfg.BootChecksumValue != "def456" {
+		t.Fatalf("Boot checksum = %q %q", cfg.BootChecksumAlgorithm, cfg.BootChecksumValue)
+	}
+	if !cfg.BlankWorkDisk {
+		t.Fatal("BlankWorkDisk = false")
+	}
+	if cfg.BootOrder[0] != "cdrom" {
+		t.Fatalf("BootOrder = %#v", cfg.BootOrder)
+	}
+	if cfg.DistroName != "Ubuntu 24.04 LTS Server" {
+		t.Fatalf("DistroName = %q", cfg.DistroName)
+	}
+	if cfg.CloudInitEnabled {
+		t.Fatal("CloudInitEnabled = true")
 	}
 }
 

@@ -19,20 +19,25 @@ type Meta struct {
 }
 
 type Image struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Category    string   `json:"category"`
-	Distro      string   `json:"distro"`
-	Codename    string   `json:"codename"`
-	Version     string   `json:"version"`
-	Edition     string   `json:"edition"`
-	Arch        string   `json:"arch"`
-	ReleaseType string   `json:"release_type"`
-	URL         string   `json:"url"`
-	Homepage    string   `json:"homepage"`
-	Checksum    Checksum `json:"checksum"`
-	EOL         EOL      `json:"eol"`
-	Status      string   `json:"status"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	ImageType    string   `json:"image_type"`
+	Category     string   `json:"category"`
+	Distro       string   `json:"distro"`
+	Codename     string   `json:"codename"`
+	Version      string   `json:"version"`
+	Edition      string   `json:"edition"`
+	Arch         string   `json:"arch"`
+	ReleaseType  string   `json:"release_type"`
+	Format       string   `json:"format"`
+	Compression  string   `json:"compression"`
+	URL          string   `json:"url"`
+	DownloadPage string   `json:"download_page"`
+	Homepage     string   `json:"homepage"`
+	Notes        string   `json:"notes"`
+	Checksum     Checksum `json:"checksum"`
+	EOL          EOL      `json:"eol"`
+	Status       string   `json:"status"`
 }
 
 type Checksum struct {
@@ -60,7 +65,6 @@ type Query struct {
 func Load(r io.Reader) (Response, error) {
 	var response Response
 	decoder := json.NewDecoder(r)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&response); err != nil {
 		return Response{}, fmt.Errorf("parse catalog JSON: %w", err)
 	}
@@ -134,14 +138,20 @@ func validateImage(image Image) error {
 		"version":  image.Version,
 		"arch":     image.Arch,
 		"status":   image.Status,
-		"url":      image.URL,
 	}
 	for field, value := range required {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("missing required field %s", field)
 		}
 	}
+	if strings.TrimSpace(image.URL) == "" && strings.TrimSpace(image.DownloadPage) == "" {
+		return fmt.Errorf("missing required field url or download_page")
+	}
 	return nil
+}
+
+func (image Image) HasDirectDownloadURL() bool {
+	return strings.TrimSpace(image.URL) != ""
 }
 
 func equalFoldTrim(a string, b string) bool {

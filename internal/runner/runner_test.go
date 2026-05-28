@@ -476,6 +476,28 @@ func TestConcreteLifecycleResolveBaseImageVerifiesChecksum(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleResolveBootSourceVerifiesCatalogChecksum(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("boot-iso"))
+	}))
+	defer server.Close()
+	sum := sha256.Sum256([]byte("different"))
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+
+	_, err := lifecycle.resolveBootSource(context.Background(), config.VM{
+		BootFrom:              server.URL + "/installer.iso",
+		BootChecksumAlgorithm: "sha256",
+		BootChecksumValue:     hex.EncodeToString(sum[:]),
+		DownloadRetries:       1,
+	})
+	if err == nil {
+		t.Fatal("expected checksum mismatch")
+	}
+	if !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
 	layout := testLayout(t)
 	installFakeCommand(t, "genisoimage", func(logPath string) string {

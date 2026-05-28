@@ -2,7 +2,7 @@ package paths
 
 import "path/filepath"
 
-const DefaultConfigPath = "/config/os-iso-catalog/v1/supported.json"
+const DefaultConfigPath = "/config/os-iso-catalog/v1/all.json"
 
 type Layout struct {
 	DataDir       string

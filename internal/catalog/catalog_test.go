@@ -16,6 +16,7 @@ func TestLoadSupportedCatalog(t *testing.T) {
 	    {
 	      "id": "ubuntu-24.04-server",
 	      "name": "Ubuntu 24.04.4 LTS",
+	      "image_type": "iso",
 	      "category": "linux",
 	      "distro": "ubuntu",
 	      "codename": "Noble Numbat",
@@ -23,8 +24,11 @@ func TestLoadSupportedCatalog(t *testing.T) {
 	      "edition": "Server",
 	      "arch": "amd64",
 	      "release_type": "stable",
+	      "format": "iso",
+	      "compression": "none",
 	      "url": "https://releases.ubuntu.com/24.04/ubuntu-24.04.4-live-server-amd64.iso",
 	      "homepage": "https://ubuntu.com/",
+	      "extra_future_field": "ignored",
 	      "checksum": {
 	        "algorithm": "sha256",
 	        "value": "e907d92eeec9df64163a7e454cbc8d7755e8ddc7ed42f99dbc80c40f1a138433"
@@ -68,7 +72,7 @@ func TestLoadSupportedCatalog(t *testing.T) {
 		t.Fatalf("image count = %d", len(response.Images))
 	}
 	image := response.Images[0]
-	if image.ID != "ubuntu-24.04-server" || image.Checksum.Algorithm != "sha256" || image.EOL.Extended != "2036-05-31" {
+	if image.ID != "ubuntu-24.04-server" || image.ImageType != "iso" || image.Format != "iso" || image.Checksum.Algorithm != "sha256" || image.EOL.Extended != "2036-05-31" {
 		t.Fatalf("image = %#v", image)
 	}
 }
@@ -84,24 +88,47 @@ func TestLoadMalformedCatalogJSON(t *testing.T) {
 }
 
 func TestLoadCatalogRequiresImageURL(t *testing.T) {
-	_, err := Load(strings.NewReader(`{
+	response, err := Load(strings.NewReader(`{
 	  "meta": {"api_version": "v1"},
 	  "images": [
 	    {
-	      "id": "ubuntu",
-	      "name": "Ubuntu",
-	      "category": "linux",
-	      "version": "24.04",
+	      "id": "windows-11",
+	      "name": "Windows 11",
+	      "category": "windows",
+	      "version": "11",
 	      "arch": "amd64",
 	      "status": "supported",
+	      "download_page": "https://example.com/download",
 	      "eol": {"is_rolling": false}
 	    }
 	  ]
 	}`))
-	if err == nil {
-		t.Fatal("expected missing URL error")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "missing required field url") {
+	if response.Images[0].HasDirectDownloadURL() {
+		t.Fatal("HasDirectDownloadURL = true")
+	}
+}
+
+func TestLoadCatalogRequiresURLOrDownloadPage(t *testing.T) {
+	_, err := Load(strings.NewReader(`{
+	  "meta": {"api_version": "v1"},
+	  "images": [
+	    {
+	      "id": "broken",
+	      "name": "Broken",
+	      "category": "linux",
+	      "version": "1",
+	      "arch": "amd64",
+	      "status": "supported"
+	    }
+	  ]
+	}`))
+	if err == nil {
+		t.Fatal("expected missing URL or download page error")
+	}
+	if !strings.Contains(err.Error(), "missing required field url or download_page") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

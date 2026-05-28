@@ -439,7 +439,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	diskManager := images.NewDiskManager(&l.CommandRunner)
 	if fileExists(workImage) && cfg.Persist {
 		if cfg.BootFrom != "" {
-			source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
+			source, err := l.resolveBootSource(ctx, cfg)
 			if err != nil {
 				return err
 			}
@@ -451,7 +451,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	}
 	if cfg.BlankWorkDisk {
 		if cfg.BootFrom != "" {
-			source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
+			source, err := l.resolveBootSource(ctx, cfg)
 			if err != nil {
 				return err
 			}
@@ -575,7 +575,7 @@ func emulatorPackage(arch string) (string, string, bool) {
 
 func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM) (string, error) {
 	if cfg.BootFrom != "" {
-		source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
+		source, err := l.resolveBootSource(ctx, cfg)
 		if err != nil {
 			return "", err
 		}
@@ -602,13 +602,21 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 	return l.postProcessImage(ctx, downloadPath, baseImage, defaultString(cfg.ImageFormat, "qcow2"))
 }
 
-func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, ref string, retries int) (string, error) {
+func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM) (string, error) {
+	ref := cfg.BootFrom
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
 		destination := filepath.Join(l.Layout.BaseImagesDir, "boot", cacheName(ref))
 		if fileExists(destination) {
 			return destination, nil
 		}
-		if err := download.NewDownloader(nil).DownloadWithRetry(ctx, ref, destination, retries); err != nil {
+		checksum := download.Checksum{Algorithm: cfg.BootChecksumAlgorithm, Value: cfg.BootChecksumValue}
+		if checksum.Algorithm != "" || checksum.Value != "" {
+			if err := download.NewDownloader(nil).DownloadWithRetryChecked(ctx, ref, destination, cfg.DownloadRetries, checksum); err != nil {
+				return "", err
+			}
+			return destination, nil
+		}
+		if err := download.NewDownloader(nil).DownloadWithRetry(ctx, ref, destination, cfg.DownloadRetries); err != nil {
 			return "", err
 		}
 		return destination, nil

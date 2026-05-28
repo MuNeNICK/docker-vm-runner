@@ -139,8 +139,6 @@ cgroup_device_acl = [
 ]
 EOF
 
-COPY catalog/v1/supported.json /config/os-iso-catalog/v1/supported.json
-
 WORKDIR /
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=3 \

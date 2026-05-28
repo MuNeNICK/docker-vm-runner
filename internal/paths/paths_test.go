@@ -6,7 +6,7 @@ import (
 )
 
 func TestDefaultConfigPath(t *testing.T) {
-	if DefaultConfigPath != "/config/os-iso-catalog/v1/supported.json" {
+	if DefaultConfigPath != "/config/os-iso-catalog/v1/all.json" {
 		t.Fatalf("DefaultConfigPath = %q", DefaultConfigPath)
 	}
 }

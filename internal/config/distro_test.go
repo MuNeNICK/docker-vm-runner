@@ -9,7 +9,7 @@ import (
 
 func writeDistroConfig(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "supported.json")
+	path := filepath.Join(t.TempDir(), "all.json")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write catalog config: %v", err)
 	}
@@ -19,15 +19,18 @@ func writeDistroConfig(t *testing.T, content string) string {
 func TestLoadDistroConfig(t *testing.T) {
 	path := writeDistroConfig(t, testCatalogJSON())
 
-	cfg, err := LoadDistroConfig(path, "ubuntu-24.04-server")
+	cfg, err := LoadDistroConfig(path, "ubuntu-24.04-cloud-amd64")
 	if err != nil {
 		t.Fatalf("LoadDistroConfig returned error: %v", err)
 	}
-	if cfg.Name != "Ubuntu 24.04 LTS Server" {
+	if cfg.Name != "Ubuntu 24.04 LTS Cloud" {
 		t.Fatalf("Name = %q", cfg.Name)
 	}
-	if cfg.URL != "https://example.com/ubuntu.iso" {
+	if cfg.URL != "https://example.com/ubuntu.qcow2" {
 		t.Fatalf("URL = %q", cfg.URL)
+	}
+	if cfg.ImageType != "cloud-image" || cfg.SourceFormat != "qcow2" || cfg.SourceCompression != "none" {
+		t.Fatalf("source metadata = %q %q %q", cfg.ImageType, cfg.SourceFormat, cfg.SourceCompression)
 	}
 	if cfg.User != "user" {
 		t.Fatalf("User = %q", cfg.User)
@@ -49,13 +52,16 @@ func TestLoadDistroConfigUnknownDistro(t *testing.T) {
 	if !strings.Contains(err.Error(), "Unknown catalog image 'nonexistent'") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "ubuntu-24.04-server") {
+	if !strings.Contains(err.Error(), "ubuntu-24.04-cloud-amd64") {
 		t.Fatalf("error does not list available image IDs: %v", err)
+	}
+	if strings.Contains(err.Error(), "windows-11") {
+		t.Fatalf("error lists image without direct URL: %v", err)
 	}
 }
 
 func TestLoadDistroConfigMissingFile(t *testing.T) {
-	_, err := LoadDistroConfig(filepath.Join(t.TempDir(), "missing.json"), "ubuntu-24.04-server")
+	_, err := LoadDistroConfig(filepath.Join(t.TempDir(), "missing.json"), "ubuntu-24.04-cloud-amd64")
 	if err == nil {
 		t.Fatal("expected missing file error")
 	}
@@ -66,7 +72,7 @@ func TestLoadDistroConfigMissingFile(t *testing.T) {
 
 func TestLoadDistroConfigMalformedJSON(t *testing.T) {
 	path := writeDistroConfig(t, `{"meta":`)
-	_, err := LoadDistroConfig(path, "ubuntu-24.04-server")
+	_, err := LoadDistroConfig(path, "ubuntu-24.04-cloud-amd64")
 	if err == nil {
 		t.Fatal("expected malformed JSON error")
 	}
@@ -83,34 +89,83 @@ func TestLoadDistroConfigMissingRequiredFields(t *testing.T) {
 	}
 }
 
+func TestLoadDistroConfigRejectsDownloadPageOnlyImage(t *testing.T) {
+	path := writeDistroConfig(t, testCatalogJSON())
+	_, err := LoadDistroConfig(path, "windows-11")
+	if err == nil {
+		t.Fatal("expected direct download URL error")
+	}
+	if !strings.Contains(err.Error(), "has no direct download URL") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func testCatalogJSON() string {
 	return `{
 	  "meta": {"api_version": "v1", "count": 2},
 	  "images": [
 	    {
+	      "id": "ubuntu-24.04-cloud-amd64",
+	      "name": "Ubuntu 24.04 LTS",
+	      "image_type": "cloud-image",
+	      "category": "linux",
+	      "distro": "ubuntu",
+	      "version": "24.04",
+	      "edition": "Cloud",
+	      "arch": "amd64",
+	      "release_type": "stable",
+	      "format": "qcow2",
+	      "compression": "none",
+	      "url": "https://example.com/ubuntu.qcow2",
+	      "checksum": {"algorithm": "sha256", "value": "abc123"},
+	      "eol": {"standard": "2029-05-31", "is_rolling": false},
+	      "status": "supported"
+	    },
+	    {
 	      "id": "ubuntu-24.04-server",
 	      "name": "Ubuntu 24.04 LTS",
+	      "image_type": "iso",
 	      "category": "linux",
 	      "distro": "ubuntu",
 	      "version": "24.04",
 	      "edition": "Server",
 	      "arch": "amd64",
 	      "release_type": "stable",
+	      "format": "iso",
+	      "compression": "none",
 	      "url": "https://example.com/ubuntu.iso",
-	      "checksum": {"algorithm": "sha256", "value": "abc123"},
+	      "checksum": {"algorithm": "sha256", "value": "def456"},
 	      "eol": {"standard": "2029-05-31", "is_rolling": false},
 	      "status": "supported"
 	    },
 	    {
 	      "id": "alma-9-aarch64",
 	      "name": "AlmaLinux 9",
+	      "image_type": "iso",
 	      "category": "linux",
 	      "distro": "almalinux",
 	      "version": "9",
 	      "edition": "DVD",
 	      "arch": "aarch64",
 	      "release_type": "stable",
+	      "format": "iso",
+	      "compression": "none",
 	      "url": "https://example.com/alma.iso",
+	      "eol": {"standard": "2032-05-31", "is_rolling": false},
+	      "status": "supported"
+	    },
+	    {
+	      "id": "windows-11",
+	      "name": "Windows 11",
+	      "image_type": "iso",
+	      "category": "windows",
+	      "distro": "windows",
+	      "version": "11",
+	      "edition": "Pro",
+	      "arch": "amd64",
+	      "release_type": "stable",
+	      "format": "iso",
+	      "download_page": "https://example.com/windows",
 	      "eol": {"standard": "2032-05-31", "is_rolling": false},
 	      "status": "supported"
 	    }

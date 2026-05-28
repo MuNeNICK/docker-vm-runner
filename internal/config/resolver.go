@@ -45,6 +45,9 @@ type VM struct {
 	ImageChecksumValue     string
 	LoginUser              string
 	ImageFormat            string
+	SourceImageType        string
+	SourceImageFormat      string
+	SourceImageCompression string
 	DistroName             string
 	MemoryMB               int
 	CPUs                   int
@@ -59,6 +62,8 @@ type VM struct {
 	VNCKeymap              string
 	NoVNCPort              int
 	BootFrom               string
+	BootChecksumAlgorithm  string
+	BootChecksumValue      string
 	BlankWorkDisk          bool
 	BootOrder              []string
 	IPXEEnabled            bool
@@ -102,8 +107,8 @@ type VM struct {
 func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	r.setDefaults()
 
-	distro := env.Get("DISTRO", "ubuntu-24.04-server")
-	distroInfo, err := LoadDistroConfig(r.DistroConfigPath, distro)
+	distro := env.Get("DISTRO", "ubuntu-24.04-cloud-amd64")
+	distroInfo, err := LoadDistroConfigFromSource(ResolveCatalogSource(env, r.DistroConfigPath), distro)
 	if err != nil {
 		return VM{}, err
 	}
@@ -153,12 +158,16 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	}
 
 	bootFrom := strings.TrimSpace(env.Get("BOOT_FROM", ""))
+	catalogISO := strings.EqualFold(strings.TrimSpace(distroInfo.ImageType), "iso")
+	if bootFrom == "" && catalogISO {
+		bootFrom = distroInfo.URL
+	}
 	blankDisk, _ := env.Bool("BLANK_DISK", false)
 	if strings.EqualFold(bootFrom, "blank") {
 		blankDisk = true
 		bootFrom = ""
 	}
-	isoRequested := bootFrom != "" && isISOReference(bootFrom)
+	isoRequested := (bootFrom != "" && isISOReference(bootFrom)) || (catalogISO && bootFrom != "")
 	bootOrder, err := resolveBootOrder(env.Get("BOOT_ORDER", "hd"), isoRequested)
 	if err != nil {
 		return VM{}, err
@@ -268,7 +277,11 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 
 	distroName := distroInfo.Name
 	if isoRequested {
-		distroName = "Custom ISO"
+		if catalogISO {
+			distroName = distroInfo.Name
+		} else {
+			distroName = "Custom ISO"
+		}
 	}
 	loginUser := distroInfo.User
 	if loginUser == "" {
@@ -277,11 +290,14 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 
 	return VM{
 		Distro:                 distro,
-		ImageURL:               distroInfo.URL,
+		ImageURL:               imageURLForDistro(distroInfo, isoRequested),
 		ImageChecksumAlgorithm: distroInfo.ChecksumAlgorithm,
 		ImageChecksumValue:     distroInfo.ChecksumValue,
 		LoginUser:              loginUser,
 		ImageFormat:            "qcow2",
+		SourceImageType:        distroInfo.ImageType,
+		SourceImageFormat:      distroInfo.SourceFormat,
+		SourceImageCompression: distroInfo.SourceCompression,
 		DistroName:             distroName,
 		MemoryMB:               memoryMB,
 		CPUs:                   cpus,
@@ -296,6 +312,8 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		VNCKeymap:              strings.TrimSpace(env.Get("VNC_KEYMAP", "")),
 		NoVNCPort:              novncPort,
 		BootFrom:               bootFrom,
+		BootChecksumAlgorithm:  bootChecksumAlgorithm(distroInfo, catalogISO),
+		BootChecksumValue:      bootChecksumValue(distroInfo, catalogISO),
 		BlankWorkDisk:          blankDisk,
 		BootOrder:              bootOrder,
 		IPXEEnabled:            networkConfig.IPXEEnabled,
@@ -490,6 +508,27 @@ func checkPortConflicts(ports map[string]int) error {
 func isISOReference(value string) bool {
 	cleaned := strings.Split(strings.Split(value, "?")[0], "#")[0]
 	return strings.HasSuffix(strings.ToLower(cleaned), ".iso")
+}
+
+func imageURLForDistro(distro DistroConfig, isoRequested bool) string {
+	if isoRequested && strings.EqualFold(strings.TrimSpace(distro.ImageType), "iso") {
+		return ""
+	}
+	return distro.URL
+}
+
+func bootChecksumAlgorithm(distro DistroConfig, catalogISO bool) string {
+	if catalogISO {
+		return distro.ChecksumAlgorithm
+	}
+	return ""
+}
+
+func bootChecksumValue(distro DistroConfig, catalogISO bool) string {
+	if catalogISO {
+		return distro.ChecksumValue
+	}
+	return ""
 }
 
 func isSpecialResource(raw string) bool {
