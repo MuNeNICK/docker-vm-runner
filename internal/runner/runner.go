@@ -23,6 +23,8 @@ type Options struct {
 	NoConsole   bool
 	ListDistros bool
 	ListArch    string
+	ListType    string
+	ListSearch  string
 	ShowConfig  bool
 	ShowXML     bool
 	DryRun      bool
@@ -64,7 +66,7 @@ func New() *Runner {
 func (r *Runner) Run(ctx context.Context, opts Options) error {
 	r.applyDefaults()
 	if opts.ListDistros {
-		return r.printDistros(opts.ListArch)
+		return r.printDistros(opts)
 	}
 	cfg, err := r.Resolver.Resolve(r.Env)
 	if err != nil {
@@ -203,8 +205,12 @@ func applyRuntimeEnv(lifecycle *ConcreteLifecycle, env config.MapEnv) {
 	}
 }
 
-func (r *Runner) printDistros(arch string) error {
-	distros, normalizedArch, err := config.ListDistrosFromSource(config.ResolveCatalogSource(r.Env, r.DistroConfigPath), arch)
+func (r *Runner) printDistros(opts Options) error {
+	distros, normalizedArch, err := config.ListDistrosFromSource(config.ResolveCatalogSource(r.Env, r.DistroConfigPath), config.DistroListFilter{
+		Arch:      opts.ListArch,
+		ImageType: opts.ListType,
+		Search:    opts.ListSearch,
+	})
 	if err != nil {
 		return err
 	}
@@ -222,7 +228,7 @@ func (r *Runner) printDistros(arch string) error {
 		}
 	}
 	for _, distro := range distros {
-		fmt.Fprintf(r.Stdout, "  %-*s  %s  (arch=%s, user=%s)\n", width, distro.Key, distro.Name, distro.Arch, distro.User)
+		fmt.Fprintf(r.Stdout, "  %-*s  %s  (type=%s, arch=%s, user=%s)\n", width, distro.Key, distro.Name, distro.ImageType, distro.Arch, distro.User)
 	}
 	return nil
 }

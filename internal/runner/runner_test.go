@@ -46,6 +46,28 @@ func TestListDistrosFiltersByArch(t *testing.T) {
 	}
 }
 
+func TestListDistrosFiltersByTypeAndSearch(t *testing.T) {
+	path := writeDistroConfig(t)
+	var stdout, stderr bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.Stderr = &stderr
+	r.DistroConfigPath = path
+
+	if err := r.Run(context.Background(), Options{ListDistros: true, ListType: "cloud image", ListSearch: "ubuntu"}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "ubuntu-24.04-server") || strings.Contains(stdout.String(), "fedora-42-arm64") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "type=cloud-image") {
+		t.Fatalf("stdout missing type: %q", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestPrintConfigMasksSensitiveFields(t *testing.T) {
 	var out bytes.Buffer
 	PrintConfig(&out, config.VM{Password: "secret1", RedfishPassword: "secret2", VMName: "vm1"})
@@ -1465,6 +1487,7 @@ func writeDistroConfig(t *testing.T) string {
     {
       "id": "ubuntu-24.04-server",
       "name": "Ubuntu 24.04 LTS",
+      "image_type": "cloud-image",
       "category": "linux",
       "distro": "ubuntu",
       "version": "24.04",
@@ -1478,6 +1501,7 @@ func writeDistroConfig(t *testing.T) string {
     {
       "id": "fedora-42-arm64",
       "name": "Fedora 42",
+      "image_type": "iso",
       "category": "linux",
       "distro": "fedora",
       "version": "42",

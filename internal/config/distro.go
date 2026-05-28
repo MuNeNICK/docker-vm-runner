@@ -30,26 +30,37 @@ type DistroConfig struct {
 }
 
 type DistroSummary struct {
-	Key  string
-	Name string
-	Arch string
-	User string
+	Key       string
+	Name      string
+	Arch      string
+	User      string
+	ImageType string
+}
+
+type DistroListFilter struct {
+	Arch      string
+	ImageType string
+	Search    string
 }
 
 func ListDistros(path string, archFilter string) ([]DistroSummary, string, error) {
+	return ListDistrosFiltered(path, DistroListFilter{Arch: archFilter})
+}
+
+func ListDistrosFiltered(path string, filter DistroListFilter) ([]DistroSummary, string, error) {
 	response, err := loadCatalog(path)
 	if err != nil {
 		return nil, "", err
 	}
-	return listDistrosFromResponse(response, archFilter)
+	return listDistrosFromResponse(response, filter)
 }
 
-func ListDistrosFromSource(source catalog.SourceOptions, archFilter string) ([]DistroSummary, string, error) {
+func ListDistrosFromSource(source catalog.SourceOptions, filter DistroListFilter) ([]DistroSummary, string, error) {
 	response, err := catalog.LoadSource(source)
 	if err != nil {
 		return nil, "", err
 	}
-	return listDistrosFromResponse(response, archFilter)
+	return listDistrosFromResponse(response, filter)
 }
 
 func LoadDistroConfig(path string, distro string) (DistroConfig, error) {
@@ -124,15 +135,20 @@ func loadCatalog(path string) (catalog.Response, error) {
 	return response, nil
 }
 
-func listDistrosFromResponse(response catalog.Response, archFilter string) ([]DistroSummary, string, error) {
+func listDistrosFromResponse(response catalog.Response, filter DistroListFilter) ([]DistroSummary, string, error) {
 	normalizedArch := ""
-	if strings.TrimSpace(archFilter) != "" {
-		arch, err := NormalizeArchitecture(archFilter)
+	if strings.TrimSpace(filter.Arch) != "" {
+		arch, err := NormalizeArchitecture(filter.Arch)
 		if err != nil {
 			return nil, "", err
 		}
 		normalizedArch = arch
 	}
+	normalizedImageType, err := normalizeImageTypeFilter(filter.ImageType)
+	if err != nil {
+		return nil, "", err
+	}
+	searchTerms := strings.Fields(strings.ToLower(strings.TrimSpace(filter.Search)))
 	summaries := make([]DistroSummary, 0, len(response.Images))
 	for _, image := range response.Images {
 		if !image.HasDirectDownloadURL() {
@@ -145,14 +161,70 @@ func listDistrosFromResponse(response catalog.Response, archFilter string) ([]Di
 		if normalizedArch != "" && resolvedArch != normalizedArch {
 			continue
 		}
+		if normalizedImageType != "" && normalizeImageTypeValue(image.ImageType) != normalizedImageType {
+			continue
+		}
+		if len(searchTerms) > 0 && !matchesSearch(image, searchTerms) {
+			continue
+		}
 		name := image.Name
 		if name == "" {
 			name = image.ID
 		}
-		summaries = append(summaries, DistroSummary{Key: image.ID, Name: name, Arch: resolvedArch, User: "user"})
+		summaries = append(summaries, DistroSummary{Key: image.ID, Name: name, Arch: resolvedArch, User: "user", ImageType: image.ImageType})
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Key < summaries[j].Key })
 	return summaries, normalizedArch, nil
+}
+
+func normalizeImageTypeFilter(raw string) (string, error) {
+	value := normalizeImageTypeValue(raw)
+	switch value {
+	case "", "all", "cloud-image", "iso", "disk-image":
+		if value == "all" {
+			return "", nil
+		}
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported image type %q; use cloud-image, iso, or disk-image", raw)
+	}
+}
+
+func normalizeImageTypeValue(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	value = strings.ReplaceAll(value, "_", "-")
+	value = strings.ReplaceAll(value, " ", "-")
+	switch value {
+	case "cloud":
+		return "cloud-image"
+	case "disk":
+		return "disk-image"
+	default:
+		return value
+	}
+}
+
+func matchesSearch(image catalog.Image, terms []string) bool {
+	haystack := strings.ToLower(strings.Join([]string{
+		image.ID,
+		image.Name,
+		image.ImageType,
+		image.Category,
+		image.Distro,
+		image.Codename,
+		image.Version,
+		image.Edition,
+		image.Arch,
+		image.ReleaseType,
+		image.Format,
+		image.Status,
+	}, " "))
+	for _, term := range terms {
+		if !strings.Contains(haystack, term) {
+			return false
+		}
+	}
+	return true
 }
 
 func distroConfigFromImage(image catalog.Image) DistroConfig {

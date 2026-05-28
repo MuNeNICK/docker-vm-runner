@@ -39,6 +39,23 @@ func TestRunListDistrosWithArch(t *testing.T) {
 	}
 }
 
+func TestRunListDistrosWithTypeAndSearch(t *testing.T) {
+	original := newRunner
+	defer func() { newRunner = original }()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"--list-distros", "--type", "cloud image", "--search", "ubuntu"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.ListDistros || fake.options.ListType != "cloud image" || fake.options.ListSearch != "ubuntu" {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
 func TestRunForwardsFlags(t *testing.T) {
 	original := newRunner
 	defer func() { newRunner = original }()

@@ -100,6 +100,31 @@ func TestLoadDistroConfigRejectsDownloadPageOnlyImage(t *testing.T) {
 	}
 }
 
+func TestListDistrosFilteredByTypeAndSearch(t *testing.T) {
+	path := writeDistroConfig(t, testCatalogJSON())
+	summaries, arch, err := ListDistrosFiltered(path, DistroListFilter{ImageType: "cloud image", Search: "ubuntu noble"})
+	if err != nil {
+		t.Fatalf("ListDistrosFiltered returned error: %v", err)
+	}
+	if arch != "" {
+		t.Fatalf("arch = %q", arch)
+	}
+	if len(summaries) != 1 || summaries[0].Key != "ubuntu-24.04-cloud-amd64" || summaries[0].ImageType != "cloud-image" {
+		t.Fatalf("summaries = %#v", summaries)
+	}
+}
+
+func TestListDistrosFilteredRejectsUnknownType(t *testing.T) {
+	path := writeDistroConfig(t, testCatalogJSON())
+	_, _, err := ListDistrosFiltered(path, DistroListFilter{ImageType: "installer"})
+	if err == nil {
+		t.Fatal("expected unsupported type error")
+	}
+	if !strings.Contains(err.Error(), "unsupported image type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func testCatalogJSON() string {
 	return `{
 	  "meta": {"api_version": "v1", "count": 2},
@@ -110,6 +135,7 @@ func testCatalogJSON() string {
 	      "image_type": "cloud-image",
 	      "category": "linux",
 	      "distro": "ubuntu",
+	      "codename": "Noble Numbat",
 	      "version": "24.04",
 	      "edition": "Cloud",
 	      "arch": "amd64",

@@ -18,6 +18,8 @@ type options struct {
 	noConsole   bool
 	listDistros bool
 	listArch    string
+	listType    string
+	listSearch  string
 	showConfig  bool
 	showXML     bool
 	dryRun      bool
@@ -57,6 +59,8 @@ func runWithEnv(ctx context.Context, args []string, stdout io.Writer, stderr io.
 		NoConsole:   opts.noConsole,
 		ListDistros: opts.listDistros,
 		ListArch:    opts.listArch,
+		ListType:    opts.listType,
+		ListSearch:  opts.listSearch,
 		ShowConfig:  opts.showConfig,
 		ShowXML:     opts.showXML,
 		DryRun:      opts.dryRun,
@@ -85,6 +89,8 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.SetOutput(stderr)
 	fs.BoolVar(&opts.noConsole, "no-console", false, "do not attach to the VM console")
 	fs.BoolVar(&opts.listDistros, "list-distros", false, "list configured distributions and exit")
+	fs.StringVar(&opts.listType, "type", "", "filter --list-distros by image type: cloud-image, iso, or disk-image")
+	fs.StringVar(&opts.listSearch, "search", "", "filter --list-distros by search text")
 	fs.BoolVar(&opts.showConfig, "show-config", false, "print resolved configuration and exit")
 	fs.BoolVar(&opts.showXML, "show-xml", false, "print resolved libvirt domain XML and exit")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "validate configuration without starting a VM")
