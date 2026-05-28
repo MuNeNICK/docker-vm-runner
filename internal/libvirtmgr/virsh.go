@@ -55,7 +55,7 @@ func (c *VirshConnection) DefineDomain(xml string) (Domain, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(path)
+	defer os.RemoveAll(filepath.Dir(path))
 	if _, err := c.virsh("define", path); err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (c *VirshConnection) DefineStoragePool(xml string) (StoragePool, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(path)
+	defer os.RemoveAll(filepath.Dir(path))
 	if _, err := c.virsh("pool-define", path); err != nil {
 		return nil, err
 	}

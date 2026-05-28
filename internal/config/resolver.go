@@ -192,6 +192,9 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	}
 
 	vmName := vmname.Derive(distro, isoRequested, env.Lookup)
+	if err := vmname.Validate(vmName); err != nil {
+		return VM{}, fmt.Errorf("invalid VM name %q: %w", vmName, err)
+	}
 	networkConfig, err := ParseNetwork(env, NetworkParseOptions{
 		VMName:        vmName,
 		Arch:          arch,
@@ -320,7 +323,11 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		loginShell = "/bin/bash"
 	}
 
-	activePorts := map[string]int{"SSH_PORT": sshPort}
+	activePorts := map[string]int{}
+	userNIC := hasUserNIC(networkConfig.NICs)
+	if userNIC {
+		activePorts["SSH_PORT"] = sshPort
+	}
 	if graphicsType == "vnc" || novncEnabled {
 		activePorts["VNC_PORT"] = vncPort
 	}
@@ -330,8 +337,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if redfishEnabled {
 		activePorts["REDFISH_PORT"] = redfishPort
 	}
-	for _, forward := range networkConfig.PortForwards {
-		activePorts[fmt.Sprintf("PORT_FWD(%d:%d)", forward.HostPort, forward.GuestPort)] = forward.HostPort
+	if userNIC {
+		for _, forward := range networkConfig.PortForwards {
+			activePorts[fmt.Sprintf("PORT_FWD(%d:%d)", forward.HostPort, forward.GuestPort)] = forward.HostPort
+		}
 	}
 	if err := checkPortConflicts(activePorts); err != nil {
 		return VM{}, err

@@ -85,6 +85,24 @@ func TestCreateDiskCommand(t *testing.T) {
 	}
 }
 
+func TestCreateOverlayCommand(t *testing.T) {
+	runner := &fakeRunner{}
+	manager := NewDiskManager(runner)
+	err := manager.CreateOverlay(context.Background(), CreateOverlayRequest{
+		Path:          "/images/disk.qcow2",
+		Format:        "qcow2",
+		BackingPath:   "/input/source.qcow2",
+		BackingFormat: "qcow2",
+	})
+	if err != nil {
+		t.Fatalf("CreateOverlay returned error: %v", err)
+	}
+	want := process.Command{Name: "qemu-img", Args: []string{"create", "-f", "qcow2", "-F", "qcow2", "-b", "/input/source.qcow2", "/images/disk.qcow2"}}
+	if !reflect.DeepEqual(runner.calls[0], want) {
+		t.Fatalf("command = %#v want %#v", runner.calls[0], want)
+	}
+}
+
 func TestResizeDiskCommand(t *testing.T) {
 	runner := &fakeRunner{}
 	manager := NewDiskManager(runner)

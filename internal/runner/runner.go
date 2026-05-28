@@ -42,6 +42,7 @@ type Lifecycle interface {
 	StartVM(context.Context, config.VM) error
 	WaitForGuestReady(context.Context, config.VM) error
 	WaitUntilStopped(context.Context, config.VM) error
+	DomainStopped(context.Context, config.VM) (bool, error)
 	AttachConsole(context.Context, config.VM) (int, error)
 	MarkInstalled(context.Context, config.VM) error
 	Cleanup(context.Context, config.VM) error
@@ -413,6 +414,11 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		} else if code != 0 {
 			return fmt.Errorf("console exited with status %d", code)
 		}
+		stopped, err := r.Lifecycle.DomainStopped(ctx, cfg)
+		if err != nil {
+			output.Warn("Could not determine VM state after console exit", err.Error())
+		}
+		vmStopped = stopped
 	}
 	if shouldMarkInstalled(cfg, vmStarted, vmStopped) {
 		if err := r.Lifecycle.MarkInstalled(ctx, cfg); err != nil {

@@ -3,6 +3,8 @@ package libvirtmgr
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -65,6 +67,9 @@ func TestVirshDefineDomain(t *testing.T) {
 	}
 	if runner.commands[0].Args[2] != "define" || !strings.HasSuffix(runner.commands[0].Args[3], "definition.xml") {
 		t.Fatalf("command = %#v", runner.commands[0])
+	}
+	if _, err := os.Stat(filepath.Dir(runner.commands[0].Args[3])); !os.IsNotExist(err) {
+		t.Fatalf("temp XML directory was not removed: %v", err)
 	}
 }
 

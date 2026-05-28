@@ -396,6 +396,17 @@ func TestResolveRedfishRejectsDefaultPassword(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsUnsafeVMName(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"GUEST_NAME": "../outside"})
+	if err == nil {
+		t.Fatal("expected unsafe VM name error")
+	}
+	if !strings.Contains(err.Error(), "invalid VM name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolvePortForwardAndConflict(t *testing.T) {
 	resolver, _ := testResolver(t)
 	cfg, err := resolver.Resolve(MapEnv{"PORT_FWD": "8080:80,8443:443"})
@@ -412,6 +423,19 @@ func TestResolvePortForwardAndConflict(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Port conflict") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveIgnoresInactiveForwardingPortsForConflictCheck(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{
+		"NETWORK_MODE":   "bridge",
+		"NETWORK_BRIDGE": "br0",
+		"SSH_PORT":       "8080",
+		"PORT_FWD":       "8080:80",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
 	}
 }
 

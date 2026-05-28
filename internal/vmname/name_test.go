@@ -29,3 +29,23 @@ func TestDerive(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateRejectsUnsafeNames(t *testing.T) {
+	for _, name := range []string{"", " ../x", "../x", "x/y", `x\y`, ".hidden", "-bad", "bad name"} {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(name); err == nil {
+				t.Fatalf("Validate(%q) returned nil", name)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsSafeNames(t *testing.T) {
+	for _, name := range []string{"ubuntu-24.04-server", "my_vm", "VM.1"} {
+		t.Run(name, func(t *testing.T) {
+			if err := Validate(name); err != nil {
+				t.Fatalf("Validate(%q) returned error: %v", name, err)
+			}
+		})
+	}
+}

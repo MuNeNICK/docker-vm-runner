@@ -34,6 +34,13 @@ type CreateDiskRequest struct {
 	Preallocate bool
 }
 
+type CreateOverlayRequest struct {
+	Path          string
+	Format        string
+	BackingPath   string
+	BackingFormat string
+}
+
 func (m *DiskManager) ImageInfo(ctx context.Context, path string) (ImageInfo, error) {
 	result, err := m.runner.Run(ctx, process.Command{
 		Name: "qemu-img",
@@ -57,6 +64,18 @@ func (m *DiskManager) CreateDisk(ctx context.Context, req CreateDiskRequest) err
 	args = append(args, req.Path, req.Size)
 	if _, err := m.runner.Run(ctx, process.Command{Name: "qemu-img", Args: args}); err != nil {
 		return fmt.Errorf("qemu-img create %s: %w", req.Path, err)
+	}
+	return nil
+}
+
+func (m *DiskManager) CreateOverlay(ctx context.Context, req CreateOverlayRequest) error {
+	args := []string{"create", "-f", req.Format}
+	if req.BackingFormat != "" {
+		args = append(args, "-F", req.BackingFormat)
+	}
+	args = append(args, "-b", req.BackingPath, req.Path)
+	if _, err := m.runner.Run(ctx, process.Command{Name: "qemu-img", Args: args}); err != nil {
+		return fmt.Errorf("qemu-img create overlay %s: %w", req.Path, err)
 	}
 	return nil
 }

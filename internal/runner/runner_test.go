@@ -312,6 +312,23 @@ func TestRunLifecycleDoesNotMarkISOInstalledOnConsoleDetach(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleMarksISOInstalledAfterConsoleStop(t *testing.T) {
+	lifecycle := &fakeLifecycle{domainStopped: true}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "fedora-42-arm64", "PERSIST": "1"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := "start-services,connect,prepare,start-vm,attach-console,domain-stopped,mark-installed,cleanup,close,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+}
+
 func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
 	r := New()
@@ -772,6 +789,20 @@ func TestConcreteLifecyclePrepareRequiresKVM(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareRejectsUnsafeVMName(t *testing.T) {
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle.KVMAvailable = func() bool { return true }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{VMName: "../outside"})
+	if err == nil {
+		t.Fatal("expected unsafe VM name error")
+	}
+	if !strings.Contains(err.Error(), "invalid VM name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestConcreteLifecyclePreparePassesIPXEROMPath(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
@@ -1013,6 +1044,51 @@ func TestConcreteLifecycleResolveBaseImageDoesNotOverwriteDistroCacheForBootFrom
 	}
 	if content := readFileString(t, baseImage); content != "catalog-base" {
 		t.Fatalf("distro cache was overwritten: %q", content)
+	}
+}
+
+func TestConcreteLifecyclePrepareUsesOverlayForLocalBootDisk(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(t.TempDir(), "custom.qcow2")
+	if err := os.WriteFile(source, []byte("custom-disk"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "20G",
+		BootOrder:      []string{"hd"},
+		BootFrom:       source,
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	workImage := filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")
+	log := readFileString(t, commandLog)
+	want := "create -f qcow2 -F qcow2 -b " + source + " " + workImage
+	if !strings.Contains(log, want) {
+		t.Fatalf("qemu-img commands missing %q:\n%s", want, log)
+	}
+	if got := readOptionalFile(t, workImage); got == "custom-disk" {
+		t.Fatalf("local boot disk was fully copied to %s", workImage)
 	}
 }
 
@@ -1712,6 +1788,26 @@ func TestConcreteLifecycleCleanupRemovesNonPersistentVMDir(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleCleanupRejectsUnsafeVMName(t *testing.T) {
+	layout := testLayout(t)
+	outside := filepath.Join(filepath.Dir(layout.VMImagesDir), "outside")
+	if err := os.WriteFile(outside, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+
+	err := lifecycle.Cleanup(context.Background(), config.VM{VMName: "../outside", Persist: false})
+	if err == nil {
+		t.Fatal("expected unsafe VM name error")
+	}
+	if !strings.Contains(err.Error(), "invalid VM name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := readFileString(t, outside); got != "keep" {
+		t.Fatalf("outside file was modified: %q", got)
+	}
+}
+
 func TestConcreteLifecycleCleanupKeepsPersistentVMDir(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -2120,6 +2216,8 @@ type fakeLifecycle struct {
 	startServicesErr   error
 	prepareErr         error
 	waitGuestReadyErr  error
+	domainStopped      bool
+	domainStoppedErr   error
 	cleanupContextErrs []error
 }
 
@@ -2304,6 +2402,10 @@ func (l *fakeLifecycle) WaitForGuestReady(context.Context, config.VM) error {
 func (l *fakeLifecycle) WaitUntilStopped(context.Context, config.VM) error {
 	l.calls = append(l.calls, "wait-stopped")
 	return nil
+}
+func (l *fakeLifecycle) DomainStopped(context.Context, config.VM) (bool, error) {
+	l.calls = append(l.calls, "domain-stopped")
+	return l.domainStopped, l.domainStoppedErr
 }
 func (l *fakeLifecycle) AttachConsole(context.Context, config.VM) (int, error) {
 	l.calls = append(l.calls, "attach-console")

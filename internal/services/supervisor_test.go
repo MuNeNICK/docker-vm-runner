@@ -221,6 +221,29 @@ func TestStopReturnsWaitError(t *testing.T) {
 	}
 }
 
+func TestStartProcessIsStoppedExplicitlyNotByContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	proc, err := startProcess(ctx, process.Command{Name: "sleep", Args: []string{"2"}})
+	if err != nil {
+		t.Fatalf("startProcess returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = proc.Kill()
+		_ = proc.Wait(context.Background(), time.Second)
+	})
+
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+
+	if !proc.Running() {
+		t.Fatal("process was stopped by context cancellation")
+	}
+	if err := proc.Terminate(); err != nil {
+		t.Fatalf("Terminate returned error: %v", err)
+	}
+	_ = proc.Wait(context.Background(), time.Second)
+}
+
 type fakeProcess struct {
 	running        bool
 	exitCode       int

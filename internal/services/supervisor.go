@@ -263,7 +263,7 @@ type osProcess struct {
 }
 
 func startProcess(ctx context.Context, command process.Command) (Process, error) {
-	cmd := exec.CommandContext(ctx, command.Name, command.Args...)
+	cmd := exec.Command(command.Name, command.Args...)
 	if command.Dir != "" {
 		cmd.Dir = command.Dir
 	}

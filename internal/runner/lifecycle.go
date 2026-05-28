@@ -36,6 +36,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/services"
 	"github.com/munenick/docker-vm-runner/internal/tpm"
 	"github.com/munenick/docker-vm-runner/internal/units"
+	"github.com/munenick/docker-vm-runner/internal/vmname"
 	"github.com/munenick/docker-vm-runner/internal/vmstate"
 	"github.com/munenick/docker-vm-runner/internal/vncproxy"
 )
@@ -238,7 +239,10 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	if cfg.RequireKVM && !kvmAvailable {
 		return fmt.Errorf("REQUIRE_KVM=1 requires /dev/kvm")
 	}
-	vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
+	vmDir, err := l.vmDirFor(cfg.VMName)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(vmDir, 0o755); err != nil {
 		return fmt.Errorf("create VM directory: %w", err)
 	}
@@ -404,18 +408,26 @@ func (l *ConcreteLifecycle) waitForCloudInit(ctx context.Context, client guestex
 
 func (l *ConcreteLifecycle) WaitUntilStopped(ctx context.Context, _ config.VM) error {
 	return waitFor(ctx, l.Sleep, 0, 2*time.Second, func() (bool, error) {
-		if l.Domain == nil {
+		return l.domainStopped()
+	})
+}
+
+func (l *ConcreteLifecycle) DomainStopped(context.Context, config.VM) (bool, error) {
+	return l.domainStopped()
+}
+
+func (l *ConcreteLifecycle) domainStopped() (bool, error) {
+	if l.Domain == nil {
+		return true, nil
+	}
+	active, err := l.Domain.IsActive()
+	if err != nil {
+		if errors.Is(err, libvirtmgr.ErrNotFound) {
 			return true, nil
 		}
-		active, err := l.Domain.IsActive()
-		if err != nil {
-			if errors.Is(err, libvirtmgr.ErrNotFound) {
-				return true, nil
-			}
-			return false, err
-		}
-		return !active, nil
-	})
+		return false, err
+	}
+	return !active, nil
 }
 
 func (l *ConcreteLifecycle) AttachConsole(ctx context.Context, cfg config.VM) (int, error) {
@@ -516,7 +528,10 @@ func currentTerminalSize() (int, int, bool) {
 }
 
 func (l *ConcreteLifecycle) MarkInstalled(_ context.Context, cfg config.VM) error {
-	vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
+	vmDir, err := l.vmDirFor(cfg.VMName)
+	if err != nil {
+		return err
+	}
 	return vmstate.MarkInstalled(vmDir, time.Now().UTC())
 }
 
@@ -543,7 +558,13 @@ func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 		}
 	}
 	if !cfg.Persist && cfg.VMName != "" {
-		vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
+		vmDir, err := l.vmDirFor(cfg.VMName)
+		if err != nil {
+			if cleanupErr == nil {
+				cleanupErr = err
+			}
+			return cleanupErr
+		}
 		if err := os.RemoveAll(vmDir); err != nil && cleanupErr == nil {
 			cleanupErr = fmt.Errorf("remove VM directory: %w", err)
 		}
@@ -561,7 +582,10 @@ func (l *ConcreteLifecycle) CleanupStale(_ context.Context, cfg config.VM) error
 		}
 	}
 	if !cfg.Persist && cfg.VMName != "" {
-		vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
+		vmDir, err := l.vmDirFor(cfg.VMName)
+		if err != nil {
+			return err
+		}
 		if err := os.RemoveAll(vmDir); err != nil {
 			return fmt.Errorf("remove stale non-persistent VM directory: %w", err)
 		}
@@ -607,6 +631,31 @@ func (l *ConcreteLifecycle) applyPersistentState(vmDir string, cfg config.VM) (c
 		cfg.BootOrder = []string{"hd"}
 	}
 	return cfg, nil
+}
+
+func (l *ConcreteLifecycle) vmDirFor(name string) (string, error) {
+	if err := vmname.Validate(name); err != nil {
+		return "", fmt.Errorf("invalid VM name %q: %w", name, err)
+	}
+	return filepath.Join(l.Layout.VMImagesDir, name), nil
+}
+
+func (l *ConcreteLifecycle) shouldCreateBackingOverlay(baseImage string, workImage string) bool {
+	if filepath.Clean(baseImage) == filepath.Clean(workImage) {
+		return false
+	}
+	return !pathWithin(l.Layout.BaseImagesDir, baseImage) && !pathWithin(l.Layout.VMImagesDir, baseImage)
+}
+
+func pathWithin(root string, path string) bool {
+	if root == "" || path == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return false
+	}
+	return true
 }
 
 func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, workImage string) error {
@@ -661,6 +710,26 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	}
 	if err := os.MkdirAll(filepath.Dir(workImage), 0o755); err != nil {
 		return fmt.Errorf("create work image directory: %w", err)
+	}
+	if l.shouldCreateBackingOverlay(baseImage, workImage) {
+		baseInfo, infoErr := diskManager.ImageInfo(ctx, baseImage)
+		backingFormat := normalizedImageFormat(cfg.SourceImageFormat)
+		if infoErr == nil && baseInfo.Format != "" {
+			backingFormat = baseInfo.Format
+		}
+		if backingFormat == "" {
+			backingFormat = defaultString(cfg.ImageFormat, "qcow2")
+		}
+		l.infof("Creating working disk overlay %s backed by %s", workImage, baseImage)
+		if err := diskManager.CreateOverlay(ctx, images.CreateOverlayRequest{
+			Path:          workImage,
+			Format:        defaultString(cfg.ImageFormat, "qcow2"),
+			BackingPath:   baseImage,
+			BackingFormat: backingFormat,
+		}); err != nil {
+			return err
+		}
+		return l.resizeDiskIfNeeded(ctx, diskManager, workImage, cfg.DiskSize)
 	}
 	l.infof("Creating working disk %s from %s", workImage, baseImage)
 	if err := copyFile(baseImage, workImage); err != nil {
@@ -781,7 +850,11 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 			return "", nil
 		}
 		vmName := defaultString(cfg.VMName, cfg.Distro)
-		return l.postProcessImage(ctx, source, filepath.Join(l.Layout.VMImagesDir, vmName, "boot."+defaultString(cfg.ImageFormat, "qcow2")), imagePostProcessOptions{
+		vmDir, err := l.vmDirFor(vmName)
+		if err != nil {
+			return "", err
+		}
+		return l.postProcessImage(ctx, source, filepath.Join(vmDir, "boot."+defaultString(cfg.ImageFormat, "qcow2")), imagePostProcessOptions{
 			DesiredFormat:     defaultString(cfg.ImageFormat, "qcow2"),
 			SourceFormat:      cfg.SourceImageFormat,
 			SourceCompression: cfg.SourceImageCompression,
