@@ -111,6 +111,22 @@ func TestRunLifecycleNoConsole(t *testing.T) {
 	}
 }
 
+func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
+	lifecycle := &fakeLifecycle{}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu", "DATA_DIR": t.TempDir()}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !containsCall(lifecycle.calls, "mark-installed") {
+		t.Fatalf("calls = %s", strings.Join(lifecycle.calls, ","))
+	}
+}
+
 func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	lifecycle := &fakeLifecycle{prepareErr: os.ErrPermission}
 	r := New()
@@ -699,4 +715,13 @@ func installFakeCommand(t *testing.T, name string, content func(logPath string) 
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func containsCall(calls []string, want string) bool {
+	for _, call := range calls {
+		if call == want {
+			return true
+		}
+	}
+	return false
 }

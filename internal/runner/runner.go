@@ -77,7 +77,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if r.Lifecycle == nil {
-		r.Lifecycle = NewConcreteLifecycle(paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), nil))
+		r.Lifecycle = NewConcreteLifecycle(r.layout())
 	}
 	return r.runLifecycle(ctx, cfg, opts)
 }
@@ -96,8 +96,14 @@ func (r *Runner) applyDefaults() {
 		r.DistroConfigPath = paths.DefaultConfigPath
 	}
 	if r.Resolver == nil {
-		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath}
+		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath, Layout: r.layout()}
+	} else if r.Resolver.Layout == (paths.Layout{}) {
+		r.Resolver.Layout = r.layout()
 	}
+}
+
+func (r *Runner) layout() paths.Layout {
+	return paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), nil)
 }
 
 func (r *Runner) printDistros(arch string) error {
