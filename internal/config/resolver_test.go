@@ -381,6 +381,28 @@ func TestResolveExtraDisks(t *testing.T) {
 	}
 }
 
+func TestResolveFilesystems(t *testing.T) {
+	resolver, _ := testResolver(t)
+	source := t.TempDir()
+
+	cfg, err := resolver.Resolve(MapEnv{
+		"FILESYSTEM_SOURCE":   source,
+		"FILESYSTEM_TARGET":   "data",
+		"FILESYSTEM_DRIVER":   "9p",
+		"FILESYSTEM_READONLY": "1",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(cfg.Filesystems) != 1 {
+		t.Fatalf("Filesystems count = %d", len(cfg.Filesystems))
+	}
+	share := cfg.Filesystems[0]
+	if share.Source != source || share.Target != "data" || share.Driver != "9p" || !share.Readonly {
+		t.Fatalf("Filesystem = %#v", share)
+	}
+}
+
 func TestResolveBlockDevice(t *testing.T) {
 	resolver, _ := testResolver(t)
 	device := "/dev/testblk"

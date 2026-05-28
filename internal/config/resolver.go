@@ -74,6 +74,7 @@ type VM struct {
 	RedfishEnabled        bool
 	NICs                  []network.Config
 	PortForwards          []network.PortForward
+	Filesystems           []FilesystemShare
 	BootMode              string
 	TPMEnabled            bool
 	MachineType           string
@@ -173,6 +174,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		DetectHostMTU: r.DetectHostMTU,
 		ROMExists:     r.ROMExists,
 	})
+	if err != nil {
+		return VM{}, err
+	}
+	filesystems, err := ParseFilesystems(env, FilesystemParseOptions{})
 	if err != nil {
 		return VM{}, err
 	}
@@ -297,6 +302,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		RedfishEnabled:        redfishEnabled,
 		NICs:                  networkConfig.NICs,
 		PortForwards:          networkConfig.PortForwards,
+		Filesystems:           filesystems,
 		BootMode:              bootMode,
 		TPMEnabled:            tpmEnabled,
 		MachineType:           machineType,
