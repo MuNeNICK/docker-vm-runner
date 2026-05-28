@@ -20,6 +20,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/download"
 	"github.com/munenick/docker-vm-runner/internal/firmware"
 	"github.com/munenick/docker-vm-runner/internal/guestexec"
+	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/images"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/oci"
@@ -36,21 +37,22 @@ import (
 )
 
 type ConcreteLifecycle struct {
-	Layout         paths.Layout
-	LibvirtURI     string
-	RedfishPool    libvirtmgr.StoragePoolRequest
-	CommandRunner  process.CommandRunner
-	Manager        libvirtManager
-	Domain         libvirtmgr.Domain
-	Service        serviceSupervisor
-	Redfish        redfishManager
-	NoVNC          novncProxy
-	TPM            tpmSupervisor
-	Console        consoleRunner
-	GuestClient    guestexec.Client
-	Sleep          func(context.Context, time.Duration) error
-	EnsureEmulator func(context.Context, string) error
-	KVMAvailable   func() bool
+	Layout          paths.Layout
+	LibvirtURI      string
+	RedfishPool     libvirtmgr.StoragePoolRequest
+	CommandRunner   process.CommandRunner
+	Manager         libvirtManager
+	Domain          libvirtmgr.Domain
+	Service         serviceSupervisor
+	Redfish         redfishManager
+	NoVNC           novncProxy
+	TPM             tpmSupervisor
+	Console         consoleRunner
+	GuestClient     guestexec.Client
+	Sleep           func(context.Context, time.Duration) error
+	EnsureEmulator  func(context.Context, string) error
+	KVMAvailable    func() bool
+	BlockSectorSize func(string) (int, bool)
 
 	workImagePath string
 	seedISOPath   string
@@ -251,6 +253,7 @@ func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmD
 		EffectiveCPUModel: cfg.CPUModel,
 		IntelRenderNode:   fileExists("/dev/dri/renderD128"),
 		DisablePasst:      l.disablePasst,
+		BlockSectorSize:   l.blockSectorSize,
 	})
 	if err != nil {
 		return err
@@ -757,6 +760,13 @@ func (l *ConcreteLifecycle) guestClient() guestexec.Client {
 		return l.GuestClient
 	}
 	return guestexec.NewVirshClient(&l.CommandRunner)
+}
+
+func (l *ConcreteLifecycle) blockSectorSize(path string) (int, bool) {
+	if l.BlockSectorSize != nil {
+		return l.BlockSectorSize(path)
+	}
+	return hostinfo.BlockSectorSize(path)
 }
 
 func isISO(path string) bool {

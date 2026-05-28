@@ -340,6 +340,50 @@ func TestConcreteLifecyclePreparePassesIPXEROMPath(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePreparePassesBlockSectorSize(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+	lifecycle.BlockSectorSize = func(path string) (int, bool) {
+		return 4096, path == "/dev/testblk"
+	}
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		BlockDevices:   []config.BlockDevice{{Path: "/dev/testblk", Index: 1}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if !strings.Contains(manager.definedXML, `<blockio logical_block_size="4096" physical_block_size="4096"/>`) {
+		t.Fatalf("domain XML missing blockio:\n%s", manager.definedXML)
+	}
+}
+
 func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
 	layout := testLayout(t)
 	installFakeCommand(t, "genisoimage", func(logPath string) string {

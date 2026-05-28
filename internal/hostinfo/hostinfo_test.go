@@ -69,6 +69,37 @@ func TestFilesystemProbes(t *testing.T) {
 	}
 }
 
+func TestBlockSectorSizeReadsSysfs(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "vdb", "queue")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir sysfs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "logical_block_size"), []byte("4096\n"), 0o644); err != nil {
+		t.Fatalf("write sector size: %v", err)
+	}
+
+	size, ok := blockSectorSize("/dev/vdb", root, os.ReadFile)
+	if !ok || size != 4096 {
+		t.Fatalf("blockSectorSize = %d, %v", size, ok)
+	}
+}
+
+func TestBlockSectorSizeIgnoresInvalidSysfs(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "vdb", "queue")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir sysfs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "logical_block_size"), []byte("bad\n"), 0o644); err != nil {
+		t.Fatalf("write sector size: %v", err)
+	}
+
+	if size, ok := blockSectorSize("/dev/vdb", root, os.ReadFile); ok || size != 0 {
+		t.Fatalf("blockSectorSize = %d, %v", size, ok)
+	}
+}
+
 func TestAvailableDiskBytesUsesExistingParent(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing", "vms")
 	if got := AvailableDiskBytes(missing); got <= 0 {

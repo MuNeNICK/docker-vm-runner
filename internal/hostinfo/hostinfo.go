@@ -95,6 +95,26 @@ func IsBlockDevice(path string) bool {
 	return mode&os.ModeDevice != 0 && mode&os.ModeCharDevice == 0
 }
 
+func BlockSectorSize(path string) (int, bool) {
+	return blockSectorSize(path, "/sys/class/block", os.ReadFile)
+}
+
+func blockSectorSize(path string, sysClassBlock string, readFile func(string) ([]byte, error)) (int, bool) {
+	name := filepath.Base(filepath.Clean(path))
+	if name == "." || name == "/" || name == "" {
+		return 0, false
+	}
+	content, err := readFile(filepath.Join(sysClassBlock, name, "queue", "logical_block_size"))
+	if err != nil {
+		return 0, false
+	}
+	size, err := strconv.Atoi(strings.TrimSpace(string(content)))
+	if err != nil || size <= 0 {
+		return 0, false
+	}
+	return size, true
+}
+
 func Lines(info Info) []string {
 	cpu := info.CPUModel
 	if cpu == "" {
