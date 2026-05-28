@@ -206,9 +206,15 @@ func (m *Manager) Cleanup(domain Domain, opts CleanupOptions) error {
 		return nil
 	}
 	active, err := domain.IsActive()
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
 	if err == nil && active {
 		if stopped := gracefulShutdown(domain, opts); !stopped {
 			if err := domain.Destroy(); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					return nil
+				}
 				return fmt.Errorf("destroy libvirt domain %s: %w", domain.Name(), err)
 			}
 		}

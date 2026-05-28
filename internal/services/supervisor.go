@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -31,6 +32,7 @@ type Options struct {
 	LibvirtdConf  string
 	VirtlogdConf  string
 	Runtime       RuntimeInfo
+	WarningWriter io.Writer
 	SocketCleaner func(string) error
 }
 
@@ -161,6 +163,7 @@ func (s *Supervisor) WaitForLibvirt(ctx context.Context) error {
 	}, 15*time.Second) {
 		msg := "libvirt socket did not appear; run the container with --privileged, --cgroupns=host, and /dev/kvm when hardware acceleration is required"
 		if s.Options.Runtime.Rootless {
+			s.warnf("%s", msg)
 			return nil
 		}
 		return fmt.Errorf("%s", msg)
@@ -171,11 +174,19 @@ func (s *Supervisor) WaitForLibvirt(ctx context.Context) error {
 	}, 15*time.Second) {
 		msg := "virtlogd socket did not appear; check container privileges and libvirt startup logs"
 		if s.Options.Runtime.Rootless {
+			s.warnf("%s", msg)
 			return nil
 		}
 		return fmt.Errorf("%s", msg)
 	}
 	return nil
+}
+
+func (s *Supervisor) warnf(format string, args ...any) {
+	if s.Options.WarningWriter == nil {
+		return
+	}
+	fmt.Fprintf(s.Options.WarningWriter, "[WARN] "+format+"\n", args...)
 }
 
 func (s *Supervisor) anyPath(ctx context.Context, paths []string, timeout time.Duration) bool {

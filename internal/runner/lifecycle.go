@@ -380,6 +380,9 @@ func (l *ConcreteLifecycle) WaitUntilStopped(ctx context.Context, _ config.VM) e
 		}
 		active, err := l.Domain.IsActive()
 		if err != nil {
+			if errors.Is(err, libvirtmgr.ErrNotFound) {
+				return true, nil
+			}
 			return false, err
 		}
 		return !active, nil
@@ -506,6 +509,9 @@ func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 			ShutdownTimeout: 20 * time.Second,
 			ShutdownPoll:    time.Second,
 		})
+		if errors.Is(cleanupErr, libvirtmgr.ErrNotFound) {
+			cleanupErr = nil
+		}
 	}
 	if !cfg.Persist && cfg.VMName != "" {
 		vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)

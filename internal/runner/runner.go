@@ -235,7 +235,7 @@ func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {
 	output := r.output()
 	lifecycle.Status = r.Stderr
 	lifecycle.Output = &output
-	applyRuntimeInfo(lifecycle, r.hostInfo(config.VM{}))
+	applyRuntimeInfo(lifecycle, r.hostInfo(config.VM{}), r.Stderr)
 	applyRuntimeEnv(lifecycle, r.Env)
 	return lifecycle
 }
@@ -247,17 +247,20 @@ func (r *Runner) hostInfo(cfg config.VM) hostinfo.Info {
 	return r.DetectHostInfo(workImageProbePath(cfg))
 }
 
-func applyRuntimeInfo(lifecycle *ConcreteLifecycle, info hostinfo.Info) {
+func applyRuntimeInfo(lifecycle *ConcreteLifecycle, info hostinfo.Info, warningWriter io.Writer) {
 	if lifecycle == nil {
 		return
 	}
 	runtimeInfo := services.RuntimeInfo{Rootless: info.RuntimeRootless, Privileged: info.RuntimePriv}
 	if supervisor, ok := lifecycle.Service.(*services.Supervisor); ok {
 		supervisor.Options.Runtime = runtimeInfo
+		if supervisor.Options.WarningWriter == nil {
+			supervisor.Options.WarningWriter = warningWriter
+		}
 		return
 	}
 	if lifecycle.Service == nil {
-		lifecycle.Service = services.NewSupervisor(services.Options{Runtime: runtimeInfo})
+		lifecycle.Service = services.NewSupervisor(services.Options{Runtime: runtimeInfo, WarningWriter: warningWriter})
 	}
 }
 
@@ -584,6 +587,12 @@ func toSnake(name string) string {
 		b.WriteRune(r)
 	}
 	replacements := map[string]string{
+		"v_m":       "vm",
+		"c_p_u":     "cpu",
+		"i_p_x_e":   "ipxe",
+		"r_o_m":     "rom",
+		"i_d":       "id",
+		"m_b":       "mb",
 		"v_n_c":     "vnc",
 		"no_v_n_c":  "novnc",
 		"s_s_h":     "ssh",

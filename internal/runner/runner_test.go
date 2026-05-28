@@ -77,7 +77,15 @@ func TestListDistrosFiltersByTypeAndSearch(t *testing.T) {
 
 func TestPrintConfigMasksSensitiveFields(t *testing.T) {
 	var out bytes.Buffer
-	PrintConfig(&out, config.VM{Password: "secret1", RedfishPassword: "secret2", VMName: "vm1"})
+	PrintConfig(&out, config.VM{
+		Password:        "secret1",
+		RedfishPassword: "secret2",
+		VMName:          "vm1",
+		CPUModel:        "host",
+		IPXEEnabled:     true,
+		IPXEROMPath:     "/ipxe.rom",
+		RedfishSystemID: "vm1",
+	})
 
 	text := out.String()
 	if !strings.Contains(text, "password: ********") || !strings.Contains(text, "redfish_password: ********") {
@@ -85,6 +93,11 @@ func TestPrintConfigMasksSensitiveFields(t *testing.T) {
 	}
 	if strings.Contains(text, "secret1") || strings.Contains(text, "secret2") {
 		t.Fatalf("sensitive values leaked: %q", text)
+	}
+	for _, want := range []string{"vm_name:", "cpu_model:", "ipxe_enabled:", "ipxe_rom_path:", "redfish_system_id:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
 	}
 }
 
@@ -451,7 +464,7 @@ func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	output := stdout.String()
-	for _, needle := range []string{"v_m_name:", "== Host ==", "== Access =="} {
+	for _, needle := range []string{"vm_name:", "== Host ==", "== Access =="} {
 		if !strings.Contains(output, needle) {
 			t.Fatalf("dry-run output missing %q:\n%s", needle, output)
 		}
@@ -1541,6 +1554,27 @@ func TestConcreteLifecycleCleanupKeepsPersistentVMDir(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleWaitUntilStoppedTreatsMissingDomainAsStopped(t *testing.T) {
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1", isActiveErr: libvirtmgr.ErrNotFound}
+
+	if err := lifecycle.WaitUntilStopped(context.Background(), config.VM{}); err != nil {
+		t.Fatalf("WaitUntilStopped returned error: %v", err)
+	}
+}
+
+func TestConcreteLifecycleCleanupTreatsMissingDomainAsCleaned(t *testing.T) {
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Manager = &fakeLibvirtManager{cleanupErr: libvirtmgr.ErrNotFound}
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.TPM = nil
+	lifecycle.NoVNC = nil
+
+	if err := lifecycle.Cleanup(context.Background(), config.VM{VMName: "vm1", Persist: true}); err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+}
+
 func TestConcreteLifecycleCleanupStaleRemovesNonPersistentVMDir(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -2013,6 +2047,7 @@ type fakeLibvirtManager struct {
 	definedXML       string
 	storagePoolCalls int
 	storagePoolErr   error
+	cleanupErr       error
 	reconcileCalls   int
 	startCalls       int
 	startErrs        []error
@@ -2039,7 +2074,7 @@ func (m *fakeLibvirtManager) Start(libvirtmgr.Domain) error {
 	return err
 }
 func (m *fakeLibvirtManager) Cleanup(libvirtmgr.Domain, libvirtmgr.CleanupOptions) error {
-	return nil
+	return m.cleanupErr
 }
 func (m *fakeLibvirtManager) EnsureStoragePool(libvirtmgr.StoragePoolRequest) (libvirtmgr.StoragePool, error) {
 	m.storagePoolCalls++
@@ -2048,13 +2083,19 @@ func (m *fakeLibvirtManager) EnsureStoragePool(libvirtmgr.StoragePoolRequest) (l
 func (m *fakeLibvirtManager) Close() error { return nil }
 
 type fakeLibvirtDomain struct {
-	name   string
-	active bool
+	name        string
+	active      bool
+	isActiveErr error
 }
 
-func (d *fakeLibvirtDomain) Name() string                  { return d.name }
-func (d *fakeLibvirtDomain) XML() (string, error)          { return managedDomainXML(d.name), nil }
-func (d *fakeLibvirtDomain) IsActive() (bool, error)       { return d.active, nil }
+func (d *fakeLibvirtDomain) Name() string         { return d.name }
+func (d *fakeLibvirtDomain) XML() (string, error) { return managedDomainXML(d.name), nil }
+func (d *fakeLibvirtDomain) IsActive() (bool, error) {
+	if d.isActiveErr != nil {
+		return false, d.isActiveErr
+	}
+	return d.active, nil
+}
 func (d *fakeLibvirtDomain) Create() error                 { d.active = true; return nil }
 func (d *fakeLibvirtDomain) Shutdown() error               { d.active = false; return nil }
 func (d *fakeLibvirtDomain) Destroy() error                { d.active = false; return nil }

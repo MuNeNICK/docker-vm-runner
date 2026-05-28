@@ -203,6 +203,17 @@ func TestCleanupUsesNVRAMUndefineFlag(t *testing.T) {
 	}
 }
 
+func TestCleanupTreatsMissingDomainAsAlreadyCleaned(t *testing.T) {
+	domain := &fakeDomain{name: "test-vm", isActiveErr: ErrNotFound}
+	err := New(nil).Cleanup(domain, CleanupOptions{HasNVRAM: true})
+	if err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if domain.destroyCalls != 0 || domain.undefineCalls != 0 || domain.undefineNVRAMCalls != 0 {
+		t.Fatalf("cleanup calls destroy=%d undefine=%d nvram=%d", domain.destroyCalls, domain.undefineCalls, domain.undefineNVRAMCalls)
+	}
+}
+
 func TestCloseConnection(t *testing.T) {
 	conn := &fakeConnection{domains: map[string]*fakeDomain{}}
 	if err := New(conn).Close(); err != nil {
@@ -314,6 +325,7 @@ type fakeDomain struct {
 	undefineCalls      int
 	undefineNVRAMCalls int
 	createErr          error
+	isActiveErr        error
 	undefined          bool
 }
 
@@ -326,6 +338,9 @@ func (d *fakeDomain) XML() (string, error) {
 }
 
 func (d *fakeDomain) IsActive() (bool, error) {
+	if d.isActiveErr != nil {
+		return false, d.isActiveErr
+	}
 	return d.active, nil
 }
 

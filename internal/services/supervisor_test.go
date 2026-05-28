@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -130,11 +131,15 @@ func TestStartRollsBackStartedProcessesOnFailure(t *testing.T) {
 }
 
 func TestWaitForLibvirtRootlessWarnsInsteadOfError(t *testing.T) {
-	supervisor := NewSupervisor(Options{Runtime: RuntimeInfo{Rootless: true}})
+	var warnings bytes.Buffer
+	supervisor := NewSupervisor(Options{Runtime: RuntimeInfo{Rootless: true}, WarningWriter: &warnings})
 	supervisor.WaitPath = func(context.Context, string, time.Duration) bool { return false }
 
 	if err := supervisor.WaitForLibvirt(context.Background()); err != nil {
 		t.Fatalf("WaitForLibvirt returned error: %v", err)
+	}
+	if !strings.Contains(warnings.String(), "libvirt socket did not appear") {
+		t.Fatalf("warnings = %q", warnings.String())
 	}
 }
 
