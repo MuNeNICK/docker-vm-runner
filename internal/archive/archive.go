@@ -19,10 +19,14 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
-type Extractor struct{}
+const DefaultMaxBytes = 512 * 1024 * 1024 * 1024
+
+type Extractor struct {
+	MaxBytes int64
+}
 
 func NewExtractor() *Extractor {
-	return &Extractor{}
+	return &Extractor{MaxBytes: DefaultMaxBytes}
 }
 
 type ExtractResult struct {
@@ -47,19 +51,19 @@ func (e *Extractor) ExtractWithResult(ctx context.Context, source string, destDi
 	suffix := strings.ToLower(filepath.Ext(source))
 	switch suffix {
 	case ".gz":
-		return extractStream(source, destDir, suffix, openGzip)
+		return e.extractStream(source, destDir, suffix, "", openGzip)
 	case ".xz":
-		return extractStream(source, destDir, suffix, openXZ)
+		return e.extractStream(source, destDir, suffix, "", openXZ)
 	case ".bz2":
-		return extractStream(source, destDir, suffix, openBzip2)
+		return e.extractStream(source, destDir, suffix, "", openBzip2)
 	case ".zip":
-		return extractZip(source, destDir)
+		return e.extractZip(source, destDir)
 	case ".tar", ".ova":
-		return extractTar(source, destDir)
+		return e.extractTar(source, destDir)
 	case ".7z":
-		return extractSevenZip(source, destDir)
+		return e.extractSevenZip(source, destDir)
 	case ".rar":
-		return extractRAR(source, destDir)
+		return e.extractRAR(source, destDir)
 	default:
 		return ExtractResult{}, fmt.Errorf("unsupported compressed format: %s", source)
 	}
@@ -67,7 +71,41 @@ func (e *Extractor) ExtractWithResult(ctx context.Context, source string, destDi
 
 type streamOpener func(*os.File) (io.ReadCloser, error)
 
-func extractStream(source string, destDir string, suffix string, opener streamOpener) (ExtractResult, error) {
+func (e *Extractor) ExtractCompressedStream(ctx context.Context, source string, destDir string, sourceFormat string, compression string) (ExtractResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ExtractResult{}, err
+	}
+	switch normalizeCompression(compression) {
+	case "gz":
+		return e.extractStream(source, destDir, "", sourceFormat, openGzip)
+	case "xz":
+		return e.extractStream(source, destDir, "", sourceFormat, openXZ)
+	case "bz2":
+		return e.extractStream(source, destDir, "", sourceFormat, openBzip2)
+	default:
+		return ExtractResult{}, fmt.Errorf("unsupported compressed format: %s", compression)
+	}
+}
+
+func (e *Extractor) ExtractByFormat(ctx context.Context, source string, destDir string, format string) (ExtractResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ExtractResult{}, err
+	}
+	switch normalizeArchiveFormat(format) {
+	case "zip":
+		return e.extractZip(source, destDir)
+	case "tar", "ova":
+		return e.extractTar(source, destDir)
+	case "7z":
+		return e.extractSevenZip(source, destDir)
+	case "rar":
+		return e.extractRAR(source, destDir)
+	default:
+		return ExtractResult{}, fmt.Errorf("unsupported archive format: %s", format)
+	}
+}
+
+func (e *Extractor) extractStream(source string, destDir string, suffix string, sourceFormat string, opener streamOpener) (ExtractResult, error) {
 	input, err := os.Open(source)
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("open %s: %w", source, err)
@@ -80,7 +118,7 @@ func extractStream(source string, destDir string, suffix string, opener streamOp
 	}
 	defer reader.Close()
 
-	memberName := strings.TrimSuffix(filepath.Base(source), suffix)
+	memberName := streamMemberName(source, suffix, sourceFormat)
 	outputPath, err := safeJoin(destDir, memberName)
 	if err != nil {
 		return ExtractResult{}, err
@@ -93,8 +131,8 @@ func extractStream(source string, destDir string, suffix string, opener streamOp
 		return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
 	}
 	defer output.Close()
-	if _, err := io.Copy(output, reader); err != nil {
-		return ExtractResult{}, fmt.Errorf("extract %s: %w", source, err)
+	if _, err := copyWithLimit(output, reader, e.MaxBytes, "extract "+source); err != nil {
+		return ExtractResult{}, err
 	}
 	return ExtractResult{Path: outputPath, MemberName: memberName, SelectionReason: "single compressed stream"}, nil
 }
@@ -119,7 +157,7 @@ func openBzip2(file *os.File) (io.ReadCloser, error) {
 	return io.NopCloser(bzip2.NewReader(file)), nil
 }
 
-func extractZip(source string, destDir string) (ExtractResult, error) {
+func (e *Extractor) extractZip(source string, destDir string) (ExtractResult, error) {
 	reader, err := zip.OpenReader(source)
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("open zip archive %s: %w", source, err)
@@ -140,6 +178,9 @@ func extractZip(source string, destDir string) (ExtractResult, error) {
 		return ExtractResult{}, fmt.Errorf("%w: %s", err, source)
 	}
 	member := byName[selected.Name]
+	if err := checkMaxBytes(selected.Size, e.MaxBytes, "zip member "+member.Name); err != nil {
+		return ExtractResult{}, err
+	}
 
 	outputPath, err := safeJoin(destDir, member.Name)
 	if err != nil {
@@ -158,15 +199,18 @@ func extractZip(source string, destDir string) (ExtractResult, error) {
 		return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
 	}
 	defer output.Close()
-	if _, err := io.Copy(output, input); err != nil {
-		return ExtractResult{}, fmt.Errorf("extract zip member %s: %w", member.Name, err)
+	if _, err := copyWithLimit(output, input, e.MaxBytes, "extract zip member "+member.Name); err != nil {
+		return ExtractResult{}, err
 	}
 	return selected.result(outputPath), nil
 }
 
-func extractTar(source string, destDir string) (ExtractResult, error) {
+func (e *Extractor) extractTar(source string, destDir string) (ExtractResult, error) {
 	member, err := selectTarMember(source)
 	if err != nil {
+		return ExtractResult{}, err
+	}
+	if err := checkMaxBytes(member.Size, e.MaxBytes, "tar member "+member.Name); err != nil {
 		return ExtractResult{}, err
 	}
 	outputPath, err := safeJoin(destDir, member.Name)
@@ -199,8 +243,8 @@ func extractTar(source string, destDir string) (ExtractResult, error) {
 			return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
 		}
 		defer output.Close()
-		if _, err := io.Copy(output, reader); err != nil {
-			return ExtractResult{}, fmt.Errorf("extract tar member %s: %w", header.Name, err)
+		if _, err := copyWithLimit(output, reader, e.MaxBytes, "extract tar member "+header.Name); err != nil {
+			return ExtractResult{}, err
 		}
 		return member.result(outputPath), nil
 	}
@@ -259,7 +303,7 @@ func selectTarMember(source string) (archiveMember, error) {
 	return member, nil
 }
 
-func extractSevenZip(source string, destDir string) (ExtractResult, error) {
+func (e *Extractor) extractSevenZip(source string, destDir string) (ExtractResult, error) {
 	reader, err := sevenzip.OpenReader(source)
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("open 7z archive %s: %w", source, err)
@@ -280,6 +324,9 @@ func extractSevenZip(source string, destDir string) (ExtractResult, error) {
 		return ExtractResult{}, fmt.Errorf("%w: %s", err, source)
 	}
 	member := byName[selected.Name]
+	if err := checkMaxBytes(selected.Size, e.MaxBytes, "7z member "+member.Name); err != nil {
+		return ExtractResult{}, err
+	}
 
 	outputPath, err := safeJoin(destDir, member.Name)
 	if err != nil {
@@ -298,13 +345,13 @@ func extractSevenZip(source string, destDir string) (ExtractResult, error) {
 		return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
 	}
 	defer output.Close()
-	if _, err := io.Copy(output, input); err != nil {
-		return ExtractResult{}, fmt.Errorf("extract 7z member %s: %w", member.Name, err)
+	if _, err := copyWithLimit(output, input, e.MaxBytes, "extract 7z member "+member.Name); err != nil {
+		return ExtractResult{}, err
 	}
 	return selected.result(outputPath), nil
 }
 
-func extractRAR(source string, destDir string) (ExtractResult, error) {
+func (e *Extractor) extractRAR(source string, destDir string) (ExtractResult, error) {
 	files, err := rardecode.List(source)
 	if err != nil {
 		return ExtractResult{}, fmt.Errorf("open rar archive %s: %w", source, err)
@@ -323,6 +370,9 @@ func extractRAR(source string, destDir string) (ExtractResult, error) {
 		return ExtractResult{}, fmt.Errorf("%w: %s", err, source)
 	}
 	member := byName[selected.Name]
+	if err := checkMaxBytes(selected.Size, e.MaxBytes, "rar member "+member.Name); err != nil {
+		return ExtractResult{}, err
+	}
 
 	outputPath, err := safeJoin(destDir, member.Name)
 	if err != nil {
@@ -353,8 +403,8 @@ func extractRAR(source string, destDir string) (ExtractResult, error) {
 			return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
 		}
 		defer output.Close()
-		if _, err := io.Copy(output, reader); err != nil {
-			return ExtractResult{}, fmt.Errorf("extract rar member %s: %w", header.Name, err)
+		if _, err := copyWithLimit(output, reader, e.MaxBytes, "extract rar member "+header.Name); err != nil {
+			return ExtractResult{}, err
 		}
 		return selected.result(outputPath), nil
 	}
@@ -417,6 +467,86 @@ func isDiskCandidate(name string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeCompression(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "none":
+		return ""
+	case "gz", "gzip":
+		return "gz"
+	case "xz":
+		return "xz"
+	case "bz2", "bzip2":
+		return "bz2"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func normalizeArchiveFormat(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "zip":
+		return "zip"
+	case "tar":
+		return "tar"
+	case "ova":
+		return "ova"
+	case "7z", "sevenzip":
+		return "7z"
+	case "rar":
+		return "rar"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+}
+
+func streamMemberName(source string, suffix string, sourceFormat string) string {
+	memberName := filepath.Base(source)
+	if suffix != "" {
+		memberName = strings.TrimSuffix(memberName, suffix)
+	}
+	sourceFormat = strings.ToLower(strings.TrimSpace(sourceFormat))
+	if sourceFormat == "" || sourceFormat == "none" || sourceFormat == "unknown" {
+		if memberName == filepath.Base(source) && filepath.Ext(memberName) == "" {
+			return memberName + ".decompressed"
+		}
+		return memberName
+	}
+	wantSuffix := "." + sourceFormat
+	if strings.EqualFold(filepath.Ext(memberName), wantSuffix) {
+		return memberName
+	}
+	return memberName + wantSuffix
+}
+
+func checkMaxBytes(size uint64, maxBytes int64, label string) error {
+	if maxBytes <= 0 {
+		return nil
+	}
+	if size > uint64(maxBytes) {
+		return fmt.Errorf("%s exceeds maximum size: %d > %d bytes", label, size, maxBytes)
+	}
+	return nil
+}
+
+func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string) (int64, error) {
+	if maxBytes <= 0 {
+		n, err := io.Copy(dst, src)
+		if err != nil {
+			return n, fmt.Errorf("%s: %w", label, err)
+		}
+		return n, nil
+	}
+	limited := &io.LimitedReader{R: src, N: maxBytes + 1}
+	n, err := io.Copy(dst, limited)
+	if err != nil {
+		return n, fmt.Errorf("%s: %w", label, err)
+	}
+	if n > maxBytes {
+		return n, fmt.Errorf("%s exceeds maximum size: %d > %d bytes", label, n, maxBytes)
+	}
+	return n, nil
 }
 
 func ovfHrefs(content []byte) []string {

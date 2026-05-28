@@ -15,11 +15,15 @@ import (
 	"time"
 )
 
-const userAgent = "docker-vm-runner/1.0"
+const (
+	userAgent       = "docker-vm-runner/1.0"
+	DefaultMaxBytes = 64 * 1024 * 1024 * 1024
+)
 
 type Downloader struct {
-	Client *http.Client
-	Sleep  func(context.Context, time.Duration) error
+	Client   *http.Client
+	Sleep    func(context.Context, time.Duration) error
+	MaxBytes int64
 }
 
 type Checksum struct {
@@ -32,8 +36,9 @@ func NewDownloader(client *http.Client) *Downloader {
 		client = &http.Client{}
 	}
 	return &Downloader{
-		Client: client,
-		Sleep:  sleepContext,
+		Client:   client,
+		Sleep:    sleepContext,
+		MaxBytes: DefaultMaxBytes,
 	}
 }
 
@@ -56,6 +61,9 @@ func (d *Downloader) DownloadChecked(ctx context.Context, url string, destinatio
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("HTTP error downloading %s: %s", url, resp.Status)
 	}
+	if d.MaxBytes > 0 && resp.ContentLength > d.MaxBytes {
+		return fmt.Errorf("download %s exceeds maximum size: content length %d > %d bytes", url, resp.ContentLength, d.MaxBytes)
+	}
 
 	dir := filepath.Dir(destination)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -73,14 +81,14 @@ func (d *Downloader) DownloadChecked(ctx context.Context, url string, destinatio
 		}
 	}()
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	if _, err := copyWithLimit(tmp, resp.Body, d.MaxBytes, "download "+url); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write download %s: %w", url, err)
+		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temporary download file: %w", err)
 	}
-	if err := verifyChecksum(tmpPath, checksum); err != nil {
+	if err := VerifyChecksum(tmpPath, checksum); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpPath, destination); err != nil {
@@ -117,7 +125,7 @@ func (d *Downloader) DownloadWithRetryChecked(ctx context.Context, url string, d
 	return lastErr
 }
 
-func verifyChecksum(path string, checksum Checksum) error {
+func VerifyChecksum(path string, checksum Checksum) error {
 	if strings.TrimSpace(checksum.Value) == "" {
 		return nil
 	}
@@ -139,6 +147,25 @@ func verifyChecksum(path string, checksum Checksum) error {
 		return fmt.Errorf("%s checksum mismatch: got %s want %s", normalized, got, want)
 	}
 	return nil
+}
+
+func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string) (int64, error) {
+	if maxBytes <= 0 {
+		n, err := io.Copy(dst, src)
+		if err != nil {
+			return n, fmt.Errorf("write %s: %w", label, err)
+		}
+		return n, nil
+	}
+	limited := &io.LimitedReader{R: src, N: maxBytes + 1}
+	n, err := io.Copy(dst, limited)
+	if err != nil {
+		return n, fmt.Errorf("write %s: %w", label, err)
+	}
+	if n > maxBytes {
+		return n, fmt.Errorf("%s exceeds maximum size: %d > %d bytes", label, n, maxBytes)
+	}
+	return n, nil
 }
 
 func checksumHasher(algorithm string) (hash.Hash, string, error) {

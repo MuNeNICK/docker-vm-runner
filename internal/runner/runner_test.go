@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -373,7 +374,7 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
-	commandLog := installFakeQEMUImg(t)
+	commandLog := installFakeQEMUImgWithInfo(t, 1*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -579,6 +580,58 @@ func TestConcreteLifecycleResolveBaseImageVerifiesChecksum(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleResolveBaseImageRejectsInvalidCachedImage(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("not-an-image"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ]; then printf 'not-json\\n'; fi\n" +
+			"exit 0\n"
+	})
+	lifecycle := NewConcreteLifecycle(layout)
+
+	_, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
+		Distro:      "ubuntu",
+		ImageFormat: "qcow2",
+	})
+	if err == nil {
+		t.Fatal("expected cached image validation error")
+	}
+	if !strings.Contains(err.Error(), "parse qemu-img info") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(t.TempDir(), "cached-image")
+	writeGzip(t, source, []byte("disk-image"))
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	lifecycle := NewConcreteLifecycle(layout)
+
+	got, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
+		Distro:                 "custom",
+		BootFrom:               source,
+		ImageFormat:            "qcow2",
+		SourceImageFormat:      "qcow2",
+		SourceImageCompression: "gzip",
+	})
+	if err != nil {
+		t.Fatalf("resolveBaseImage returned error: %v", err)
+	}
+	if filepath.Base(got) != "custom.qcow2" {
+		t.Fatalf("base image path = %s", got)
+	}
+	if content := readFileString(t, got); content != "disk-image" {
+		t.Fatalf("base image content = %q", content)
+	}
+}
+
 func TestConcreteLifecycleResolveBootSourceVerifiesCatalogChecksum(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("boot-iso"))
@@ -598,6 +651,41 @@ func TestConcreteLifecycleResolveBootSourceVerifiesCatalogChecksum(t *testing.T)
 	}
 	if !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestConcreteLifecycleResolveBootSourceRechecksCachedChecksum(t *testing.T) {
+	body := []byte("boot-iso")
+	sum := sha256.Sum256(body)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+	ref := server.URL + "/installer.iso"
+	layout := testLayout(t)
+	destination := filepath.Join(layout.BaseImagesDir, "boot", cacheName(ref))
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatalf("mkdir boot cache: %v", err)
+	}
+	if err := os.WriteFile(destination, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale cache: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+
+	got, err := lifecycle.resolveBootSource(context.Background(), config.VM{
+		BootFrom:              ref,
+		BootChecksumAlgorithm: "sha256",
+		BootChecksumValue:     hex.EncodeToString(sum[:]),
+		DownloadRetries:       1,
+	})
+	if err != nil {
+		t.Fatalf("resolveBootSource returned error: %v", err)
+	}
+	if got != destination {
+		t.Fatalf("boot source = %s", got)
+	}
+	if content := readFileString(t, destination); content != string(body) {
+		t.Fatalf("cached content = %q", content)
 	}
 }
 
@@ -808,7 +896,7 @@ func TestConcreteLifecyclePrepareDoesNotShrinkCopiedBaseImage(t *testing.T) {
 
 func TestConcreteLifecyclePrepareCreatesBlankWorkDisk(t *testing.T) {
 	layout := testLayout(t)
-	commandLog := installFakeQEMUImg(t)
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -848,7 +936,7 @@ func TestConcreteLifecyclePrepareAttachesBootISOWithBlankWorkDisk(t *testing.T) 
 	if err := os.WriteFile(bootISO, []byte("iso"), 0o644); err != nil {
 		t.Fatalf("write boot iso: %v", err)
 	}
-	commandLog := installFakeQEMUImg(t)
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -905,7 +993,7 @@ func TestConcreteLifecyclePrepareExtractsAAVMFForAarch64(t *testing.T) {
 	config.SupportedArchitectures["aarch64"] = profile
 	t.Cleanup(func() { config.SupportedArchitectures["aarch64"] = originalProfile })
 
-	installFakeQEMUImg(t)
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	dpkgLog := installFakeCommand(t, "dpkg-deb", func(logPath string) string {
 		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
 			"mkdir -p " + shellQuote(firmwareDir) + "\n" +
@@ -964,7 +1052,7 @@ func TestConcreteLifecyclePrepareSkipsInstalledBootISO(t *testing.T) {
 	if err := os.WriteFile(bootISO, []byte("iso"), 0o644); err != nil {
 		t.Fatalf("write boot iso: %v", err)
 	}
-	commandLog := installFakeQEMUImg(t)
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -1069,7 +1157,7 @@ func TestConcreteLifecyclePrepareCreatesExtraDisks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
-	commandLog := installFakeQEMUImg(t)
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -1656,6 +1744,27 @@ func readOptionalFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(content)
+}
+
+func writeGzip(t *testing.T, path string, payload []byte) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir gzip dir: %v", err)
+	}
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create gzip: %v", err)
+	}
+	writer := gzip.NewWriter(file)
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatalf("write gzip payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close gzip writer: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close gzip file: %v", err)
+	}
 }
 
 func fixedTime() time.Time {

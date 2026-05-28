@@ -601,40 +601,63 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 			l.bootISOPath = source
 			return "", nil
 		}
-		return l.postProcessImage(ctx, source, filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2")), defaultString(cfg.ImageFormat, "qcow2"))
+		return l.postProcessImage(ctx, source, filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2")), imagePostProcessOptions{
+			DesiredFormat:     defaultString(cfg.ImageFormat, "qcow2"),
+			SourceFormat:      cfg.SourceImageFormat,
+			SourceCompression: cfg.SourceImageCompression,
+			MaxExtractBytes:   cfg.ExtractMaxBytes,
+		})
 	}
-	baseImage := filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+defaultString(cfg.ImageFormat, "qcow2"))
+	desiredFormat := defaultString(cfg.ImageFormat, "qcow2")
+	baseImage := filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+desiredFormat)
 	if fileExists(baseImage) {
-		return baseImage, nil
+		if err := l.validateCachedImage(ctx, baseImage, desiredFormat); err == nil {
+			return baseImage, nil
+		} else if cfg.ImageURL == "" {
+			return "", err
+		}
+		_ = os.Remove(baseImage)
 	}
 	if cfg.ImageURL == "" {
 		return "", fmt.Errorf("image URL is empty and base image is missing: %s", baseImage)
 	}
 	downloadPath := filepath.Join(l.Layout.BaseImagesDir, "downloads", cacheName(cfg.ImageURL))
-	if err := download.NewDownloader(nil).DownloadWithRetryChecked(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries, download.Checksum{
+	downloader := download.NewDownloader(nil)
+	downloader.MaxBytes = cfg.DownloadMaxBytes
+	if err := downloader.DownloadWithRetryChecked(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries, download.Checksum{
 		Algorithm: cfg.ImageChecksumAlgorithm,
 		Value:     cfg.ImageChecksumValue,
 	}); err != nil {
 		return "", err
 	}
-	return l.postProcessImage(ctx, downloadPath, baseImage, defaultString(cfg.ImageFormat, "qcow2"))
+	return l.postProcessImage(ctx, downloadPath, baseImage, imagePostProcessOptions{
+		DesiredFormat:     desiredFormat,
+		SourceFormat:      cfg.SourceImageFormat,
+		SourceCompression: cfg.SourceImageCompression,
+		MaxExtractBytes:   cfg.ExtractMaxBytes,
+	})
 }
 
 func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM) (string, error) {
 	ref := cfg.BootFrom
 	if strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://") {
 		destination := filepath.Join(l.Layout.BaseImagesDir, "boot", cacheName(ref))
-		if fileExists(destination) {
-			return destination, nil
-		}
 		checksum := download.Checksum{Algorithm: cfg.BootChecksumAlgorithm, Value: cfg.BootChecksumValue}
+		if fileExists(destination) {
+			if err := download.VerifyChecksum(destination, checksum); err == nil {
+				return destination, nil
+			}
+			_ = os.Remove(destination)
+		}
+		downloader := download.NewDownloader(nil)
+		downloader.MaxBytes = cfg.DownloadMaxBytes
 		if checksum.Algorithm != "" || checksum.Value != "" {
-			if err := download.NewDownloader(nil).DownloadWithRetryChecked(ctx, ref, destination, cfg.DownloadRetries, checksum); err != nil {
+			if err := downloader.DownloadWithRetryChecked(ctx, ref, destination, cfg.DownloadRetries, checksum); err != nil {
 				return "", err
 			}
 			return destination, nil
 		}
-		if err := download.NewDownloader(nil).DownloadWithRetry(ctx, ref, destination, cfg.DownloadRetries); err != nil {
+		if err := downloader.DownloadWithRetry(ctx, ref, destination, cfg.DownloadRetries); err != nil {
 			return "", err
 		}
 		return destination, nil
@@ -652,9 +675,31 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 	return ref, nil
 }
 
-func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, desiredFormat string) (string, error) {
+type imagePostProcessOptions struct {
+	DesiredFormat     string
+	SourceFormat      string
+	SourceCompression string
+	MaxExtractBytes   int64
+}
+
+func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, opts imagePostProcessOptions) (string, error) {
 	current := source
 	extractor := archive.NewExtractor()
+	extractor.MaxBytes = opts.MaxExtractBytes
+	if shouldExtractByMetadata(current, opts.SourceCompression) {
+		result, err := extractor.ExtractCompressedStream(ctx, current, filepath.Dir(current), opts.SourceFormat, opts.SourceCompression)
+		if err != nil {
+			return "", err
+		}
+		current = result.Path
+	}
+	if shouldExtractArchiveByMetadata(current, opts.SourceFormat) {
+		result, err := extractor.ExtractByFormat(ctx, current, filepath.Dir(current), opts.SourceFormat)
+		if err != nil {
+			return "", err
+		}
+		current = result.Path
+	}
 	for isArchive(current) {
 		result, err := extractor.ExtractWithResult(ctx, current, filepath.Dir(current))
 		if err != nil {
@@ -665,9 +710,14 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return "", fmt.Errorf("create base image directory: %w", err)
 	}
+	desiredFormat := defaultString(opts.DesiredFormat, "qcow2")
 	diskManager := images.NewDiskManager(&l.CommandRunner)
 	info, err := diskManager.ImageInfo(ctx, current)
-	if err == nil && info.Format != "" && info.Format != desiredFormat {
+	currentFormat := normalizedImageFormat(opts.SourceFormat)
+	if err == nil && info.Format != "" {
+		currentFormat = info.Format
+	}
+	if currentFormat != "" && currentFormat != desiredFormat {
 		if err := diskManager.ConvertDisk(ctx, current, destination, desiredFormat); err != nil {
 			return "", err
 		}
@@ -679,6 +729,50 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 		}
 	}
 	return destination, nil
+}
+
+func (l *ConcreteLifecycle) validateCachedImage(ctx context.Context, path string, desiredFormat string) error {
+	info, err := images.NewDiskManager(&l.CommandRunner).ImageInfo(ctx, path)
+	if err != nil {
+		return err
+	}
+	if info.Format == "" {
+		return fmt.Errorf("cached image format is empty: %s", path)
+	}
+	if desiredFormat != "" && info.Format != desiredFormat {
+		return fmt.Errorf("cached image format mismatch: got %s want %s", info.Format, desiredFormat)
+	}
+	return nil
+}
+
+func shouldExtractByMetadata(path string, compression string) bool {
+	compression = strings.ToLower(strings.TrimSpace(compression))
+	if compression == "" || compression == "none" {
+		return false
+	}
+	return !isArchive(path)
+}
+
+func normalizedImageFormat(format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	switch format {
+	case "", "none", "unknown":
+		return ""
+	default:
+		return format
+	}
+}
+
+func shouldExtractArchiveByMetadata(path string, format string) bool {
+	if isArchive(path) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "zip", "tar", "ova", "7z", "sevenzip", "rar":
+		return true
+	default:
+		return false
+	}
 }
 
 func (l *ConcreteLifecycle) prepareSeedISO(ctx context.Context, cfg config.VM, outputPath string) error {

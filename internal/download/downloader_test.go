@@ -127,6 +127,43 @@ func TestDownloadReadErrorCleansTempFile(t *testing.T) {
 	assertNoTempFiles(t, dir)
 }
 
+func TestDownloadRejectsContentLengthOverLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "12")
+		_, _ = w.Write([]byte("hello-world!"))
+	}))
+	defer server.Close()
+
+	downloader := NewDownloader(nil)
+	downloader.MaxBytes = 5
+	err := downloader.Download(context.Background(), server.URL, filepath.Join(t.TempDir(), "image.qcow2"))
+	if err == nil {
+		t.Fatal("expected size limit error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDownloadRejectsBodyOverLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("hello-world"))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	downloader := NewDownloader(nil)
+	downloader.MaxBytes = 5
+	err := downloader.Download(context.Background(), server.URL, filepath.Join(dir, "image.qcow2"))
+	if err == nil {
+		t.Fatal("expected size limit error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertNoTempFiles(t, dir)
+}
+
 func TestDownloadWithRetryRetriesOnce(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -50,6 +50,57 @@ func TestExtractCompressedGzipXZAndBzip2(t *testing.T) {
 	}
 }
 
+func TestExtractCompressedStreamUsesMetadataWhenExtensionIsMissing(t *testing.T) {
+	payload := []byte("payload")
+	path := filepath.Join(t.TempDir(), "cached-image")
+	writeXZ(t, path, payload)
+
+	result, err := NewExtractor().ExtractCompressedStream(context.Background(), path, filepath.Dir(path), "qcow2", "xz")
+	if err != nil {
+		t.Fatalf("ExtractCompressedStream returned error: %v", err)
+	}
+	if filepath.Base(result.Path) != "cached-image.qcow2" {
+		t.Fatalf("path = %s", result.Path)
+	}
+	if content := readFile(t, result.Path); !bytes.Equal(content, payload) {
+		t.Fatalf("payload = %q", content)
+	}
+}
+
+func TestExtractByFormatUsesMetadataWhenExtensionIsMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cached-archive")
+	writeZip(t, path, map[string][]byte{
+		"disk.qcow2": []byte("disk"),
+	})
+
+	result, err := NewExtractor().ExtractByFormat(context.Background(), path, filepath.Dir(path), "zip")
+	if err != nil {
+		t.Fatalf("ExtractByFormat returned error: %v", err)
+	}
+	if filepath.Base(result.Path) != "disk.qcow2" {
+		t.Fatalf("path = %s", result.Path)
+	}
+	if content := readFile(t, result.Path); !bytes.Equal(content, []byte("disk")) {
+		t.Fatalf("payload = %q", content)
+	}
+}
+
+func TestExtractRejectsStreamOverLimit(t *testing.T) {
+	payload := []byte("payload")
+	path := filepath.Join(t.TempDir(), "disk.raw.xz")
+	writeXZ(t, path, payload)
+
+	extractor := NewExtractor()
+	extractor.MaxBytes = 3
+	_, err := extractor.Extract(context.Background(), path, filepath.Dir(path))
+	if err == nil {
+		t.Fatal("expected size limit error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExtractZipAndTarDiskCandidates(t *testing.T) {
 	extractor := NewExtractor()
 

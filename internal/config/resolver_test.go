@@ -51,6 +51,12 @@ func TestResolveDefaultConfig(t *testing.T) {
 	if cfg.SourceImageType != "cloud-image" || cfg.SourceImageFormat != "qcow2" || cfg.SourceImageCompression != "none" {
 		t.Fatalf("source metadata = %q %q %q", cfg.SourceImageType, cfg.SourceImageFormat, cfg.SourceImageCompression)
 	}
+	if cfg.DownloadMaxBytes != 64*1024*1024*1024 {
+		t.Fatalf("DownloadMaxBytes = %d", cfg.DownloadMaxBytes)
+	}
+	if cfg.ExtractMaxBytes != 512*1024*1024*1024 {
+		t.Fatalf("ExtractMaxBytes = %d", cfg.ExtractMaxBytes)
+	}
 	if cfg.ImageChecksumAlgorithm != "sha256" || cfg.ImageChecksumValue != "abc123" {
 		t.Fatalf("Image checksum = %q %q", cfg.ImageChecksumAlgorithm, cfg.ImageChecksumValue)
 	}
@@ -342,6 +348,31 @@ func TestResolveRejectsInvalidBooleanEnv(t *testing.T) {
 		t.Fatal("expected boolean error")
 	}
 	if !strings.Contains(err.Error(), "PERSIST must be a boolean") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveSizeLimits(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"DOWNLOAD_MAX_SIZE": "1G",
+		"EXTRACT_MAX_SIZE":  "2G",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.DownloadMaxBytes != 1024*1024*1024 {
+		t.Fatalf("DownloadMaxBytes = %d", cfg.DownloadMaxBytes)
+	}
+	if cfg.ExtractMaxBytes != 2*1024*1024*1024 {
+		t.Fatalf("ExtractMaxBytes = %d", cfg.ExtractMaxBytes)
+	}
+
+	_, err = resolver.Resolve(MapEnv{"DOWNLOAD_MAX_SIZE": "bad"})
+	if err == nil {
+		t.Fatal("expected invalid size limit")
+	}
+	if !strings.Contains(err.Error(), "DOWNLOAD_MAX_SIZE") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

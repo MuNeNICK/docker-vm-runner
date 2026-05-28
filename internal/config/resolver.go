@@ -102,6 +102,8 @@ type VM struct {
 	RequireKVM             bool
 	LoginShell             string
 	DownloadRetries        int
+	DownloadMaxBytes       int64
+	ExtractMaxBytes        int64
 }
 
 func (r *Resolver) Resolve(env MapEnv) (VM, error) {
@@ -294,6 +296,14 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
+	downloadMaxBytes, err := resolveSizeLimit("DOWNLOAD_MAX_SIZE", env.Get("DOWNLOAD_MAX_SIZE", "64G"))
+	if err != nil {
+		return VM{}, err
+	}
+	extractMaxBytes, err := resolveSizeLimit("EXTRACT_MAX_SIZE", env.Get("EXTRACT_MAX_SIZE", "512G"))
+	if err != nil {
+		return VM{}, err
+	}
 	loginShell := strings.TrimSpace(env.Get("SHELL", ""))
 	if loginShell == "" {
 		loginShell = distroInfo.Shell
@@ -396,6 +406,8 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		RequireKVM:             requireKVM,
 		LoginShell:             loginShell,
 		DownloadRetries:        downloadRetries,
+		DownloadMaxBytes:       downloadMaxBytes,
+		ExtractMaxBytes:        extractMaxBytes,
 	}, nil
 }
 
@@ -456,6 +468,21 @@ func (r *Resolver) resolveDiskSize(raw string) (string, error) {
 		return "", err
 	}
 	return raw, nil
+}
+
+func resolveSizeLimit(name string, raw string) (int64, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	if err := units.ValidateDiskSize(raw); err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	value, err := units.ParseSizeBytes(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s: %w", name, err)
+	}
+	return value, nil
 }
 
 func (r *Resolver) resourceProbe() units.ResourceProbe {
