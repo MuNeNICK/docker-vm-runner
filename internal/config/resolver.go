@@ -90,6 +90,7 @@ type VM struct {
 	USBController         bool
 	HyperVEnabled         bool
 	GPUPassthrough        string
+	RequireKVM            bool
 	LoginShell            string
 	DownloadRetries       int
 }
@@ -228,6 +229,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	balloon, _ := env.Bool("BALLOON", true)
 	rng, _ := env.Bool("RNG", true)
 	ioThread, _ := env.Bool("IO_THREAD", true)
+	requireKVM, _ := env.Bool("REQUIRE_KVM", false)
 	downloadRetries, err := env.Int("DOWNLOAD_RETRIES", "3", 1, ptr(10))
 	if err != nil {
 		return VM{}, err
@@ -318,6 +320,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		USBController:         usb,
 		HyperVEnabled:         hyperv,
 		GPUPassthrough:        gpu,
+		RequireKVM:            requireKVM,
 		LoginShell:            loginShell,
 		DownloadRetries:       downloadRetries,
 	}, nil

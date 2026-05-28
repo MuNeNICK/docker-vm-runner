@@ -455,12 +455,13 @@ func TestResolveBlockDeviceMustExistAndBeBlockDevice(t *testing.T) {
 func TestResolveFeatureFlags(t *testing.T) {
 	resolver, _ := testResolver(t)
 	cfg, err := resolver.Resolve(MapEnv{
-		"GPU":       "intel",
-		"USB":       "0",
-		"HYPERV":    "1",
-		"BALLOON":   "0",
-		"RNG":       "0",
-		"IO_THREAD": "0",
+		"GPU":         "intel",
+		"USB":         "0",
+		"HYPERV":      "1",
+		"BALLOON":     "0",
+		"RNG":         "0",
+		"IO_THREAD":   "0",
+		"REQUIRE_KVM": "1",
 	})
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
@@ -476,6 +477,9 @@ func TestResolveFeatureFlags(t *testing.T) {
 	}
 	if cfg.BalloonEnabled || cfg.RNGEnabled || cfg.IOThread {
 		t.Fatalf("performance flags = balloon %v rng %v iothread %v", cfg.BalloonEnabled, cfg.RNGEnabled, cfg.IOThread)
+	}
+	if !cfg.RequireKVM {
+		t.Fatal("RequireKVM = false")
 	}
 }
 

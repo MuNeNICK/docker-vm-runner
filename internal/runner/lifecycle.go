@@ -49,6 +49,7 @@ type ConcreteLifecycle struct {
 	Console        consoleRunner
 	Sleep          func(context.Context, time.Duration) error
 	EnsureEmulator func(context.Context, string) error
+	KVMAvailable   func() bool
 
 	workImagePath string
 	seedISOPath   string
@@ -165,6 +166,9 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	if l.Manager == nil {
 		return fmt.Errorf("libvirt manager is not connected")
 	}
+	if cfg.RequireKVM && !l.kvmAvailable() {
+		return fmt.Errorf("REQUIRE_KVM=1 requires /dev/kvm")
+	}
 	vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
 	if err := os.MkdirAll(vmDir, 0o755); err != nil {
 		return fmt.Errorf("create VM directory: %w", err)
@@ -232,6 +236,7 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 }
 
 func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmDir string) error {
+	kvmAvailable := l.kvmAvailable()
 	xmlText, err := domain.NewRenderer().Render(domain.Request{
 		VM:                cfg,
 		VMDir:             vmDir,
@@ -240,7 +245,7 @@ func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmD
 		BootISOPath:       l.bootISOPath,
 		FirmwareLoader:    l.firmware.LoaderPath,
 		FirmwareVars:      l.firmware.VarsPath,
-		KVMAvailable:      fileExists("/dev/kvm"),
+		KVMAvailable:      kvmAvailable,
 		EffectiveCPUModel: cfg.CPUModel,
 		IntelRenderNode:   fileExists("/dev/dri/renderD128"),
 		DisablePasst:      l.disablePasst,
@@ -691,6 +696,13 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func (l *ConcreteLifecycle) kvmAvailable() bool {
+	if l.KVMAvailable != nil {
+		return l.KVMAvailable()
+	}
+	return fileExists("/dev/kvm")
 }
 
 func isISO(path string) bool {

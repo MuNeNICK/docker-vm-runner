@@ -279,6 +279,23 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareRequiresKVM(t *testing.T) {
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle.KVMAvailable = func() bool { return false }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		VMName:     "vm1",
+		RequireKVM: true,
+	})
+	if err == nil {
+		t.Fatal("expected REQUIRE_KVM error")
+	}
+	if !strings.Contains(err.Error(), "REQUIRE_KVM=1 requires /dev/kvm") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(filepath.Join(layout.VMImagesDir, "vm1"), 0o755); err != nil {
