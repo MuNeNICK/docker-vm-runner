@@ -102,6 +102,33 @@ func TestStartLibvirtProcessExited(t *testing.T) {
 	}
 }
 
+func TestStartRollsBackStartedProcessesOnFailure(t *testing.T) {
+	root := t.TempDir()
+	virtlogd := &fakeProcess{running: true}
+	supervisor := NewSupervisor(Options{
+		RunDir:    filepath.Join(root, "run"),
+		VarRunDir: filepath.Join(root, "var-run"),
+		Runtime:   RuntimeInfo{Rootless: false},
+	})
+	supervisor.Sleep = func(context.Context, time.Duration) error { return nil }
+	startCalls := 0
+	supervisor.StartProcess = func(ctx context.Context, cmd process.Command) (Process, error) {
+		startCalls++
+		if startCalls == 1 {
+			return virtlogd, nil
+		}
+		return nil, errors.New("libvirtd failed")
+	}
+
+	err := supervisor.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected start error")
+	}
+	if virtlogd.terminateCalls != 1 {
+		t.Fatalf("terminateCalls = %d", virtlogd.terminateCalls)
+	}
+}
+
 func TestWaitForLibvirtRootlessWarnsInsteadOfError(t *testing.T) {
 	supervisor := NewSupervisor(Options{Runtime: RuntimeInfo{Rootless: true}})
 	supervisor.WaitPath = func(context.Context, string, time.Duration) bool { return false }

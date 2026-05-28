@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/munenick/docker-vm-runner/internal/config"
@@ -236,10 +237,15 @@ func (r *Runner) printDistros(opts Options) error {
 func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) (retErr error) {
 	vmStarted := false
 	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
+		stopCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		_ = r.Lifecycle.StopServices(stopCtx, cfg)
 		return err
 	}
 	defer func() {
-		if err := r.Lifecycle.StopServices(ctx, cfg); retErr == nil && err != nil {
+		cleanupCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		if err := r.Lifecycle.StopServices(cleanupCtx, cfg); retErr == nil && err != nil {
 			retErr = err
 		}
 	}()
@@ -247,12 +253,16 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		return err
 	}
 	defer func() {
-		if err := r.Lifecycle.Close(ctx, cfg); retErr == nil && err != nil {
+		cleanupCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		if err := r.Lifecycle.Close(cleanupCtx, cfg); retErr == nil && err != nil {
 			retErr = err
 		}
 	}()
 	defer func() {
-		if err := r.Lifecycle.Cleanup(ctx, cfg); retErr == nil && err != nil {
+		cleanupCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		if err := r.Lifecycle.Cleanup(cleanupCtx, cfg); retErr == nil && err != nil {
 			retErr = err
 		}
 	}()
@@ -290,10 +300,15 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 
 func (r *Runner) runCleanup(ctx context.Context, cfg config.VM) (retErr error) {
 	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
+		stopCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		_ = r.Lifecycle.StopServices(stopCtx, cfg)
 		return err
 	}
 	defer func() {
-		if err := r.Lifecycle.StopServices(ctx, cfg); retErr == nil && err != nil {
+		cleanupCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		if err := r.Lifecycle.StopServices(cleanupCtx, cfg); retErr == nil && err != nil {
 			retErr = err
 		}
 	}()
@@ -301,11 +316,17 @@ func (r *Runner) runCleanup(ctx context.Context, cfg config.VM) (retErr error) {
 		return err
 	}
 	defer func() {
-		if err := r.Lifecycle.Close(ctx, cfg); retErr == nil && err != nil {
+		cleanupCtx, cancel := lifecycleCleanupContext()
+		defer cancel()
+		if err := r.Lifecycle.Close(cleanupCtx, cfg); retErr == nil && err != nil {
 			retErr = err
 		}
 	}()
 	return r.Lifecycle.CleanupStale(ctx, cfg)
+}
+
+func lifecycleCleanupContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 30*time.Second)
 }
 
 func PrintConfig(w io.Writer, cfg config.VM) {

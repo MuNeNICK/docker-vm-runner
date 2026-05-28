@@ -238,6 +238,46 @@ func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleUsesFreshContextForCleanup(t *testing.T) {
+	lifecycle := &fakeLifecycle{prepareErr: os.ErrPermission}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
+	r.Lifecycle = lifecycle
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := r.Run(ctx, Options{NoConsole: true}); err == nil {
+		t.Fatal("expected error")
+	}
+	if len(lifecycle.cleanupContextErrs) == 0 {
+		t.Fatal("cleanup was not called")
+	}
+	for _, err := range lifecycle.cleanupContextErrs {
+		if err != nil {
+			t.Fatalf("cleanup context was canceled: %v", err)
+		}
+	}
+}
+
+func TestRunLifecycleStopsServicesWhenStartFails(t *testing.T) {
+	lifecycle := &fakeLifecycle{startServicesErr: errors.New("service failed")}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{NoConsole: true}); err == nil {
+		t.Fatal("expected error")
+	}
+	want := "start-services,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+}
+
 func TestRunCleanupModeOnlyCleansStaleResources(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
 	r := New()
@@ -1308,8 +1348,10 @@ func TestEmulatorPackageIgnoresUnknownArchitecture(t *testing.T) {
 }
 
 type fakeLifecycle struct {
-	calls      []string
-	prepareErr error
+	calls              []string
+	startServicesErr   error
+	prepareErr         error
+	cleanupContextErrs []error
 }
 
 type fakeServiceSupervisor struct {
@@ -1431,7 +1473,7 @@ func (d *fakeLibvirtDomain) unusedTpmReference(tpm.Result) {}
 
 func (l *fakeLifecycle) StartServices(context.Context, config.VM) error {
 	l.calls = append(l.calls, "start-services")
-	return nil
+	return l.startServicesErr
 }
 func (l *fakeLifecycle) Connect(context.Context, config.VM) error {
 	l.calls = append(l.calls, "connect")
@@ -1461,20 +1503,24 @@ func (l *fakeLifecycle) MarkInstalled(context.Context, config.VM) error {
 	l.calls = append(l.calls, "mark-installed")
 	return nil
 }
-func (l *fakeLifecycle) Cleanup(context.Context, config.VM) error {
+func (l *fakeLifecycle) Cleanup(ctx context.Context, _ config.VM) error {
 	l.calls = append(l.calls, "cleanup")
+	l.cleanupContextErrs = append(l.cleanupContextErrs, ctx.Err())
 	return nil
 }
-func (l *fakeLifecycle) CleanupStale(context.Context, config.VM) error {
+func (l *fakeLifecycle) CleanupStale(ctx context.Context, _ config.VM) error {
 	l.calls = append(l.calls, "cleanup-stale")
+	l.cleanupContextErrs = append(l.cleanupContextErrs, ctx.Err())
 	return nil
 }
-func (l *fakeLifecycle) Close(context.Context, config.VM) error {
+func (l *fakeLifecycle) Close(ctx context.Context, _ config.VM) error {
 	l.calls = append(l.calls, "close")
+	l.cleanupContextErrs = append(l.cleanupContextErrs, ctx.Err())
 	return nil
 }
-func (l *fakeLifecycle) StopServices(context.Context, config.VM) error {
+func (l *fakeLifecycle) StopServices(ctx context.Context, _ config.VM) error {
 	l.calls = append(l.calls, "stop-services")
+	l.cleanupContextErrs = append(l.cleanupContextErrs, ctx.Err())
 	return nil
 }
 

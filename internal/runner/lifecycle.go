@@ -119,11 +119,20 @@ func NewConcreteLifecycle(layout paths.Layout) *ConcreteLifecycle {
 	return lifecycle
 }
 
-func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) error {
+func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (err error) {
+	started := false
+	defer func() {
+		if err != nil && started {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = l.StopServices(stopCtx, cfg)
+		}
+	}()
 	if l.Service != nil {
 		if err := l.Service.Start(ctx); err != nil {
 			return err
 		}
+		started = true
 	}
 	if cfg.RedfishEnabled {
 		poolReq := l.redfishPool()

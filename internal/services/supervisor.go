@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -97,7 +98,15 @@ func applyDefaults(opts *Options) {
 	}
 }
 
-func (s *Supervisor) Start(ctx context.Context) error {
+func (s *Supervisor) Start(ctx context.Context) (err error) {
+	started := false
+	defer func() {
+		if err != nil && started {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = s.Stop(stopCtx)
+		}
+	}()
 	if err := os.MkdirAll(s.Options.RunDir, 0o755); err != nil {
 		return fmt.Errorf("create libvirt run directory: %w", err)
 	}
@@ -114,6 +123,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		return err
 	}
 	s.Processes = append(s.Processes, virtlogd)
+	started = true
 	libvirtd, err := s.startAndAssert(ctx, "libvirtd", serviceCommand(s.Options.LibvirtdPath, s.Options.LibvirtdConf))
 	if err != nil {
 		return err
@@ -234,8 +244,11 @@ func (s *Supervisor) socketPaths() []string {
 }
 
 type osProcess struct {
-	cmd    *exec.Cmd
-	stderr *bytes.Buffer
+	cmd      *exec.Cmd
+	stderr   *bytes.Buffer
+	waitDone chan struct{}
+	waitErr  error
+	mu       sync.Mutex
 }
 
 func startProcess(ctx context.Context, command process.Command) (Process, error) {
@@ -251,18 +264,27 @@ func startProcess(ctx context.Context, command process.Command) (Process, error)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &osProcess{cmd: cmd, stderr: &stderr}, nil
+	proc := &osProcess{cmd: cmd, stderr: &stderr, waitDone: make(chan struct{})}
+	go func() {
+		err := cmd.Wait()
+		proc.mu.Lock()
+		proc.waitErr = err
+		proc.mu.Unlock()
+		close(proc.waitDone)
+	}()
+	return proc, nil
 }
 
 func (p *osProcess) Running() bool {
-	if p.cmd.ProcessState != nil {
-		return false
-	}
 	if p.cmd.Process == nil {
 		return false
 	}
+	select {
+	case <-p.waitDone:
+		return false
+	default:
+	}
 	if err := p.cmd.Process.Signal(syscall.Signal(0)); err != nil {
-		_ = p.cmd.Wait()
 		return false
 	}
 	return true
@@ -293,18 +315,17 @@ func (p *osProcess) Kill() error {
 	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
-	_ = p.cmd.Wait()
 	return nil
 }
 
 func (p *osProcess) Wait(ctx context.Context, timeout time.Duration) error {
-	done := make(chan error, 1)
-	go func() { done <- p.cmd.Wait() }()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
-	case err := <-done:
-		return err
+	case <-p.waitDone:
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.waitErr
 	case <-timer.C:
 		return ErrWaitTimeout
 	case <-ctx.Done():
