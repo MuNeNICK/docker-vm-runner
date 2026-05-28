@@ -36,6 +36,22 @@ func TestVirshLookupDomainNotFound(t *testing.T) {
 	}
 }
 
+func TestVirshErrorIncludesStderr(t *testing.T) {
+	runner := &fakeVirshRunner{
+		errResult: process.Result{Stderr: "unsupported configuration"},
+		err:       &process.ExitError{Name: "virsh", ExitCode: 1},
+	}
+	conn := NewVirshConnection(context.Background(), "", runner)
+
+	_, err := conn.LookupDomain("vm1")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unsupported configuration") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestVirshDefineDomain(t *testing.T) {
 	runner := &fakeVirshRunner{}
 	conn := NewVirshConnection(context.Background(), "", runner)
@@ -90,15 +106,16 @@ func TestVirshStoragePoolLifecycle(t *testing.T) {
 }
 
 type fakeVirshRunner struct {
-	commands []process.Command
-	results  []process.Result
-	err      error
+	commands  []process.Command
+	results   []process.Result
+	errResult process.Result
+	err       error
 }
 
 func (r *fakeVirshRunner) Run(_ context.Context, cmd process.Command) (process.Result, error) {
 	r.commands = append(r.commands, cmd)
 	if r.err != nil {
-		return process.Result{}, r.err
+		return r.errResult, r.err
 	}
 	if len(r.results) == 0 {
 		return process.Result{}, nil

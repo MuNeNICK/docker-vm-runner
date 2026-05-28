@@ -34,18 +34,19 @@ import (
 )
 
 type ConcreteLifecycle struct {
-	Layout        paths.Layout
-	LibvirtURI    string
-	RedfishPool   libvirtmgr.StoragePoolRequest
-	CommandRunner process.CommandRunner
-	Manager       libvirtManager
-	Domain        libvirtmgr.Domain
-	Service       serviceSupervisor
-	Redfish       redfishManager
-	NoVNC         novncProxy
-	TPM           tpmSupervisor
-	Console       consoleRunner
-	Sleep         func(context.Context, time.Duration) error
+	Layout         paths.Layout
+	LibvirtURI     string
+	RedfishPool    libvirtmgr.StoragePoolRequest
+	CommandRunner  process.CommandRunner
+	Manager        libvirtManager
+	Domain         libvirtmgr.Domain
+	Service        serviceSupervisor
+	Redfish        redfishManager
+	NoVNC          novncProxy
+	TPM            tpmSupervisor
+	Console        consoleRunner
+	Sleep          func(context.Context, time.Duration) error
+	EnsureEmulator func(context.Context, string) error
 
 	workImagePath string
 	seedISOPath   string
@@ -89,7 +90,7 @@ func NewConcreteLifecycle(layout paths.Layout) *ConcreteLifecycle {
 		layout = paths.ResolveLayout("", nil)
 	}
 	runner := process.NewCommandRunner()
-	return &ConcreteLifecycle{
+	lifecycle := &ConcreteLifecycle{
 		Layout:        layout,
 		LibvirtURI:    libvirtmgr.DefaultURI,
 		RedfishPool:   libvirtmgr.StoragePoolRequest{Name: "default", TargetPath: "/var/lib/libvirt/images"},
@@ -101,6 +102,8 @@ func NewConcreteLifecycle(layout paths.Layout) *ConcreteLifecycle {
 		Console:       console.NewRunner(),
 		Sleep:         sleepContext,
 	}
+	lifecycle.EnsureEmulator = lifecycle.ensureEmulator
+	return lifecycle
 }
 
 func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) error {
@@ -163,6 +166,11 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	l.workImagePath = filepath.Join(vmDir, "disk."+defaultString(cfg.ImageFormat, "qcow2"))
 	if err := l.prepareDisk(ctx, cfg, l.workImagePath); err != nil {
 		return err
+	}
+	if l.EnsureEmulator != nil {
+		if err := l.EnsureEmulator(ctx, cfg.Arch); err != nil {
+			return err
+		}
 	}
 	fw, err := firmware.NewPreparer(l.Layout.StateDir).Prepare(firmware.Request{
 		Arch:     cfg.Arch,
@@ -312,6 +320,43 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 		return fmt.Errorf("copy base image to work image: %w", err)
 	}
 	return nil
+}
+
+func (l *ConcreteLifecycle) ensureEmulator(ctx context.Context, arch string) error {
+	binary, deb, ok := emulatorPackage(arch)
+	if !ok {
+		return nil
+	}
+	if fileExists(binary) {
+		return nil
+	}
+	if !fileExists(deb) {
+		return fmt.Errorf("QEMU emulator %s not found and package cache missing: %s", binary, deb)
+	}
+	if _, err := l.CommandRunner.Run(ctx, process.Command{Name: "dpkg-deb", Args: []string{"-x", deb, "/"}}); err != nil {
+		return fmt.Errorf("extract QEMU emulator package %s: %w", deb, err)
+	}
+	if !fileExists(binary) {
+		return fmt.Errorf("QEMU emulator %s still missing after extracting %s", binary, deb)
+	}
+	return nil
+}
+
+func emulatorPackage(arch string) (string, string, bool) {
+	switch arch {
+	case "x86_64":
+		return "/usr/bin/qemu-system-x86_64", "/opt/qemu-x86.deb", true
+	case "aarch64":
+		return "/usr/bin/qemu-system-aarch64", "/opt/qemu-arm.deb", true
+	case "ppc64":
+		return "/usr/bin/qemu-system-ppc64", "/opt/qemu-ppc.deb", true
+	case "s390x":
+		return "/usr/bin/qemu-system-s390x", "/opt/qemu-s390x.deb", true
+	case "riscv64":
+		return "/usr/bin/qemu-system-riscv64", "/opt/qemu-riscv.deb", true
+	default:
+		return "", "", false
+	}
 }
 
 func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM) (string, error) {

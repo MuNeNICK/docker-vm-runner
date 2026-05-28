@@ -94,6 +94,9 @@ func (c *VirshConnection) virsh(args ...string) (process.Result, error) {
 	fullArgs = append(fullArgs, args...)
 	result, err := c.Runner.Run(c.ctx, process.Command{Name: "virsh", Args: fullArgs})
 	if err != nil {
+		if strings.TrimSpace(result.Stderr) != "" {
+			return result, fmt.Errorf("virsh %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(result.Stderr))
+		}
 		return result, fmt.Errorf("virsh %s: %w", strings.Join(args, " "), err)
 	}
 	return result, nil

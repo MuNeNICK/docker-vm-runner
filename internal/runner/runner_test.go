@@ -169,6 +169,7 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
 	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
 
 	err := lifecycle.Prepare(context.Background(), config.VM{
 		Distro:         "ubuntu",
@@ -195,6 +196,36 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	}
 	if got := readFileString(t, filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")); got != "base" {
 		t.Fatalf("work image = %q", got)
+	}
+}
+
+func TestEmulatorPackageMapsSupportedArchitectures(t *testing.T) {
+	tests := []struct {
+		arch       string
+		wantBinary string
+		wantDeb    string
+	}{
+		{"x86_64", "/usr/bin/qemu-system-x86_64", "/opt/qemu-x86.deb"},
+		{"aarch64", "/usr/bin/qemu-system-aarch64", "/opt/qemu-arm.deb"},
+		{"ppc64", "/usr/bin/qemu-system-ppc64", "/opt/qemu-ppc.deb"},
+		{"s390x", "/usr/bin/qemu-system-s390x", "/opt/qemu-s390x.deb"},
+		{"riscv64", "/usr/bin/qemu-system-riscv64", "/opt/qemu-riscv.deb"},
+	}
+	for _, tt := range tests {
+		binary, deb, ok := emulatorPackage(tt.arch)
+		if !ok {
+			t.Fatalf("emulatorPackage(%q) ok = false", tt.arch)
+		}
+		if binary != tt.wantBinary || deb != tt.wantDeb {
+			t.Fatalf("emulatorPackage(%q) = %q, %q", tt.arch, binary, deb)
+		}
+	}
+}
+
+func TestEmulatorPackageIgnoresUnknownArchitecture(t *testing.T) {
+	binary, deb, ok := emulatorPackage("mips64")
+	if ok || binary != "" || deb != "" {
+		t.Fatalf("emulatorPackage returned %q, %q, %v", binary, deb, ok)
 	}
 }
 
