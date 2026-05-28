@@ -232,6 +232,7 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 		FirmwareVars:      l.firmware.VarsPath,
 		KVMAvailable:      fileExists("/dev/kvm"),
 		EffectiveCPUModel: cfg.CPUModel,
+		IntelRenderNode:   fileExists("/dev/dri/renderD128"),
 	})
 	if err != nil {
 		return err

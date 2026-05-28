@@ -33,6 +33,7 @@ type Request struct {
 	KVMAvailable      bool
 	EffectiveCPUModel string
 	IPv6Enabled       bool
+	IntelRenderNode   bool
 	BlockSectorSize   func(string) (int, bool)
 }
 
@@ -239,7 +240,7 @@ func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) er
 	start(b, "console", attr{"type", "pty"})
 	empty(b, "target", attr{"type", "virtio"}, attr{"port", "0"})
 	end(b, "console")
-	renderGraphics(b, vm)
+	renderGraphics(b, req)
 	return nil
 }
 
@@ -303,7 +304,8 @@ func renderNetworks(b *strings.Builder, req Request, networkOrder int) error {
 	return nil
 }
 
-func renderGraphics(b *strings.Builder, vm config.VM) {
+func renderGraphics(b *strings.Builder, req Request) {
+	vm := req.VM
 	if vm.GraphicsType == "" || vm.GraphicsType == "none" {
 		return
 	}
@@ -319,7 +321,7 @@ func renderGraphics(b *strings.Builder, vm config.VM) {
 	empty(b, "graphics", attrs...)
 	start(b, "video")
 	start(b, "model", attr{"type", "virtio"}, attr{"heads", "1"}, attr{"primary", "yes"})
-	if vm.GPUPassthrough != "intel" {
+	if !intelGPUEnabled(vm, req) {
 		empty(b, "resolution", attr{"x", "1920"}, attr{"y", "1080"})
 	}
 	end(b, "model")
@@ -409,7 +411,7 @@ func qemuArgs(vm config.VM, req Request) []string {
 	if vm.ExtraArgs != "" {
 		args = append(args, strings.Fields(vm.ExtraArgs)...)
 	}
-	if vm.GPUPassthrough == "intel" {
+	if intelGPUEnabled(vm, req) {
 		args = append(args, "-display", "egl-headless")
 		args = append(args, "-device", "virtio-vga-gl,rendernode=/dev/dri/renderD128")
 	}
@@ -417,6 +419,10 @@ func qemuArgs(vm config.VM, req Request) []string {
 		args = append(args, "-global", "ICH9-LPC.disable_s3=1", "-global", "ICH9-LPC.disable_s4=1")
 	}
 	return args
+}
+
+func intelGPUEnabled(vm config.VM, req Request) bool {
+	return vm.GPUPassthrough == "intel" && req.IntelRenderNode
 }
 
 func defaultString(value string, fallback string) string {

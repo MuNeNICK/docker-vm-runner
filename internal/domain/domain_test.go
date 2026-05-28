@@ -175,6 +175,36 @@ func TestRenderSecureBootLoaderXML(t *testing.T) {
 	}
 }
 
+func TestRenderIntelGPURequiresRenderNode(t *testing.T) {
+	vm := testVM()
+	vm.GPUPassthrough = "intel"
+	vm.GraphicsType = "vnc"
+
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+		IntelRenderNode:   false,
+	})
+	if strings.Contains(xmlText, "virtio-vga-gl") || strings.Contains(xmlText, "egl-headless") {
+		t.Fatalf("XML should not include Intel GPU qemu args without rendernode:\n%s", xmlText)
+	}
+	if !strings.Contains(xmlText, `<resolution x="1920" y="1080"/>`) {
+		t.Fatalf("XML should keep normal video resolution without rendernode:\n%s", xmlText)
+	}
+
+	xmlText = renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+		IntelRenderNode:   true,
+	})
+	if !strings.Contains(xmlText, `<qemu:arg value="egl-headless"/>`) ||
+		!strings.Contains(xmlText, `<qemu:arg value="virtio-vga-gl,rendernode=/dev/dri/renderD128"/>`) {
+		t.Fatalf("XML missing Intel GPU qemu args:\n%s", xmlText)
+	}
+}
+
 func TestRenderHyperVFeatures(t *testing.T) {
 	vm := testVM()
 	vm.HyperVEnabled = true
