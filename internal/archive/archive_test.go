@@ -50,20 +50,19 @@ func TestExtractCompressedGzipXZAndBzip2(t *testing.T) {
 	}
 }
 
-func TestExtractZipAndTarLargestFile(t *testing.T) {
+func TestExtractZipAndTarDiskCandidates(t *testing.T) {
 	extractor := NewExtractor()
 
 	zipPath := filepath.Join(t.TempDir(), "disk.zip")
 	writeZip(t, zipPath, map[string][]byte{
-		"small.txt":       []byte("a"),
-		"disk/big.qcow2":  bytes.Repeat([]byte("x"), 10),
-		"disk/empty-file": nil,
+		"larger-not-a-disk.bin": bytes.Repeat([]byte("x"), 20),
+		"disk/small.qcow2":      bytes.Repeat([]byte("q"), 10),
 	})
 	got, err := extractor.Extract(context.Background(), zipPath, filepath.Dir(zipPath))
 	if err != nil {
 		t.Fatalf("Extract zip returned error: %v", err)
 	}
-	if filepath.Base(got) != "big.qcow2" {
+	if filepath.Base(got) != "small.qcow2" {
 		t.Fatalf("zip extracted path = %s", got)
 	}
 	if len(readFile(t, got)) != 10 {
@@ -72,19 +71,63 @@ func TestExtractZipAndTarLargestFile(t *testing.T) {
 
 	tarPath := filepath.Join(t.TempDir(), "disk.tar")
 	writeTar(t, tarPath, map[string][]byte{
-		"small.txt":     []byte("a"),
-		"disk/big.raw":  bytes.Repeat([]byte("y"), 20),
-		"disk/zero.raw": nil,
+		"larger-not-a-disk.bin": bytes.Repeat([]byte("y"), 20),
+		"disk/small.raw":        bytes.Repeat([]byte("r"), 10),
 	})
 	got, err = extractor.Extract(context.Background(), tarPath, filepath.Dir(tarPath))
 	if err != nil {
 		t.Fatalf("Extract tar returned error: %v", err)
 	}
-	if filepath.Base(got) != "big.raw" {
+	if filepath.Base(got) != "small.raw" {
 		t.Fatalf("tar extracted path = %s", got)
 	}
-	if len(readFile(t, got)) != 20 {
+	if len(readFile(t, got)) != 10 {
 		t.Fatalf("tar extracted size mismatch")
+	}
+}
+
+func TestExtractFallsBackToLargestRegularFile(t *testing.T) {
+	zipPath := filepath.Join(t.TempDir(), "disk.zip")
+	writeZip(t, zipPath, map[string][]byte{
+		"small.txt": []byte("a"),
+		"blob":      bytes.Repeat([]byte("x"), 10),
+	})
+
+	result, err := NewExtractor().ExtractWithResult(context.Background(), zipPath, filepath.Dir(zipPath))
+	if err != nil {
+		t.Fatalf("ExtractWithResult returned error: %v", err)
+	}
+	if filepath.Base(result.Path) != "blob" {
+		t.Fatalf("fallback path = %s", result.Path)
+	}
+	if !result.Fallback {
+		t.Fatalf("Fallback = false")
+	}
+	if !strings.Contains(result.SelectionReason, "no disk candidate") {
+		t.Fatalf("SelectionReason = %q", result.SelectionReason)
+	}
+}
+
+func TestExtractOVAPrefersOVFReferencedDisk(t *testing.T) {
+	ovaPath := filepath.Join(t.TempDir(), "image.ova")
+	writeTar(t, ovaPath, map[string][]byte{
+		"descriptor.ovf": []byte(`<Envelope><References><File ovf:href="disk-file" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1"/></References></Envelope>`),
+		"disk-file":      bytes.Repeat([]byte("d"), 8),
+		"larger-data":    bytes.Repeat([]byte("x"), 20),
+	})
+
+	result, err := NewExtractor().ExtractWithResult(context.Background(), ovaPath, filepath.Dir(ovaPath))
+	if err != nil {
+		t.Fatalf("ExtractWithResult returned error: %v", err)
+	}
+	if filepath.Base(result.Path) != "disk-file" {
+		t.Fatalf("OVA extracted path = %s", result.Path)
+	}
+	if result.Fallback {
+		t.Fatalf("Fallback = true")
+	}
+	if !strings.Contains(result.SelectionReason, "ovf") {
+		t.Fatalf("SelectionReason = %q", result.SelectionReason)
 	}
 }
 
