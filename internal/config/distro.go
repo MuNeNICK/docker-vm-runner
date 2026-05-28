@@ -90,4 +90,3 @@ func ResolveArchitecture(distroArch string, override string) (string, error) {
 	}
 	return declaredArch, nil
 }
-
