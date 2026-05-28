@@ -306,6 +306,50 @@ func TestResolveCloudInitUserDataWarnsOnUnrecognizedHeader(t *testing.T) {
 	}
 }
 
+func TestResolveWarnsWhenISOAutoDisablesCloudInit(t *testing.T) {
+	resolver, _ := testResolver(t)
+	iso := filepath.Join(t.TempDir(), "installer.iso")
+	if err := os.WriteFile(iso, []byte("iso"), 0o644); err != nil {
+		t.Fatalf("write iso: %v", err)
+	}
+
+	cfg, err := resolver.Resolve(MapEnv{"BOOT_FROM": iso})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.CloudInitEnabled {
+		t.Fatal("CloudInitEnabled = true")
+	}
+	if !containsWarning(cfg.Warnings, "auto-disabling cloud-init") {
+		t.Fatalf("Warnings = %#v", cfg.Warnings)
+	}
+}
+
+func TestResolveCloudConfigWarnsWhenNotMapping(t *testing.T) {
+	resolver, _ := testResolver(t)
+	userData := filepath.Join(t.TempDir(), "user-data.yaml")
+	if err := os.WriteFile(userData, []byte("#cloud-config\n- bad\n"), 0o644); err != nil {
+		t.Fatalf("write user-data: %v", err)
+	}
+
+	cfg, err := resolver.Resolve(MapEnv{"CLOUD_INIT_USER_DATA": userData})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !containsWarning(cfg.Warnings, "not a YAML mapping") {
+		t.Fatalf("Warnings = %#v", cfg.Warnings)
+	}
+}
+
+func containsWarning(warnings []string, needle string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, needle) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestResolveRedfish(t *testing.T) {
 	resolver, _ := testResolver(t)
 	cfg, err := resolver.Resolve(MapEnv{

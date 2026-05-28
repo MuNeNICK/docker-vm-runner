@@ -502,6 +502,7 @@ type cloudInitResolution struct {
 
 func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitResolution, error) {
 	enabled := true
+	warnings := []string{}
 	if raw, ok := env.Lookup("CLOUD_INIT"); ok {
 		value, err := BoolValue("CLOUD_INIT", raw)
 		if err != nil {
@@ -510,10 +511,11 @@ func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitRes
 		enabled = value
 	} else if isoRequested {
 		enabled = false
+		warnings = append(warnings, "BOOT_FROM ISO detected; auto-disabling cloud-init (set CLOUD_INIT=1 to override)")
 	}
 	userDataPath := strings.TrimSpace(env.Get("CLOUD_INIT_USER_DATA", ""))
 	if userDataPath == "" {
-		return cloudInitResolution{Enabled: enabled}, nil
+		return cloudInitResolution{Enabled: enabled, Warnings: warnings}, nil
 	}
 	if r.FileExists != nil && !r.FileExists(userDataPath) {
 		return cloudInitResolution{}, fmt.Errorf("CLOUD_INIT_USER_DATA file not found: %s", userDataPath)
@@ -532,12 +534,14 @@ func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitRes
 			if err := yaml.Unmarshal(content, &parsed); err != nil {
 				return cloudInitResolution{}, fmt.Errorf("CLOUD_INIT_USER_DATA contains invalid YAML: %w", err)
 			}
+			if _, ok := parsed.(map[string]any); parsed != nil && !ok {
+				warnings = append(warnings, "CLOUD_INIT_USER_DATA #cloud-config content is not a YAML mapping; cloud-init may ignore it")
+			}
 		} else if firstLine != "" && !isKnownCloudInitHeader(firstLine) {
-			warnings := []string{fmt.Sprintf("CLOUD_INIT_USER_DATA has an unrecognized first line %q; cloud-init may ignore it", firstLine)}
-			return cloudInitResolution{Enabled: enabled, UserDataPath: userDataPath, Warnings: warnings}, nil
+			warnings = append(warnings, fmt.Sprintf("CLOUD_INIT_USER_DATA has an unrecognized first line %q; cloud-init may ignore it", firstLine))
 		}
 	}
-	return cloudInitResolution{Enabled: enabled, UserDataPath: userDataPath}, nil
+	return cloudInitResolution{Enabled: enabled, UserDataPath: userDataPath, Warnings: warnings}, nil
 }
 
 func isKnownCloudInitHeader(firstLine string) bool {

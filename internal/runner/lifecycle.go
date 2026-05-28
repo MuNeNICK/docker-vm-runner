@@ -9,9 +9,13 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/munenick/docker-vm-runner/internal/archive"
 	"github.com/munenick/docker-vm-runner/internal/config"
@@ -56,6 +60,9 @@ type ConcreteLifecycle struct {
 	IPv6Available   func() bool
 	CPUVendor       func() string
 	CPUFlags        func() map[string]bool
+	TerminalSize    func() (int, int, bool)
+	Notify          func(chan<- os.Signal, ...os.Signal)
+	StopNotify      func(chan<- os.Signal)
 	Status          io.Writer
 	Output          *Output
 
@@ -117,6 +124,9 @@ func NewConcreteLifecycle(layout paths.Layout) *ConcreteLifecycle {
 		TPM:           tpm.NewSupervisor(layout.StateDir),
 		Console:       console.NewRunner(),
 		Sleep:         sleepContext,
+		TerminalSize:  currentTerminalSize,
+		Notify:        signal.Notify,
+		StopNotify:    signal.Stop,
 	}
 	lifecycle.EnsureEmulator = lifecycle.ensureEmulator
 	return lifecycle
@@ -383,7 +393,92 @@ func (l *ConcreteLifecycle) AttachConsole(ctx context.Context, cfg config.VM) (i
 	if runner, ok := l.Console.(*console.Runner); ok {
 		runner.LibvirtURI = l.libvirtURI()
 	}
+	stopResize := l.startConsoleResizeSync(ctx, cfg)
+	defer stopResize()
 	return l.Console.Run(ctx, cfg.VMName)
+}
+
+func (l *ConcreteLifecycle) startConsoleResizeSync(ctx context.Context, cfg config.VM) func() {
+	signals := make(chan os.Signal, 1)
+	notify := l.Notify
+	if notify == nil {
+		notify = signal.Notify
+	}
+	stopNotify := l.StopNotify
+	if stopNotify == nil {
+		stopNotify = signal.Stop
+	}
+	notify(signals, syscall.SIGWINCH)
+	done := make(chan struct{})
+	go func() {
+		l.syncConsoleSize(ctx, cfg)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-signals:
+				l.syncConsoleSize(ctx, cfg)
+			}
+		}
+	}()
+	return func() {
+		stopNotify(signals)
+		close(done)
+	}
+}
+
+func (l *ConcreteLifecycle) syncConsoleSize(ctx context.Context, cfg config.VM) {
+	rows, cols, ok := l.consoleTerminalSize()
+	if !ok {
+		return
+	}
+	client := l.guestClient()
+	executor := guestexec.NewExecutor(client)
+	executor.Sleep = l.Sleep
+	executor.AgentWaitTimeout = 5 * time.Second
+	executor.AgentWaitInterval = 500 * time.Millisecond
+	executor.PollTimeout = 5 * time.Second
+	command := fmt.Sprintf(
+		`for tty in /dev/hvc0 /dev/ttyS0; do [ -e "$tty" ] && stty -F "$tty" rows %s cols %s 2>/dev/null; done`,
+		strconv.Itoa(rows),
+		strconv.Itoa(cols),
+	)
+	result, err := executor.RunOnDomain(ctx, cfg.VMName, guestexec.Invocation{
+		Wait: true,
+		Path: "sh",
+		Args: []string{"-c", command},
+	})
+	if err != nil {
+		l.warnf("Could not sync console terminal size: %v", err)
+		return
+	}
+	if result.ExitCode != 0 {
+		l.warnf("Could not sync console terminal size: stty exited with status %d", result.ExitCode)
+	}
+}
+
+func (l *ConcreteLifecycle) consoleTerminalSize() (int, int, bool) {
+	if l.TerminalSize != nil {
+		return l.TerminalSize()
+	}
+	return currentTerminalSize()
+}
+
+func currentTerminalSize() (int, int, bool) {
+	type winsize struct {
+		Row    uint16
+		Col    uint16
+		Xpixel uint16
+		Ypixel uint16
+	}
+	var ws winsize
+	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, os.Stdin.Fd(), uintptr(syscall.TIOCGWINSZ), uintptr(unsafe.Pointer(&ws)))
+	if errno != 0 || ws.Row == 0 || ws.Col == 0 {
+		return 0, 0, false
+	}
+	return int(ws.Row), int(ws.Col), true
 }
 
 func (l *ConcreteLifecycle) MarkInstalled(_ context.Context, cfg config.VM) error {
@@ -818,6 +913,9 @@ func (l *ConcreteLifecycle) prepareSeedISO(ctx context.Context, cfg config.VM, o
 			return fmt.Errorf("read cloud-init user-data: %w", err)
 		}
 		userData = string(content)
+		if strings.TrimSpace(userData) == "" {
+			l.warnf("CLOUD_INIT_USER_DATA is empty; generated seed ISO will contain empty user-data")
+		}
 	}
 	content, err := seediso.BuildCloudInit(seediso.CloudInitRequest{
 		VMName:       cfg.VMName,

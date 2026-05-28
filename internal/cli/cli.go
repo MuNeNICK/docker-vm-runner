@@ -41,6 +41,11 @@ var stdinIsTerminal = func() bool {
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
+var stdoutIsTerminal = func() bool {
+	info, err := os.Stdout.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
 func Main(ctx context.Context, args []string) int {
 	return runWithEnv(ctx, args, os.Stdout, os.Stderr, config.OSEnv)
 }
@@ -94,7 +99,7 @@ func applyEnvDefaults(args []string, lookup config.LookupFunc) []string {
 			noConsole = true
 		}
 	}
-	if !stdinIsTerminal() {
+	if !stdinIsTerminal() || !stdoutIsTerminal() {
 		noConsole = true
 	}
 	return applyNoConsoleDefault(args, noConsole)

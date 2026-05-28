@@ -158,13 +158,16 @@ func TestRunDisablesConsoleForNoVNC(t *testing.T) {
 func TestRunRespectsExplicitNoConsoleFalseForNoVNC(t *testing.T) {
 	original := newRunner
 	originalTTY := stdinIsTerminal
+	originalStdoutTTY := stdoutIsTerminal
 	defer func() {
 		newRunner = original
 		stdinIsTerminal = originalTTY
+		stdoutIsTerminal = originalStdoutTTY
 	}()
 	fake := &fakeRunner{}
 	newRunner = func() appRunner { return fake }
 	stdinIsTerminal = func() bool { return true }
+	stdoutIsTerminal = func() bool { return true }
 
 	var stdout, stderr bytes.Buffer
 	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(key string) (string, bool) {
@@ -189,13 +192,16 @@ func TestRunRespectsExplicitNoConsoleFalseForNoVNC(t *testing.T) {
 func TestRunDisablesConsoleWithoutTTY(t *testing.T) {
 	originalRunner := newRunner
 	originalTTY := stdinIsTerminal
+	originalStdoutTTY := stdoutIsTerminal
 	defer func() {
 		newRunner = originalRunner
 		stdinIsTerminal = originalTTY
+		stdoutIsTerminal = originalStdoutTTY
 	}()
 	fake := &fakeRunner{}
 	newRunner = func() appRunner { return fake }
 	stdinIsTerminal = func() bool { return false }
+	stdoutIsTerminal = func() bool { return true }
 
 	var stdout, stderr bytes.Buffer
 	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(string) (string, bool) { return "", false })
@@ -211,13 +217,16 @@ func TestRunDisablesConsoleWithoutTTY(t *testing.T) {
 func TestRunKeepsNoConsoleForNoConsoleFalseWithoutTTY(t *testing.T) {
 	originalRunner := newRunner
 	originalTTY := stdinIsTerminal
+	originalStdoutTTY := stdoutIsTerminal
 	defer func() {
 		newRunner = originalRunner
 		stdinIsTerminal = originalTTY
+		stdoutIsTerminal = originalStdoutTTY
 	}()
 	fake := &fakeRunner{}
 	newRunner = func() appRunner { return fake }
 	stdinIsTerminal = func() bool { return false }
+	stdoutIsTerminal = func() bool { return true }
 
 	var stdout, stderr bytes.Buffer
 	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(key string) (string, bool) {
@@ -235,16 +244,44 @@ func TestRunKeepsNoConsoleForNoConsoleFalseWithoutTTY(t *testing.T) {
 	}
 }
 
-func TestRunNoConsoleFlagOverridesEnvDefault(t *testing.T) {
-	original := newRunner
+func TestRunDisablesConsoleWithoutStdoutTTY(t *testing.T) {
+	originalRunner := newRunner
 	originalTTY := stdinIsTerminal
+	originalStdoutTTY := stdoutIsTerminal
 	defer func() {
-		newRunner = original
+		newRunner = originalRunner
 		stdinIsTerminal = originalTTY
+		stdoutIsTerminal = originalStdoutTTY
 	}()
 	fake := &fakeRunner{}
 	newRunner = func() appRunner { return fake }
 	stdinIsTerminal = func() bool { return true }
+	stdoutIsTerminal = func() bool { return false }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(string) (string, bool) { return "", false })
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
+func TestRunNoConsoleFlagOverridesEnvDefault(t *testing.T) {
+	original := newRunner
+	originalTTY := stdinIsTerminal
+	originalStdoutTTY := stdoutIsTerminal
+	defer func() {
+		newRunner = original
+		stdinIsTerminal = originalTTY
+		stdoutIsTerminal = originalStdoutTTY
+	}()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+	stdinIsTerminal = func() bool { return true }
+	stdoutIsTerminal = func() bool { return true }
 
 	var stdout, stderr bytes.Buffer
 	code := runWithEnv(context.Background(), []string{"--no-console=false"}, &stdout, &stderr, func(key string) (string, bool) {

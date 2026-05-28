@@ -15,6 +15,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -996,6 +998,35 @@ func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareSeedISOWarnsOnEmptyUserData(t *testing.T) {
+	layout := testLayout(t)
+	installFakeCommand(t, "genisoimage", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
+	})
+	userData := filepath.Join(t.TempDir(), "user-data")
+	if err := os.WriteFile(userData, []byte(" \n"), 0o644); err != nil {
+		t.Fatalf("write user-data: %v", err)
+	}
+	var status bytes.Buffer
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Status = &status
+	output := filepath.Join(layout.VMImagesDir, "vm1", "seed.iso")
+
+	err := lifecycle.prepareSeedISO(context.Background(), config.VM{
+		VMName:                "vm1",
+		LoginUser:             "user",
+		LoginShell:            "/bin/bash",
+		Password:              "password",
+		CloudInitUserDataPath: userData,
+	}, output)
+	if err != nil {
+		t.Fatalf("prepareSeedISO returned error: %v", err)
+	}
+	if !strings.Contains(status.String(), "CLOUD_INIT_USER_DATA is empty") {
+		t.Fatalf("status = %q", status.String())
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(filepath.Join(layout.VMImagesDir, "vm1"), 0o755); err != nil {
@@ -1669,6 +1700,77 @@ func TestConcreteLifecycleWaitForGuestReadyWaitsForCloudInit(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleAttachConsoleSyncsTerminalSizeOnSigwinch(t *testing.T) {
+	client := &fakeGuestExecClient{
+		responses: []guestExecResponse{
+			{raw: json.RawMessage(`{}`)},
+			{raw: json.RawMessage(`{"pid":17}`)},
+			{raw: json.RawMessage(`{"exited":true,"exitcode":0}`)},
+			{raw: json.RawMessage(`{}`)},
+			{raw: json.RawMessage(`{"pid":18}`)},
+			{raw: json.RawMessage(`{"exited":true,"exitcode":0}`)},
+		},
+	}
+	secondResize := make(chan struct{})
+	signals := make(chan os.Signal, 1)
+	var resizeCount int
+	var resizeMu sync.Mutex
+	client.commandHook = func(command guestexec.Command) {
+		if command.Execute != "guest-exec" {
+			return
+		}
+		args := command.Arguments.(map[string]any)
+		arg := strings.Join(args["arg"].([]string), " ")
+		if !strings.Contains(arg, "stty") {
+			return
+		}
+		resizeMu.Lock()
+		resizeCount++
+		count := resizeCount
+		resizeMu.Unlock()
+		if count == 1 {
+			signals <- syscall.SIGWINCH
+		}
+		if count == 2 {
+			close(secondResize)
+		}
+	}
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.GuestClient = client
+	lifecycle.Console = fakeConsoleRunnerFunc(func(context.Context, string) (int, error) {
+		select {
+		case <-secondResize:
+			return 0, nil
+		case <-time.After(time.Second):
+			return 1, errors.New("timed out waiting for resize sync")
+		}
+	})
+	lifecycle.TerminalSize = func() (int, int, bool) { return 40, 120, true }
+	lifecycle.Notify = func(ch chan<- os.Signal, _ ...os.Signal) {
+		go func() {
+			for sig := range signals {
+				ch <- sig
+			}
+		}()
+	}
+	lifecycle.StopNotify = func(chan<- os.Signal) { close(signals) }
+	lifecycle.Sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := lifecycle.AttachConsole(context.Background(), config.VM{VMName: "vm1"}); err != nil {
+		t.Fatalf("AttachConsole returned error: %v", err)
+	}
+	if len(client.commands) != 6 {
+		t.Fatalf("commands = %#v", client.commands)
+	}
+	args := client.commands[1].Arguments.(map[string]any)
+	command := strings.Join(args["arg"].([]string), " ")
+	for _, want := range []string{"/dev/hvc0", "/dev/ttyS0", "rows 40", "cols 120"} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("resize command missing %q: %s", want, command)
+		}
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -1802,8 +1904,10 @@ type guestExecResponse struct {
 }
 
 type fakeGuestExecClient struct {
-	responses []guestExecResponse
-	commands  []guestexec.Command
+	mu          sync.Mutex
+	responses   []guestExecResponse
+	commands    []guestexec.Command
+	commandHook func(guestexec.Command)
 }
 
 func (c *fakeGuestExecClient) ListRunningDomains(context.Context) ([]string, error) {
@@ -1811,13 +1915,26 @@ func (c *fakeGuestExecClient) ListRunningDomains(context.Context) ([]string, err
 }
 
 func (c *fakeGuestExecClient) Execute(_ context.Context, _ string, command guestexec.Command) (json.RawMessage, error) {
+	c.mu.Lock()
 	c.commands = append(c.commands, command)
 	if len(c.responses) == 0 {
+		c.mu.Unlock()
 		return nil, errors.New("unexpected guest command")
 	}
 	resp := c.responses[0]
 	c.responses = c.responses[1:]
+	hook := c.commandHook
+	c.mu.Unlock()
+	if hook != nil {
+		hook(command)
+	}
 	return resp.raw, resp.err
+}
+
+type fakeConsoleRunnerFunc func(context.Context, string) (int, error)
+
+func (f fakeConsoleRunnerFunc) Run(ctx context.Context, vmName string) (int, error) {
+	return f(ctx, vmName)
 }
 
 type fakeNoVNCProxy struct {
