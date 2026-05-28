@@ -53,6 +53,14 @@ func CPUCount() int {
 	return runtime.NumCPU()
 }
 
+func CPUVendor() string {
+	return cpuVendor(readFile("/proc/cpuinfo"))
+}
+
+func CPUFlags() map[string]bool {
+	return cpuFlags(readFile("/proc/cpuinfo"))
+}
+
 func AvailableDiskBytes(path string) int64 {
 	return int64(diskAvailable(path))
 }
@@ -198,6 +206,51 @@ func firstCPUModel(content []byte) string {
 		}
 	}
 	return ""
+}
+
+func cpuVendor(content []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "vendor_id") {
+			continue
+		}
+		_, value, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		vendor := strings.ToLower(strings.TrimSpace(value))
+		if strings.Contains(vendor, "amd") {
+			return "amd"
+		}
+		if strings.Contains(vendor, "intel") {
+			return "intel"
+		}
+		if vendor != "" {
+			return vendor
+		}
+	}
+	return "unknown"
+}
+
+func cpuFlags(content []byte) map[string]bool {
+	flags := map[string]bool{}
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "flags") {
+			continue
+		}
+		_, value, ok := strings.Cut(line, ":")
+		if !ok {
+			return flags
+		}
+		for _, flag := range strings.Fields(value) {
+			flags[flag] = true
+		}
+		return flags
+	}
+	return flags
 }
 
 func diskAvailable(path string) uint64 {

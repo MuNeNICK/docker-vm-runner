@@ -243,6 +243,43 @@ func TestRenderHyperVFeatures(t *testing.T) {
 	}
 }
 
+func TestRenderHyperVVendorFeatures(t *testing.T) {
+	vm := testVM()
+	vm.HyperVEnabled = true
+
+	intelXML := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+		HostCPUVendor:     "intel",
+		HostCPUFlags:      map[string]bool{},
+	})
+	for _, want := range []string{
+		`<apicv state="off"/>`,
+		`<evmcs state="off"/>`,
+	} {
+		if !strings.Contains(intelXML, want) {
+			t.Fatalf("Intel XML missing %q:\n%s", want, intelXML)
+		}
+	}
+
+	amdXML := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+		HostCPUVendor:     "amd",
+		HostCPUFlags:      map[string]bool{},
+	})
+	for _, want := range []string{
+		`<evmcs state="off"/>`,
+		`<avic state="off"/>`,
+	} {
+		if !strings.Contains(amdXML, want) {
+			t.Fatalf("AMD XML missing %q:\n%s", want, amdXML)
+		}
+	}
+}
+
 func TestRenderDomainWithGraphics(t *testing.T) {
 	vm := testVM()
 	vm.GraphicsType = "vnc"

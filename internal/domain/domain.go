@@ -35,6 +35,8 @@ type Request struct {
 	IPv6Enabled       bool
 	IntelRenderNode   bool
 	DisablePasst      bool
+	HostCPUVendor     string
+	HostCPUFlags      map[string]bool
 	BlockSectorSize   func(string) (int, bool)
 }
 
@@ -85,7 +87,7 @@ func (r *Renderer) Render(req Request) (string, error) {
 			empty(&b, feature)
 		}
 		if vm.HyperVEnabled {
-			renderHyperV(&b)
+			renderHyperV(&b, req)
 		}
 		end(&b, "features")
 	}
@@ -337,13 +339,29 @@ func renderGraphics(b *strings.Builder, req Request) {
 	end(b, "channel")
 }
 
-func renderHyperV(b *strings.Builder) {
+func renderHyperV(b *strings.Builder, req Request) {
 	start(b, "hyperv", attr{"mode", "passthrough"})
 	for _, feature := range []string{"relaxed", "vapic", "vpindex", "runtime", "synic", "stimer", "frequencies"} {
 		empty(b, feature, attr{"state", "on"})
 	}
 	empty(b, "spinlocks", attr{"state", "on"}, attr{"retries", "8191"})
+	renderHyperVVendorFeatures(b, req)
 	end(b, "hyperv")
+}
+
+func renderHyperVVendorFeatures(b *strings.Builder, req Request) {
+	switch strings.ToLower(req.HostCPUVendor) {
+	case "amd":
+		empty(b, "evmcs", attr{"state", "off"})
+		if !req.HostCPUFlags["avic"] {
+			empty(b, "avic", attr{"state", "off"})
+		}
+	case "intel":
+		if !req.HostCPUFlags["apicv"] {
+			empty(b, "apicv", attr{"state", "off"})
+		}
+		empty(b, "evmcs", attr{"state", "off"})
+	}
 }
 
 type controller struct {

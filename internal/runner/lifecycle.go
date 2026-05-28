@@ -54,6 +54,8 @@ type ConcreteLifecycle struct {
 	KVMAvailable    func() bool
 	BlockSectorSize func(string) (int, bool)
 	IPv6Available   func() bool
+	CPUVendor       func() string
+	CPUFlags        func() map[string]bool
 
 	workImagePath string
 	seedISOPath   string
@@ -255,6 +257,8 @@ func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmD
 		IPv6Enabled:       l.ipv6Available(),
 		IntelRenderNode:   fileExists("/dev/dri/renderD128"),
 		DisablePasst:      l.disablePasst,
+		HostCPUVendor:     l.cpuVendor(),
+		HostCPUFlags:      l.cpuFlags(),
 		BlockSectorSize:   l.blockSectorSize,
 	})
 	if err != nil {
@@ -776,6 +780,20 @@ func (l *ConcreteLifecycle) ipv6Available() bool {
 		return l.IPv6Available()
 	}
 	return hostinfo.IPv6Available()
+}
+
+func (l *ConcreteLifecycle) cpuVendor() string {
+	if l.CPUVendor != nil {
+		return l.CPUVendor()
+	}
+	return hostinfo.CPUVendor()
+}
+
+func (l *ConcreteLifecycle) cpuFlags() map[string]bool {
+	if l.CPUFlags != nil {
+		return l.CPUFlags()
+	}
+	return hostinfo.CPUFlags()
 }
 
 func isISO(path string) bool {

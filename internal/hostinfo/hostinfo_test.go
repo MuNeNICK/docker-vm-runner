@@ -21,6 +21,21 @@ func TestFirstCPUModel(t *testing.T) {
 	}
 }
 
+func TestCPUVendorAndFlags(t *testing.T) {
+	content := []byte("vendor_id\t: GenuineIntel\nflags\t\t: sse apicv avic\n")
+	if got := cpuVendor(content); got != "intel" {
+		t.Fatalf("cpuVendor = %q", got)
+	}
+	flags := cpuFlags(content)
+	if !flags["apicv"] || !flags["avic"] {
+		t.Fatalf("cpuFlags = %#v", flags)
+	}
+
+	if got := cpuVendor([]byte("vendor_id\t: AuthenticAMD\n")); got != "amd" {
+		t.Fatalf("cpuVendor AMD = %q", got)
+	}
+}
+
 func TestLines(t *testing.T) {
 	lines := Lines(Info{
 		CPUModel:        "Example CPU",
