@@ -48,6 +48,9 @@ func ListDistros(path string, archFilter string) ([]DistroSummary, string, error
 }
 
 func ListDistrosFiltered(path string, filter DistroListFilter) ([]DistroSummary, string, error) {
+	if _, _, err := validateDistroListFilter(filter); err != nil {
+		return nil, "", err
+	}
 	response, err := loadCatalog(path)
 	if err != nil {
 		return nil, "", err
@@ -56,6 +59,9 @@ func ListDistrosFiltered(path string, filter DistroListFilter) ([]DistroSummary,
 }
 
 func ListDistrosFromSource(source catalog.SourceOptions, filter DistroListFilter) ([]DistroSummary, string, error) {
+	if _, _, err := validateDistroListFilter(filter); err != nil {
+		return nil, "", err
+	}
 	response, err := catalog.LoadSource(source)
 	if err != nil {
 		return nil, "", err
@@ -79,22 +85,25 @@ func LoadDistroConfigFromSource(source catalog.SourceOptions, distro string) (Di
 	return distroConfigFromResponse(response, distro)
 }
 
-func ResolveCatalogSource(env MapEnv, configPath string) catalog.SourceOptions {
+func ResolveCatalogSource(env MapEnv, configPath string) (catalog.SourceOptions, error) {
 	cachePath := strings.TrimSpace(env.Get("CATALOG_CACHE", configPath))
 	if cachePath == "" {
 		cachePath = paths.DefaultConfigPath
 	}
-	offline, _ := env.Bool("CATALOG_OFFLINE", false)
+	offline, err := env.Bool("CATALOG_OFFLINE", false)
+	if err != nil {
+		return catalog.SourceOptions{}, err
+	}
 	sourceURL, urlSet := env.Lookup("CATALOG_URL")
 	_, cacheSet := env.Lookup("CATALOG_CACHE")
 	_, offlineSet := env.Lookup("CATALOG_OFFLINE")
 	if !urlSet && !cacheSet && !offlineSet && configPath != "" && configPath != paths.DefaultConfigPath {
-		return catalog.SourceOptions{CachePath: configPath, Offline: true}
+		return catalog.SourceOptions{CachePath: configPath, Offline: true}, nil
 	}
 	if !urlSet {
 		sourceURL = catalog.DefaultURL
 	}
-	return catalog.SourceOptions{URL: strings.TrimSpace(sourceURL), CachePath: cachePath, Offline: offline}
+	return catalog.SourceOptions{URL: strings.TrimSpace(sourceURL), CachePath: cachePath, Offline: offline}, nil
 }
 
 func distroConfigFromResponse(response catalog.Response, distro string) (DistroConfig, error) {
@@ -108,7 +117,7 @@ func distroConfigFromResponse(response catalog.Response, distro string) (DistroC
 			available = append(available, image.ID)
 		}
 		sort.Strings(available)
-		return DistroConfig{}, fmt.Errorf("Unknown catalog image '%s'. Available image IDs: %s", distro, strings.Join(available, ", "))
+		return DistroConfig{}, fmt.Errorf("Unknown catalog image %q. Available image IDs include: %s. Use --list-distros --search %q to search the catalog", distro, summarizeIDs(available, 12), distro)
 	}
 	if !image.HasDirectDownloadURL() {
 		if strings.TrimSpace(image.DownloadPage) != "" {
@@ -136,15 +145,7 @@ func loadCatalog(path string) (catalog.Response, error) {
 }
 
 func listDistrosFromResponse(response catalog.Response, filter DistroListFilter) ([]DistroSummary, string, error) {
-	normalizedArch := ""
-	if strings.TrimSpace(filter.Arch) != "" {
-		arch, err := NormalizeArchitecture(filter.Arch)
-		if err != nil {
-			return nil, "", err
-		}
-		normalizedArch = arch
-	}
-	normalizedImageType, err := normalizeImageTypeFilter(filter.ImageType)
+	normalizedArch, normalizedImageType, err := validateDistroListFilter(filter)
 	if err != nil {
 		return nil, "", err
 	}
@@ -156,7 +157,7 @@ func listDistrosFromResponse(response catalog.Response, filter DistroListFilter)
 		}
 		resolvedArch, err := NormalizeArchitecture(image.Arch)
 		if err != nil {
-			return nil, "", fmt.Errorf("catalog image %q declares unsupported arch %q: %w", image.ID, image.Arch, err)
+			continue
 		}
 		if normalizedArch != "" && resolvedArch != normalizedArch {
 			continue
@@ -171,10 +172,37 @@ func listDistrosFromResponse(response catalog.Response, filter DistroListFilter)
 		if name == "" {
 			name = image.ID
 		}
-		summaries = append(summaries, DistroSummary{Key: image.ID, Name: name, Arch: resolvedArch, User: "user", ImageType: image.ImageType})
+		summaries = append(summaries, DistroSummary{Key: image.ID, Name: name, Arch: displayArchitecture(resolvedArch), User: "user", ImageType: image.ImageType})
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Key < summaries[j].Key })
-	return summaries, normalizedArch, nil
+	return summaries, displayArchitecture(normalizedArch), nil
+}
+
+func validateDistroListFilter(filter DistroListFilter) (string, string, error) {
+	normalizedArch := ""
+	if strings.TrimSpace(filter.Arch) != "" {
+		arch, err := NormalizeArchitecture(filter.Arch)
+		if err != nil {
+			return "", "", err
+		}
+		normalizedArch = arch
+	}
+	normalizedImageType, err := normalizeImageTypeFilter(filter.ImageType)
+	if err != nil {
+		return "", "", err
+	}
+	return normalizedArch, normalizedImageType, nil
+}
+
+func displayArchitecture(arch string) string {
+	switch arch {
+	case "x86_64":
+		return "amd64"
+	case "aarch64":
+		return "arm64"
+	default:
+		return arch
+	}
 }
 
 func normalizeImageTypeFilter(raw string) (string, error) {
@@ -225,6 +253,16 @@ func matchesSearch(image catalog.Image, terms []string) bool {
 		}
 	}
 	return true
+}
+
+func summarizeIDs(ids []string, limit int) string {
+	if len(ids) == 0 {
+		return "none"
+	}
+	if limit < 1 || len(ids) <= limit {
+		return strings.Join(ids, ", ")
+	}
+	return fmt.Sprintf("%s, ... (%d total)", strings.Join(ids[:limit], ", "), len(ids))
 }
 
 func distroConfigFromImage(image catalog.Image) DistroConfig {

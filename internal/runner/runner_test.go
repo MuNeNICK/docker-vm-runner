@@ -41,7 +41,7 @@ func TestListDistrosFiltersByArch(t *testing.T) {
 	if strings.Contains(stdout.String(), "ubuntu") || !strings.Contains(stdout.String(), "fedora-42-arm64") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "aarch64") {
+	if !strings.Contains(stderr.String(), "arm64") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }

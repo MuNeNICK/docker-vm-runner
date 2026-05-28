@@ -207,11 +207,16 @@ func applyRuntimeEnv(lifecycle *ConcreteLifecycle, env config.MapEnv) {
 }
 
 func (r *Runner) printDistros(opts Options) error {
-	distros, normalizedArch, err := config.ListDistrosFromSource(config.ResolveCatalogSource(r.Env, r.DistroConfigPath), config.DistroListFilter{
+	filter := config.DistroListFilter{
 		Arch:      opts.ListArch,
 		ImageType: opts.ListType,
 		Search:    opts.ListSearch,
-	})
+	}
+	catalogSource, err := config.ResolveCatalogSource(r.Env, r.DistroConfigPath)
+	if err != nil {
+		return err
+	}
+	distros, normalizedArch, err := config.ListDistrosFromSource(catalogSource, filter)
 	if err != nil {
 		return err
 	}

@@ -289,3 +289,16 @@ func TestParseNetworkIPXERequiresROM(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParseNetworkRejectsInvalidBooleanEnv(t *testing.T) {
+	_, err := ParseNetwork(MapEnv{"IPXE_ENABLE": "ture"}, NetworkParseOptions{
+		VMName:        "vm",
+		DetectHostMTU: func() int { return 1500 },
+	})
+	if err == nil {
+		t.Fatal("expected boolean error")
+	}
+	if !strings.Contains(err.Error(), "IPXE_ENABLE must be a boolean") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

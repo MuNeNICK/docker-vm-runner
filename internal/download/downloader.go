@@ -29,7 +29,7 @@ type Checksum struct {
 
 func NewDownloader(client *http.Client) *Downloader {
 	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
+		client = &http.Client{}
 	}
 	return &Downloader{
 		Client: client,

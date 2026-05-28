@@ -51,7 +51,19 @@ func BoolFrom(lookup LookupFunc, key string, fallback bool) (bool, error) {
 	if !ok {
 		return fallback, nil
 	}
-	return Truthy[strings.ToLower(raw)], nil
+	return BoolValue(key, raw)
+}
+
+func BoolValue(key string, raw string) (bool, error) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch value {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be a boolean (true/false/1/0/yes/no/on/off, got %q)", key, raw)
+	}
 }
 
 func IntFrom(lookup LookupFunc, key string, fallback string, min int, max *int) (int, error) {

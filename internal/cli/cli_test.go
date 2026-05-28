@@ -22,6 +22,18 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunHelpReturnsZero(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "Usage of docker-vm-runner") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunListDistrosWithArch(t *testing.T) {
 	original := newRunner
 	defer func() { newRunner = original }()

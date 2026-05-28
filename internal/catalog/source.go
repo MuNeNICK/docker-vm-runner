@@ -41,9 +41,7 @@ func LoadSource(opts SourceOptions) (Response, error) {
 		response, parseErr := Load(bytes.NewReader(data))
 		if parseErr == nil {
 			if cachePath != "" {
-				if err := writeCache(cachePath, data); err != nil {
-					return Response{}, err
-				}
+				_ = writeCache(cachePath, data)
 			}
 			return response, nil
 		}
@@ -99,9 +97,33 @@ func writeCache(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create catalog cache directory: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write catalog cache %s: %w", path, err)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create catalog cache temp file: %w", err)
 	}
+	tmpPath := tmp.Name()
+	keepTemp := false
+	defer func() {
+		if !keepTemp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write catalog cache temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync catalog cache temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close catalog cache temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("move catalog cache into place: %w", err)
+	}
+	keepTemp = true
 	return nil
 }
 

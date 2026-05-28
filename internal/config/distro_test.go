@@ -49,7 +49,7 @@ func TestLoadDistroConfigUnknownDistro(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unknown distro error")
 	}
-	if !strings.Contains(err.Error(), "Unknown catalog image 'nonexistent'") {
+	if !strings.Contains(err.Error(), `Unknown catalog image "nonexistent"`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(err.Error(), "ubuntu-24.04-cloud-amd64") {
@@ -57,6 +57,9 @@ func TestLoadDistroConfigUnknownDistro(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "windows-11") {
 		t.Fatalf("error lists image without direct URL: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--list-distros --search") {
+		t.Fatalf("error does not suggest search: %v", err)
 	}
 }
 
@@ -122,6 +125,51 @@ func TestListDistrosFilteredRejectsUnknownType(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported image type") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestListDistrosFilteredValidatesFilterBeforeLoad(t *testing.T) {
+	_, _, err := ListDistrosFiltered(filepath.Join(t.TempDir(), "missing.json"), DistroListFilter{ImageType: "installer"})
+	if err == nil {
+		t.Fatal("expected unsupported type error")
+	}
+	if !strings.Contains(err.Error(), "unsupported image type") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestListDistrosFilteredSkipsUnsupportedImageArch(t *testing.T) {
+	path := writeDistroConfig(t, `{
+	  "meta": {"api_version": "v1", "count": 2},
+	  "images": [
+	    {
+	      "id": "known",
+	      "name": "Known",
+	      "image_type": "cloud-image",
+	      "category": "linux",
+	      "version": "1",
+	      "arch": "amd64",
+	      "url": "https://example.com/known.qcow2",
+	      "status": "supported"
+	    },
+	    {
+	      "id": "unknown-arch",
+	      "name": "Unknown Arch",
+	      "image_type": "cloud-image",
+	      "category": "linux",
+	      "version": "1",
+	      "arch": "mips64",
+	      "url": "https://example.com/unknown.qcow2",
+	      "status": "supported"
+	    }
+	  ]
+	}`)
+	summaries, _, err := ListDistrosFiltered(path, DistroListFilter{})
+	if err != nil {
+		t.Fatalf("ListDistrosFiltered returned error: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].Key != "known" {
+		t.Fatalf("summaries = %#v", summaries)
 	}
 }
 

@@ -324,6 +324,17 @@ func TestResolveDataDirDefaultsPersist(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsInvalidBooleanEnv(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"PERSIST": "ture"})
+	if err == nil {
+		t.Fatal("expected boolean error")
+	}
+	if !strings.Contains(err.Error(), "PERSIST must be a boolean") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveBootModeAndTPM(t *testing.T) {
 	resolver, _ := testResolver(t)
 	cfg, err := resolver.Resolve(MapEnv{"BOOT_MODE": "secure"})

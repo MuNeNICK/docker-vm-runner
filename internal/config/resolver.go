@@ -108,7 +108,11 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	r.setDefaults()
 
 	distro := env.Get("DISTRO", "ubuntu-24.04-cloud-amd64")
-	distroInfo, err := LoadDistroConfigFromSource(ResolveCatalogSource(env, r.DistroConfigPath), distro)
+	catalogSource, err := ResolveCatalogSource(env, r.DistroConfigPath)
+	if err != nil {
+		return VM{}, err
+	}
+	distroInfo, err := LoadDistroConfigFromSource(catalogSource, distro)
 	if err != nil {
 		return VM{}, err
 	}
@@ -162,7 +166,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if bootFrom == "" && catalogISO {
 		bootFrom = distroInfo.URL
 	}
-	blankDisk, _ := env.Bool("BLANK_DISK", false)
+	blankDisk, err := env.Bool("BLANK_DISK", false)
+	if err != nil {
+		return VM{}, err
+	}
 	if strings.EqualFold(bootFrom, "blank") {
 		blankDisk = true
 		bootFrom = ""
@@ -200,16 +207,28 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	}
 
 	persistDefault := r.Layout.DataDir != ""
-	persist, _ := env.Bool("PERSIST", persistDefault)
-	forceISO, _ := env.Bool("FORCE_ISO", false)
-	redfishEnabled, _ := env.Bool("REDFISH_ENABLE", false)
+	persist, err := env.Bool("PERSIST", persistDefault)
+	if err != nil {
+		return VM{}, err
+	}
+	forceISO, err := env.Bool("FORCE_ISO", false)
+	if err != nil {
+		return VM{}, err
+	}
+	redfishEnabled, err := env.Bool("REDFISH_ENABLE", false)
+	if err != nil {
+		return VM{}, err
+	}
 	bootMode, err := resolveBootModeSetting(env.Get("BOOT_MODE", "uefi"))
 	if err != nil {
 		return VM{}, err
 	}
 	tpmEnabled := bootMode == "secure"
 	if _, ok := env.Lookup("TPM"); ok {
-		tpmEnabled, _ = env.Bool("TPM", false)
+		tpmEnabled, err = env.Bool("TPM", false)
+		if err != nil {
+			return VM{}, err
+		}
 	}
 	machineType, err := resolveMachineType(env.Get("MACHINE", ""), arch)
 	if err != nil {
@@ -227,7 +246,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
-	diskPreallocate, _ := env.Bool("ALLOCATE", false)
+	diskPreallocate, err := env.Bool("ALLOCATE", false)
+	if err != nil {
+		return VM{}, err
+	}
 	extraDisks, err := resolveExtraDisks(env, diskController)
 	if err != nil {
 		return VM{}, err
@@ -240,12 +262,30 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
-	usb, _ := env.Bool("USB", true)
-	hyperv, _ := env.Bool("HYPERV", false)
-	balloon, _ := env.Bool("BALLOON", true)
-	rng, _ := env.Bool("RNG", true)
-	ioThread, _ := env.Bool("IO_THREAD", true)
-	requireKVM, _ := env.Bool("REQUIRE_KVM", false)
+	usb, err := env.Bool("USB", true)
+	if err != nil {
+		return VM{}, err
+	}
+	hyperv, err := env.Bool("HYPERV", false)
+	if err != nil {
+		return VM{}, err
+	}
+	balloon, err := env.Bool("BALLOON", true)
+	if err != nil {
+		return VM{}, err
+	}
+	rng, err := env.Bool("RNG", true)
+	if err != nil {
+		return VM{}, err
+	}
+	ioThread, err := env.Bool("IO_THREAD", true)
+	if err != nil {
+		return VM{}, err
+	}
+	requireKVM, err := env.Bool("REQUIRE_KVM", false)
+	if err != nil {
+		return VM{}, err
+	}
 	downloadRetries, err := env.Int("DOWNLOAD_RETRIES", "3", 1, ptr(10))
 	if err != nil {
 		return VM{}, err
@@ -429,7 +469,11 @@ type cloudInitResolution struct {
 func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitResolution, error) {
 	enabled := true
 	if raw, ok := env.Lookup("CLOUD_INIT"); ok {
-		enabled = Truthy[strings.ToLower(strings.TrimSpace(raw))]
+		value, err := BoolValue("CLOUD_INIT", raw)
+		if err != nil {
+			return cloudInitResolution{}, err
+		}
+		enabled = value
 	} else if isoRequested {
 		enabled = false
 	}

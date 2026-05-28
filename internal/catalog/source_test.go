@@ -55,6 +55,25 @@ func TestLoadSourceFallsBackToCache(t *testing.T) {
 	}
 }
 
+func TestLoadSourceContinuesWhenCacheWriteFails(t *testing.T) {
+	dirAsFile := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(dirAsFile, []byte("file"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, sourceCatalogJSON("fetched", "https://example.com/fetched.qcow2"))
+	}))
+	defer server.Close()
+
+	response, err := LoadSource(SourceOptions{URL: server.URL, CachePath: filepath.Join(dirAsFile, "all.json")})
+	if err != nil {
+		t.Fatalf("LoadSource returned error: %v", err)
+	}
+	if response.Images[0].ID != "fetched" {
+		t.Fatalf("image ID = %q", response.Images[0].ID)
+	}
+}
+
 func TestLoadSourceOfflineUsesCacheOnly(t *testing.T) {
 	cachePath := filepath.Join(t.TempDir(), "all.json")
 	if err := os.WriteFile(cachePath, []byte(sourceCatalogJSON("offline", "https://example.com/offline.qcow2")), 0o644); err != nil {

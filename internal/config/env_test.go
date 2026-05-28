@@ -24,7 +24,7 @@ func TestMapEnvBool(t *testing.T) {
 		}
 	}
 
-	for _, value := range []string{"0", "false", "no", "off", "random"} {
+	for _, value := range []string{"0", "false", "no", "off"} {
 		env := MapEnv{"TEST_BOOL": value}
 		got, err := env.Bool("TEST_BOOL", true)
 		if err != nil {
@@ -41,6 +41,13 @@ func TestMapEnvBool(t *testing.T) {
 	}
 	if !got {
 		t.Fatal("Bool default true returned false")
+	}
+}
+
+func TestMapEnvBoolRejectsInvalidValue(t *testing.T) {
+	_, err := (MapEnv{"TEST_BOOL": "random"}).Bool("TEST_BOOL", true)
+	if err == nil {
+		t.Fatal("expected invalid bool error")
 	}
 }
 

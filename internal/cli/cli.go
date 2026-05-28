@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -47,6 +48,9 @@ func runWithEnv(ctx context.Context, args []string, stdout io.Writer, stderr io.
 	args = applyEnvDefaults(args, lookup)
 	opts, err := parse(args, stderr)
 	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if opts.version {

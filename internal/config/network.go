@@ -63,7 +63,10 @@ func ParseNetwork(env MapEnv, opts NetworkParseOptions) (NetworkConfig, error) {
 	}
 
 	result := NetworkConfig{NICs: nics, PortForwards: portForwards}
-	ipxe, _ := env.Bool("IPXE_ENABLE", false)
+	ipxe, err := env.Bool("IPXE_ENABLE", false)
+	if err != nil {
+		return NetworkConfig{}, err
+	}
 	if ipxe {
 		rom, err := resolveIPXEROM(env, opts, result.NICs[0].Model)
 		if err != nil {
@@ -162,7 +165,11 @@ func parseNIC(env MapEnv, opts NetworkParseOptions, index int) (network.Config, 
 	nic.GuestIPv6 = ipv6
 
 	if bootRaw, ok := lookupIndexed(env, "NETWORK_BOOT", index); ok {
-		nic.Boot = Truthy[strings.ToLower(strings.TrimSpace(bootRaw))]
+		boot, err := BoolValue(indexedName("NETWORK_BOOT", index), bootRaw)
+		if err != nil {
+			return network.Config{}, err
+		}
+		nic.Boot = boot
 	}
 	return nic, nil
 }

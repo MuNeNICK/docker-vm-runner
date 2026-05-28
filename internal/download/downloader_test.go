@@ -38,6 +38,13 @@ func TestDownloadSuccess(t *testing.T) {
 	}
 }
 
+func TestNewDownloaderDoesNotSetWholeDownloadTimeout(t *testing.T) {
+	downloader := NewDownloader(nil)
+	if downloader.Client.Timeout != 0 {
+		t.Fatalf("client timeout = %s", downloader.Client.Timeout)
+	}
+}
+
 func TestDownloadChecksumSuccess(t *testing.T) {
 	body := []byte("hello-world")
 	sum := sha256.Sum256(body)
