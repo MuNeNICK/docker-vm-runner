@@ -167,6 +167,23 @@ func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	}
 }
 
+func TestRunCleanupModeOnlyCleansStaleResources(t *testing.T) {
+	lifecycle := &fakeLifecycle{}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{Cleanup: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := "start-services,connect,cleanup-stale,close,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+}
+
 func TestConcreteLifecycleStartsServices(t *testing.T) {
 	service := &fakeServiceSupervisor{}
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
@@ -756,6 +773,27 @@ func TestConcreteLifecycleCleanupKeepsPersistentVMDir(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleCleanupStaleRemovesNonPersistentVMDir(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	manager := &fakeLibvirtManager{}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+
+	if err := lifecycle.CleanupStale(context.Background(), config.VM{VMName: "vm1", Persist: false}); err != nil {
+		t.Fatalf("CleanupStale returned error: %v", err)
+	}
+	if manager.reconcileCalls != 1 {
+		t.Fatalf("reconcileCalls = %d", manager.reconcileCalls)
+	}
+	if _, err := os.Stat(vmDir); !os.IsNotExist(err) {
+		t.Fatalf("vm dir still exists, stat err=%v", err)
+	}
+}
+
 func TestConcreteLifecyclePrepareRemovesLeftoverNonPersistentVMDir(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
@@ -1007,6 +1045,10 @@ func (l *fakeLifecycle) MarkInstalled(context.Context, config.VM) error {
 }
 func (l *fakeLifecycle) Cleanup(context.Context, config.VM) error {
 	l.calls = append(l.calls, "cleanup")
+	return nil
+}
+func (l *fakeLifecycle) CleanupStale(context.Context, config.VM) error {
+	l.calls = append(l.calls, "cleanup-stale")
 	return nil
 }
 func (l *fakeLifecycle) Close(context.Context, config.VM) error {

@@ -307,6 +307,24 @@ func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 	return cleanupErr
 }
 
+func (l *ConcreteLifecycle) CleanupStale(_ context.Context, cfg config.VM) error {
+	if l.Manager == nil {
+		return fmt.Errorf("libvirt manager is not connected")
+	}
+	if cfg.VMName != "" {
+		if err := l.Manager.ReconcileStaleDomain(cfg.VMName); err != nil {
+			return err
+		}
+	}
+	if !cfg.Persist && cfg.VMName != "" {
+		vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
+		if err := os.RemoveAll(vmDir); err != nil {
+			return fmt.Errorf("remove stale non-persistent VM directory: %w", err)
+		}
+	}
+	return nil
+}
+
 func (l *ConcreteLifecycle) Close(_ context.Context, _ config.VM) error {
 	if l.Manager == nil {
 		return nil

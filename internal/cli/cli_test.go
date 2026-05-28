@@ -56,6 +56,23 @@ func TestRunForwardsFlags(t *testing.T) {
 	}
 }
 
+func TestRunForwardsCleanupFlag(t *testing.T) {
+	original := newRunner
+	defer func() { newRunner = original }()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"--cleanup"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.Cleanup {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
 func TestRunReadsNoConsoleFromEnv(t *testing.T) {
 	original := newRunner
 	defer func() { newRunner = original }()

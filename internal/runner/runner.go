@@ -23,6 +23,7 @@ type Options struct {
 	ShowConfig  bool
 	ShowXML     bool
 	DryRun      bool
+	Cleanup     bool
 }
 
 type Lifecycle interface {
@@ -35,6 +36,7 @@ type Lifecycle interface {
 	AttachConsole(context.Context, config.VM) (int, error)
 	MarkInstalled(context.Context, config.VM) error
 	Cleanup(context.Context, config.VM) error
+	CleanupStale(context.Context, config.VM) error
 	Close(context.Context, config.VM) error
 	StopServices(context.Context, config.VM) error
 }
@@ -79,6 +81,9 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 	}
 	if r.Lifecycle == nil {
 		r.Lifecycle = NewConcreteLifecycle(r.layout())
+	}
+	if opts.Cleanup {
+		return r.runCleanup(ctx, cfg)
 	}
 	return r.runLifecycle(ctx, cfg, opts)
 }
@@ -216,6 +221,26 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 	}
 	return nil
+}
+
+func (r *Runner) runCleanup(ctx context.Context, cfg config.VM) (retErr error) {
+	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
+		return err
+	}
+	defer func() {
+		if err := r.Lifecycle.StopServices(ctx, cfg); retErr == nil && err != nil {
+			retErr = err
+		}
+	}()
+	if err := r.Lifecycle.Connect(ctx, cfg); err != nil {
+		return err
+	}
+	defer func() {
+		if err := r.Lifecycle.Close(ctx, cfg); retErr == nil && err != nil {
+			retErr = err
+		}
+	}()
+	return r.Lifecycle.CleanupStale(ctx, cfg)
 }
 
 func PrintConfig(w io.Writer, cfg config.VM) {

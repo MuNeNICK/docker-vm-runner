@@ -21,6 +21,7 @@ type options struct {
 	showConfig  bool
 	showXML     bool
 	dryRun      bool
+	cleanup     bool
 	version     bool
 }
 
@@ -59,6 +60,7 @@ func runWithEnv(ctx context.Context, args []string, stdout io.Writer, stderr io.
 		ShowConfig:  opts.showConfig,
 		ShowXML:     opts.showXML,
 		DryRun:      opts.dryRun,
+		Cleanup:     opts.cleanup,
 	}); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -86,6 +88,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.BoolVar(&opts.showConfig, "show-config", false, "print resolved configuration and exit")
 	fs.BoolVar(&opts.showXML, "show-xml", false, "print resolved libvirt domain XML and exit")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "validate configuration without starting a VM")
+	fs.BoolVar(&opts.cleanup, "cleanup", false, "cleanup stale VM resources and exit")
 	fs.BoolVar(&opts.version, "version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
