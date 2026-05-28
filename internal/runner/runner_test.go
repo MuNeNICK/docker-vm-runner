@@ -324,6 +324,67 @@ func TestConcreteLifecyclePrepareAttachesBootISOWithBlankWorkDisk(t *testing.T) 
 	}
 }
 
+func TestConcreteLifecyclePrepareExtractsAAVMFForAarch64(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "custom.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	firmwareDir := t.TempDir()
+	loader := filepath.Join(firmwareDir, "AAVMF_CODE.fd")
+	vars := filepath.Join(firmwareDir, "AAVMF_VARS.fd")
+	originalProfile := config.SupportedArchitectures["aarch64"]
+	profile := originalProfile
+	profile.Firmware = map[string]config.FirmwareProfile{
+		"default": {Loader: loader, VarsTemplate: vars},
+	}
+	config.SupportedArchitectures["aarch64"] = profile
+	t.Cleanup(func() { config.SupportedArchitectures["aarch64"] = originalProfile })
+
+	installFakeQEMUImg(t)
+	dpkgLog := installFakeCommand(t, "dpkg-deb", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"mkdir -p " + shellQuote(firmwareDir) + "\n" +
+			"printf loader > " + shellQuote(loader) + "\n" +
+			"printf vars > " + shellQuote(vars) + "\n" +
+			"exit 0\n"
+	})
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "arm-vm"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "custom",
+		VMName:         "arm-vm",
+		Arch:           "aarch64",
+		BootMode:       "uefi",
+		ImageFormat:    "qcow2",
+		CPUModel:       "cortex-a72",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "virt",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if !strings.Contains(readFileString(t, dpkgLog), "-x /opt/aavmf.deb /") {
+		t.Fatalf("dpkg-deb log = %q", readFileString(t, dpkgLog))
+	}
+	if !strings.Contains(manager.definedXML, `<loader readonly="yes" secure="no" type="pflash">`+loader+`</loader>`) {
+		t.Fatalf("domain XML missing AAVMF loader:\n%s", manager.definedXML)
+	}
+}
+
 func TestConcreteLifecyclePrepareCreatesExtraDisks(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
@@ -619,12 +680,18 @@ func readFileString(t *testing.T, path string) string {
 
 func installFakeQEMUImg(t *testing.T) string {
 	t.Helper()
+	return installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
+	})
+}
+
+func installFakeCommand(t *testing.T, name string, content func(logPath string) string) string {
+	t.Helper()
 	dir := t.TempDir()
-	logPath := filepath.Join(dir, "qemu-img.log")
-	script := filepath.Join(dir, "qemu-img")
-	content := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
-		t.Fatalf("write fake qemu-img: %v", err)
+	logPath := filepath.Join(dir, name+".log")
+	script := filepath.Join(dir, name)
+	if err := os.WriteFile(script, []byte(content(logPath)), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return logPath

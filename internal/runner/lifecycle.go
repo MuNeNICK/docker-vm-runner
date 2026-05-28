@@ -175,7 +175,13 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 			return err
 		}
 	}
-	fw, err := firmware.NewPreparer(l.Layout.StateDir).Prepare(firmware.Request{
+	firmwarePreparer := firmware.NewPreparer(l.Layout.StateDir)
+	firmwarePreparer.ExtractAAVMF = func() error {
+		command := firmware.AAVMFExtractCommand("/opt/aavmf.deb", "/")
+		_, err := l.CommandRunner.Run(ctx, process.Command{Name: command[0], Args: command[1:]})
+		return err
+	}
+	fw, err := firmwarePreparer.Prepare(firmware.Request{
 		Arch:     cfg.Arch,
 		BootMode: cfg.BootMode,
 		VMName:   cfg.VMName,
