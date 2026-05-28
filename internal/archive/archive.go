@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bodgit/sevenzip"
+	"github.com/nwaples/rardecode/v2"
 	"github.com/ulikunitz/xz"
 )
 
@@ -37,6 +39,10 @@ func (e *Extractor) Extract(ctx context.Context, source string, destDir string) 
 		return extractZip(source, destDir)
 	case ".tar", ".ova":
 		return extractTar(source, destDir)
+	case ".7z":
+		return extractSevenZip(source, destDir)
+	case ".rar":
+		return extractRAR(source, destDir)
 	default:
 		return "", fmt.Errorf("unsupported compressed format: %s", source)
 	}
@@ -215,6 +221,104 @@ func largestTarMember(source string) (tarMember, error) {
 		return tarMember{}, fmt.Errorf("empty tar archive: %s", source)
 	}
 	return largest, nil
+}
+
+func extractSevenZip(source string, destDir string) (string, error) {
+	reader, err := sevenzip.OpenReader(source)
+	if err != nil {
+		return "", fmt.Errorf("open 7z archive %s: %w", source, err)
+	}
+	defer reader.Close()
+
+	var largest *sevenzip.File
+	for _, file := range reader.File {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		if largest == nil || file.UncompressedSize > largest.UncompressedSize {
+			largest = file
+		}
+	}
+	if largest == nil {
+		return "", fmt.Errorf("empty 7z archive: %s", source)
+	}
+
+	outputPath, err := safeJoin(destDir, largest.Name)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
+	input, err := largest.Open()
+	if err != nil {
+		return "", fmt.Errorf("open 7z member %s: %w", largest.Name, err)
+	}
+	defer input.Close()
+	output, err := os.Create(outputPath)
+	if err != nil {
+		return "", fmt.Errorf("create %s: %w", outputPath, err)
+	}
+	defer output.Close()
+	if _, err := io.Copy(output, input); err != nil {
+		return "", fmt.Errorf("extract 7z member %s: %w", largest.Name, err)
+	}
+	return outputPath, nil
+}
+
+func extractRAR(source string, destDir string) (string, error) {
+	files, err := rardecode.List(source)
+	if err != nil {
+		return "", fmt.Errorf("open rar archive %s: %w", source, err)
+	}
+	var largest *rardecode.File
+	for _, file := range files {
+		if file.IsDir {
+			continue
+		}
+		if largest == nil || file.UnPackedSize > largest.UnPackedSize {
+			largest = file
+		}
+	}
+	if largest == nil {
+		return "", fmt.Errorf("empty rar archive: %s", source)
+	}
+
+	outputPath, err := safeJoin(destDir, largest.Name)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
+
+	reader, err := rardecode.OpenReader(source)
+	if err != nil {
+		return "", fmt.Errorf("open rar archive %s: %w", source, err)
+	}
+	defer reader.Close()
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", fmt.Errorf("read rar archive %s: %w", source, err)
+		}
+		if header.Name != largest.Name || header.IsDir {
+			continue
+		}
+		output, err := os.Create(outputPath)
+		if err != nil {
+			return "", fmt.Errorf("create %s: %w", outputPath, err)
+		}
+		defer output.Close()
+		if _, err := io.Copy(output, reader); err != nil {
+			return "", fmt.Errorf("extract rar member %s: %w", header.Name, err)
+		}
+		return outputPath, nil
+	}
+	return "", fmt.Errorf("rar member disappeared: %s", largest.Name)
 }
 
 func safeJoin(destDir string, name string) (string, error) {

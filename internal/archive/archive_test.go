@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ulikunitz/xz"
@@ -84,6 +85,35 @@ func TestExtractZipAndTarLargestFile(t *testing.T) {
 	}
 	if len(readFile(t, got)) != 20 {
 		t.Fatalf("tar extracted size mismatch")
+	}
+}
+
+func TestExtractSevenZipLargestFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "disk.7z")
+	writeFile(t, path, mustBase64(t, "N3q8ryccAASgR6WICAAAAAAAAABmAAAAAAAAAN2R8/FiYXIKZm9vCgEEBgACCQQEAAcLAgABAQABAQAMBAQACAoB6bOiBKhlMn4AAAUCGQUAAAAAABERAGIAYQByAAAAZgBvAG8AAAAZAgAAFBIBAACFM3PyY9YBAFgCcvJj1gEVCgEAIICkgSCApIEAAA=="))
+
+	got, err := NewExtractor().Extract(context.Background(), path, filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("Extract 7z returned error: %v", err)
+	}
+	if filepath.Base(got) != "bar" {
+		t.Fatalf("7z extracted path = %s", got)
+	}
+	if len(readFile(t, got)) != 4 {
+		t.Fatalf("7z extracted size mismatch")
+	}
+}
+
+func TestExtractRARUsesRARDecoder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.rar")
+	writeFile(t, path, []byte("not-rar"))
+
+	_, err := NewExtractor().Extract(context.Background(), path, filepath.Dir(path))
+	if err == nil {
+		t.Fatal("expected rar decode error")
+	}
+	if strings.Contains(err.Error(), "unsupported compressed format") {
+		t.Fatalf("rar should be handled by decoder, got: %v", err)
 	}
 }
 
