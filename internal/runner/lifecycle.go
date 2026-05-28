@@ -275,17 +275,24 @@ func (l *ConcreteLifecycle) MarkInstalled(_ context.Context, cfg config.VM) erro
 	return vmstate.MarkInstalled(vmDir, time.Now().UTC())
 }
 
-func (l *ConcreteLifecycle) Cleanup(ctx context.Context, _ config.VM) error {
+func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 	if l.tpmProcess != nil {
 		_ = l.tpmProcess.Stop()
 	}
 	if l.NoVNC != nil {
 		_ = l.NoVNC.Stop(ctx)
 	}
-	if l.Manager == nil || l.Domain == nil {
-		return nil
+	var cleanupErr error
+	if l.Manager != nil && l.Domain != nil {
+		cleanupErr = l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{HasNVRAM: l.firmware.VarsPath != ""})
 	}
-	return l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{HasNVRAM: l.firmware.VarsPath != ""})
+	if !cfg.Persist && cfg.VMName != "" {
+		vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
+		if err := os.RemoveAll(vmDir); err != nil && cleanupErr == nil {
+			cleanupErr = fmt.Errorf("remove VM directory: %w", err)
+		}
+	}
+	return cleanupErr
 }
 
 func (l *ConcreteLifecycle) Close(_ context.Context, _ config.VM) error {

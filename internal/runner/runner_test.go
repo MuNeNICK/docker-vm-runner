@@ -713,6 +713,49 @@ func TestConcreteLifecyclePrepareCreatesExtraDisks(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleCleanupRemovesNonPersistentVMDir(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vmDir, "disk.qcow2"), []byte("disk"), 0o644); err != nil {
+		t.Fatalf("write disk: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.TPM = nil
+	lifecycle.NoVNC = nil
+
+	if err := lifecycle.Cleanup(context.Background(), config.VM{VMName: "vm1", Persist: false}); err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if _, err := os.Stat(vmDir); !os.IsNotExist(err) {
+		t.Fatalf("vm dir still exists, stat err=%v", err)
+	}
+}
+
+func TestConcreteLifecycleCleanupKeepsPersistentVMDir(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.TPM = nil
+	lifecycle.NoVNC = nil
+
+	if err := lifecycle.Cleanup(context.Background(), config.VM{VMName: "vm1", Persist: true}); err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if _, err := os.Stat(vmDir); err != nil {
+		t.Fatalf("vm dir stat err=%v", err)
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
 	layout := testLayout(t)
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
