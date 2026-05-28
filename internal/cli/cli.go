@@ -124,10 +124,6 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	}
 	remaining := fs.Args()
 	if len(remaining) > 0 {
-		if opts.listDistros && opts.listArch == "" && len(remaining) == 1 {
-			opts.listArch = remaining[0]
-			return opts, nil
-		}
 		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(remaining, " "))
 	}
 	return opts, nil
