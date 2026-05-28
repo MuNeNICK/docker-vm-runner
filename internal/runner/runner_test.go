@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,11 +99,11 @@ func TestAccessLinesIncludeConsoleRedfishAndPublish(t *testing.T) {
 	})
 	text := strings.Join(lines, "\n")
 	for _, needle := range []string{
-		"SSH:     ssh -p 2222 user@localhost",
-		"Console: https://localhost:6080/vnc.html",
-		"Redfish: https://localhost:8443/",
-		"Ports:   8080->80",
-		"Publish: ",
+		"SSH      ssh -p 2222 user@localhost",
+		"Console  https://localhost:6080/vnc.html",
+		"Redfish  https://localhost:8443/",
+		"Ports    8080->80",
+		"Publish  ",
 	} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("missing %q in:\n%s", needle, text)
@@ -120,7 +121,7 @@ func TestPrintAccessUsesReadableBlock(t *testing.T) {
 		NICs:             []network.Config{{Mode: "user", Model: "virtio"}},
 	})
 	text := out.String()
-	for _, needle := range []string{"+", "| Access", "| SSH:     ssh -p 2222 user@localhost"} {
+	for _, needle := range []string{"== Access ==", "SSH      ssh -p 2222 user@localhost"} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("missing %q in:\n%s", needle, text)
 		}
@@ -140,20 +141,50 @@ func TestVMSummaryLines(t *testing.T) {
 		BootOrder:      []string{"hd"},
 	})
 	text := strings.Join(lines, "\n")
-	if !strings.Contains(text, "2 vCPU | 4096 MiB RAM | 20G disk") || !strings.Contains(text, "TPM") {
+	if !strings.Contains(text, "Compute  2 vCPU / 4096 MiB RAM") || !strings.Contains(text, "Features TPM") {
 		t.Fatalf("summary = %q", text)
 	}
 }
 
 func TestProgressLineIncludesBarSpeedAndETA(t *testing.T) {
-	line := progressLine(download.Progress{
+	line := terminalProgressLine(download.Progress{
 		Written: 5 * 1024 * 1024,
 		Total:   10 * 1024 * 1024,
 		Elapsed: time.Second,
 	}, false)
-	for _, needle := range []string{"[###############---------------]", "50.0%", "5.0 MiB/10.0 MiB", "5.0 MiB/s", "ETA 00:01"} {
+	for _, needle := range []string{"███████████████░░░░░░░░░░░░░░░", "50.0%", "5.0 MiB / 10.0 MiB", "5.0 MiB/s", "ETA 00:01"} {
 		if !strings.Contains(line, needle) {
 			t.Fatalf("missing %q in %q", needle, line)
+		}
+	}
+}
+
+func TestOutputRendersTerminalSection(t *testing.T) {
+	var out bytes.Buffer
+	Output{Stdout: &out, Stderr: io.Discard, Mode: OutputTerminal}.Section("Access", []string{"SSH      ssh -p 2222 ubuntu@localhost"})
+
+	text := out.String()
+	for _, needle := range []string{"┌─ Access", "│ SSH      ssh -p 2222 ubuntu@localhost", "└"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("missing %q in:\n%s", needle, text)
+		}
+	}
+}
+
+func TestOutputRendersLogDownloadProgress(t *testing.T) {
+	var stderr bytes.Buffer
+	output := Output{Stdout: io.Discard, Stderr: &stderr, Mode: OutputLog}
+	output.DownloadProgress(download.Progress{
+		Label:   "Downloading base image",
+		Written: 128 * 1024 * 1024,
+		Total:   512 * 1024 * 1024,
+		Elapsed: 4 * time.Second,
+	})
+
+	text := stderr.String()
+	for _, needle := range []string{"[INFO] Downloading base image:", "128.0 MiB / 512.0 MiB", "25.0%", "32.0 MiB/s", "ETA 00:12"} {
+		if !strings.Contains(text, needle) {
+			t.Fatalf("missing %q in:\n%s", needle, text)
 		}
 	}
 }
@@ -353,7 +384,7 @@ func TestRunDryRunPrintsHostDiagnostics(t *testing.T) {
 	if err := r.Run(context.Background(), Options{DryRun: true}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Host") || !strings.Contains(stdout.String(), "KVM:") {
+	if !strings.Contains(stdout.String(), "Host") || !strings.Contains(stdout.String(), "KVM") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 }

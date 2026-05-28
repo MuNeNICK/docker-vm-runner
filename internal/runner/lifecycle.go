@@ -57,6 +57,7 @@ type ConcreteLifecycle struct {
 	CPUVendor       func() string
 	CPUFlags        func() map[string]bool
 	Status          io.Writer
+	Output          *Output
 
 	workImagePath  string
 	seedISOPath    string
@@ -690,108 +691,13 @@ func (l *ConcreteLifecycle) newDownloader(cfg config.VM, label string) *download
 	downloader := download.NewDownloader(nil)
 	downloader.MaxBytes = cfg.DownloadMaxBytes
 	downloader.Label = label
-	downloader.Progress = l.reportDownloadProgress
+	if l.Output != nil {
+		downloader.Progress = l.Output.DownloadProgress
+	} else if l.Status != nil {
+		output := Output{Stderr: l.Status, Stdout: io.Discard, Mode: OutputLog}
+		downloader.Progress = output.DownloadProgress
+	}
 	return downloader
-}
-
-func (l *ConcreteLifecycle) reportDownloadProgress(progress download.Progress) {
-	if l.Status == nil {
-		return
-	}
-	if progress.RetryDelay > 0 && progress.Err != nil {
-		fmt.Fprintf(l.Status, "\n[WARN] Download failed (attempt %d/%d), retrying in %s: %v\n", progress.Attempt, progress.Attempts, progress.RetryDelay, progress.Err)
-		return
-	}
-	label := progress.Label
-	if label == "" {
-		label = "Downloading"
-	}
-	if progress.Written == 0 && !progress.Done {
-		fmt.Fprintf(l.Status, "[INFO] %s: %s\n", label, progress.URL)
-	}
-	if progress.Done {
-		fmt.Fprintf(l.Status, "\r  %s\n", progressLine(progress, true))
-		fmt.Fprintf(l.Status, "[SUCCESS] Downloaded %s in %s\n", formatBytes(progress.Written), formatDuration(progress.Elapsed))
-		return
-	}
-	fmt.Fprintf(l.Status, "\r  %s", progressLine(progress, false))
-}
-
-func progressLine(progress download.Progress, done bool) string {
-	speed := float64(0)
-	if progress.Elapsed > 0 {
-		speed = float64(progress.Written) / progress.Elapsed.Seconds()
-	}
-	if progress.Total > 0 {
-		percent := float64(progress.Written) * 100 / float64(progress.Total)
-		if done {
-			percent = 100
-		}
-		return fmt.Sprintf("[%s] %5.1f%% %s/%s (%s/s, ETA %s)",
-			progressBar(progress.Written, progress.Total, 30),
-			percent,
-			formatMiB(progress.Written),
-			formatMiB(progress.Total),
-			formatMiB(int64(speed)),
-			eta(progress, speed),
-		)
-	}
-	return fmt.Sprintf("%s downloaded (%s/s)", formatMiB(progress.Written), formatMiB(int64(speed)))
-}
-
-func progressBar(written int64, total int64, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	if total <= 0 {
-		return strings.Repeat("-", width)
-	}
-	filled := int(float64(width) * float64(written) / float64(total))
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > width {
-		filled = width
-	}
-	return strings.Repeat("#", filled) + strings.Repeat("-", width-filled)
-}
-
-func eta(progress download.Progress, speed float64) string {
-	if progress.Total <= 0 || speed <= 0 || progress.Written >= progress.Total {
-		return "00:00"
-	}
-	remaining := time.Duration(float64(progress.Total-progress.Written)/speed) * time.Second
-	return formatDuration(remaining)
-}
-
-func formatBytes(value int64) string {
-	const unit = 1024
-	if value < unit {
-		return fmt.Sprintf("%d B", value)
-	}
-	units := []string{"KiB", "MiB", "GiB", "TiB"}
-	v := float64(value)
-	for _, suffix := range units {
-		v /= unit
-		if v < unit {
-			return fmt.Sprintf("%.1f %s", v, suffix)
-		}
-	}
-	return fmt.Sprintf("%.1f PiB", v/unit)
-}
-
-func formatMiB(value int64) string {
-	return fmt.Sprintf("%.1f MiB", float64(value)/(1024*1024))
-}
-
-func formatDuration(value time.Duration) string {
-	if value < 0 {
-		value = 0
-	}
-	totalSeconds := int(value.Round(time.Second).Seconds())
-	minutes := totalSeconds / 60
-	seconds := totalSeconds % 60
-	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
 type imagePostProcessOptions struct {

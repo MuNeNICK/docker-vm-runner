@@ -56,6 +56,7 @@ type Runner struct {
 	DistroConfigPath string
 	Lifecycle        Lifecycle
 	IsMount          func(string) bool
+	OutputMode       OutputMode
 }
 
 func New() *Runner {
@@ -92,8 +93,8 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 			return err
 		}
 		PrintConfig(r.Stdout, cfg)
-		PrintHost(r.Stdout, cfg)
-		PrintAccess(r.Stdout, cfg)
+		r.output().Section("Host", normalizedLines(hostinfo.Lines(hostinfo.Detect(workImageProbePath(cfg)))))
+		r.output().Section("Access", AccessLines(cfg))
 		return nil
 	}
 	if r.Lifecycle == nil {
@@ -209,9 +210,22 @@ func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
 
 func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {
 	lifecycle := NewConcreteLifecycle(r.layout())
+	output := r.output()
 	lifecycle.Status = r.Stderr
+	lifecycle.Output = &output
 	applyRuntimeEnv(lifecycle, r.Env)
 	return lifecycle
+}
+
+func (r *Runner) output() Output {
+	mode := r.OutputMode
+	if mode == OutputAuto {
+		mode = OutputLog
+		if isTerminalWriter(r.Stdout) && isTerminalWriter(r.Stderr) && strings.TrimSpace(r.Env.Get("NO_COLOR", "")) == "" && strings.TrimSpace(r.Env.Get("TERM", "")) != "dumb" {
+			mode = OutputTerminal
+		}
+	}
+	return Output{Stdout: r.Stdout, Stderr: r.Stderr, Mode: mode}
 }
 
 func applyRuntimeEnv(lifecycle *ConcreteLifecycle, env config.MapEnv) {
@@ -267,9 +281,9 @@ func (r *Runner) printDistros(opts Options) error {
 func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) (retErr error) {
 	vmStarted := false
 	vmStopped := false
-	PrintHost(r.Stdout, cfg)
-	PrintVMSummary(r.Stdout, cfg)
-	r.printInfo("Starting VM services")
+	output := r.output()
+	output.Startup(cfg)
+	output.Step("Starting libvirt services")
 	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
 		stopCtx, cancel := lifecycleCleanupContext()
 		defer cancel()
@@ -300,22 +314,22 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 			retErr = err
 		}
 	}()
-	r.printInfo("Preparing VM image and configuration")
+	output.Step("Preparing VM image and configuration")
 	if err := r.Lifecycle.Prepare(ctx, cfg); err != nil {
 		return err
 	}
-	r.printInfo("Starting VM")
+	output.Step("Starting VM")
 	if err := r.Lifecycle.StartVM(ctx, cfg); err != nil {
 		return err
 	}
 	vmStarted = true
-	r.printSuccess("VM started")
-	PrintAccess(r.Stdout, cfg)
+	output.Success("VM started")
+	output.Section("Access", AccessLines(cfg))
 	if opts.NoConsole {
-		r.printInfo("Waiting for VM shutdown")
+		output.HeadlessWait()
 		if cfg.CloudInitEnabled {
 			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
-				r.printWarn(fmt.Sprintf("Guest readiness check did not complete; VM will keep running: %v", err))
+				output.Warn("Guest readiness check did not complete", "VM will keep running. "+err.Error())
 			}
 		}
 		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
@@ -323,7 +337,7 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 		vmStopped = true
 	} else {
-		r.printInfo("Attaching to VM console (Ctrl+] to exit)")
+		output.ConsoleAttach()
 		if code, err := r.Lifecycle.AttachConsole(ctx, cfg); err != nil {
 			return err
 		} else if code != 0 {
@@ -336,25 +350,6 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 	}
 	return nil
-}
-
-func (r *Runner) printInfo(message string) {
-	r.printStatus("INFO", message)
-}
-
-func (r *Runner) printWarn(message string) {
-	r.printStatus("WARN", message)
-}
-
-func (r *Runner) printSuccess(message string) {
-	r.printStatus("SUCCESS", message)
-}
-
-func (r *Runner) printStatus(level string, message string) {
-	if r.Stderr == nil {
-		return
-	}
-	fmt.Fprintf(r.Stderr, "[%s] %s\n", level, message)
 }
 
 func shouldMarkInstalled(cfg config.VM, vmStarted bool, vmStopped bool) bool {
@@ -415,16 +410,15 @@ func PrintConfig(w io.Writer, cfg config.VM) {
 }
 
 func PrintAccess(w io.Writer, cfg config.VM) {
-	printBlock(w, "Access", AccessLines(cfg))
+	Output{Stdout: w, Stderr: io.Discard, Mode: OutputLog}.Section("Access", AccessLines(cfg))
 }
 
 func PrintHost(w io.Writer, cfg config.VM) {
-	printBlock(w, "Host", hostinfo.Lines(hostinfo.Detect(workImageProbePath(cfg))))
+	Output{Stdout: w, Stderr: io.Discard, Mode: OutputLog}.Section("Host", normalizedLines(hostinfo.Lines(hostinfo.Detect(workImageProbePath(cfg)))))
 }
 
 func PrintVMSummary(w io.Writer, cfg config.VM) {
-	title := fmt.Sprintf("%s (%s)", cfg.VMName, cfg.DistroName)
-	printBlock(w, title, VMSummaryLines(cfg))
+	Output{Stdout: w, Stderr: io.Discard, Mode: OutputLog}.Section("VM: "+cfg.Distro, VMSummaryLines(cfg))
 }
 
 func workImageProbePath(cfg config.VM) string {
@@ -446,24 +440,24 @@ func AccessLines(cfg config.VM) []string {
 	portsToPublish := []string{}
 	if hasUserNIC && cfg.SSHPort != 0 {
 		if cfg.CloudInitEnabled {
-			lines = append(lines, fmt.Sprintf("SSH:     ssh -p %d %s@localhost", cfg.SSHPort, cfg.LoginUser))
+			lines = append(lines, fmt.Sprintf("SSH      ssh -p %d %s@localhost", cfg.SSHPort, cfg.LoginUser))
 		} else {
-			lines = append(lines, fmt.Sprintf("SSH:     port %d -> guest:22", cfg.SSHPort))
+			lines = append(lines, fmt.Sprintf("SSH      port %d -> guest:22", cfg.SSHPort))
 		}
 		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.SSHPort, cfg.SSHPort))
 	}
 	if cfg.CloudInitEnabled {
-		lines = append(lines, fmt.Sprintf("Login:   %s / %s", cfg.LoginUser, cfg.Password))
+		lines = append(lines, fmt.Sprintf("Login    %s / %s", cfg.LoginUser, cfg.Password))
 	}
 	if cfg.NoVNCEnabled {
-		lines = append(lines, fmt.Sprintf("Console: https://localhost:%d/vnc.html", cfg.NoVNCPort))
+		lines = append(lines, fmt.Sprintf("Console  https://localhost:%d/vnc.html", cfg.NoVNCPort))
 		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.NoVNCPort, cfg.NoVNCPort))
 	} else if cfg.GraphicsType == "vnc" {
-		lines = append(lines, fmt.Sprintf("VNC:     localhost:%d", cfg.VNCPort))
+		lines = append(lines, fmt.Sprintf("VNC      localhost:%d", cfg.VNCPort))
 		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.VNCPort, cfg.VNCPort))
 	}
 	if cfg.RedfishEnabled {
-		lines = append(lines, fmt.Sprintf("Redfish: https://localhost:%d/", cfg.RedfishPort))
+		lines = append(lines, fmt.Sprintf("Redfish  https://localhost:%d/", cfg.RedfishPort))
 		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.RedfishPort, cfg.RedfishPort))
 	}
 	if len(cfg.PortForwards) > 0 && hasUserNIC {
@@ -472,19 +466,32 @@ func AccessLines(cfg config.VM) []string {
 			forwardLines = append(forwardLines, fmt.Sprintf("%d->%d", forward.HostPort, forward.GuestPort))
 			portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", forward.HostPort, forward.HostPort))
 		}
-		lines = append(lines, "Ports:   "+strings.Join(forwardLines, ", "))
+		lines = append(lines, "Ports    "+strings.Join(forwardLines, ", "))
 	}
 	if len(portsToPublish) > 0 {
 		lines = append(lines, "")
-		lines = append(lines, "Publish: "+strings.Join(portsToPublish, " "))
+		lines = append(lines, "Publish  "+strings.Join(portsToPublish, " "))
 	}
 	return lines
 }
 
 func VMSummaryLines(cfg config.VM) []string {
 	lines := []string{
-		fmt.Sprintf("%d vCPU | %d MiB RAM | %s disk", cfg.CPUs, cfg.MemoryMB, cfg.DiskSize),
-		fmt.Sprintf("%s boot (%s) | %s bus", strings.ToUpper(cfg.BootMode), cfg.MachineType, cfg.DiskController),
+		"Image    " + defaultString(cfg.DistroName, cfg.Distro),
+		fmt.Sprintf("Compute  %d vCPU / %d MiB RAM", cfg.CPUs, cfg.MemoryMB),
+		fmt.Sprintf("Disk     %s %s on %s", cfg.DiskSize, defaultString(cfg.ImageFormat, "qcow2"), cfg.DiskController),
+		fmt.Sprintf("Boot     %s / %s", strings.ToUpper(cfg.BootMode), strings.Join(cfg.BootOrder, ", ")),
+	}
+	if len(cfg.NICs) > 0 {
+		networkLines := make([]string, 0, len(cfg.NICs))
+		for _, nic := range cfg.NICs {
+			mode := nic.Mode
+			if mode == "user" {
+				mode = "user mode"
+			}
+			networkLines = append(networkLines, fmt.Sprintf("%s, %s", mode, nic.Model))
+		}
+		lines = append(lines, "Network  "+strings.Join(networkLines, "; "))
 	}
 	features := []string{}
 	if cfg.TPMEnabled {
@@ -506,37 +513,9 @@ func VMSummaryLines(cfg config.VM) []string {
 		features = append(features, "GPU:"+cfg.GPUPassthrough)
 	}
 	if len(features) > 0 {
-		lines = append(lines, strings.Join(features, " | "))
+		lines = append(lines, "Features "+strings.Join(features, ", "))
 	}
-	for index, nic := range cfg.NICs {
-		label := "NIC"
-		if len(cfg.NICs) > 1 {
-			label = fmt.Sprintf("NIC%d", index+1)
-		}
-		lines = append(lines, fmt.Sprintf("%s: %s (%s)", label, nic.Mode, nic.Model))
-	}
-	lines = append(lines, "Boot: "+strings.Join(cfg.BootOrder, ", "))
 	return lines
-}
-
-func printBlock(w io.Writer, title string, lines []string) {
-	width := len(title)
-	for _, line := range lines {
-		if len(line) > width {
-			width = len(line)
-		}
-	}
-	if width < 56 {
-		width = 56
-	}
-	border := "+" + strings.Repeat("-", width+2) + "+"
-	fmt.Fprintln(w, border)
-	fmt.Fprintf(w, "| %-*s |\n", width, title)
-	fmt.Fprintln(w, border)
-	for _, line := range lines {
-		fmt.Fprintf(w, "| %-*s |\n", width, line)
-	}
-	fmt.Fprintln(w, border)
 }
 
 func toSnake(name string) string {
