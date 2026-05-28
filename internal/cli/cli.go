@@ -89,6 +89,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.SetOutput(stderr)
 	fs.BoolVar(&opts.noConsole, "no-console", false, "do not attach to the VM console")
 	fs.BoolVar(&opts.listDistros, "list-distros", false, "list configured distributions and exit")
+	fs.StringVar(&opts.listArch, "arch", "", "filter --list-distros by architecture")
 	fs.StringVar(&opts.listType, "type", "", "filter --list-distros by image type: cloud-image, iso, or disk-image")
 	fs.StringVar(&opts.listSearch, "search", "", "filter --list-distros by search text")
 	fs.BoolVar(&opts.showConfig, "show-config", false, "print resolved configuration and exit")
@@ -100,10 +101,6 @@ func parse(args []string, stderr io.Writer) (options, error) {
 		return options{}, err
 	}
 	remaining := fs.Args()
-	if opts.listDistros && len(remaining) > 0 {
-		opts.listArch = remaining[0]
-		remaining = remaining[1:]
-	}
 	if len(remaining) > 0 {
 		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(remaining, " "))
 	}

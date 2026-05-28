@@ -29,13 +29,22 @@ func TestRunListDistrosWithArch(t *testing.T) {
 	newRunner = func() appRunner { return fake }
 
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"--list-distros", "arm64"}, &stdout, &stderr)
+	code := run(context.Background(), []string{"--list-distros", "--arch", "arm64"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%q", code, stderr.String())
 	}
 	if !fake.options.ListDistros || fake.options.ListArch != "arm64" {
 		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
+func TestRunListDistrosRejectsPositionalArch(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"--list-distros", "arm64"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("code = %d", code)
 	}
 }
 
