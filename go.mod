@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/bodgit/sevenzip v1.6.4
+	github.com/coder/websocket v1.8.14
 	github.com/google/go-containerregistry v0.21.6
 	github.com/nwaples/rardecode/v2 v2.2.3
 	github.com/ulikunitz/xz v0.5.15
