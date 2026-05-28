@@ -191,6 +191,29 @@ func TestResolveISOCloudInitOverride(t *testing.T) {
 	}
 }
 
+func TestResolveIPXEStoresROMAndBootsNetwork(t *testing.T) {
+	resolver, _ := testResolver(t)
+	rom := "/tmp/ipxe.rom"
+	resolver.ROMExists = func(path string) bool { return path == rom }
+
+	cfg, err := resolver.Resolve(MapEnv{
+		"IPXE_ENABLE":   "1",
+		"IPXE_ROM_PATH": rom,
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !cfg.IPXEEnabled {
+		t.Fatal("IPXEEnabled = false")
+	}
+	if cfg.IPXEROMPath != rom {
+		t.Fatalf("IPXEROMPath = %q", cfg.IPXEROMPath)
+	}
+	if len(cfg.BootOrder) == 0 || cfg.BootOrder[0] != "network" {
+		t.Fatalf("BootOrder = %#v", cfg.BootOrder)
+	}
+}
+
 func TestResolveCloudInitUserDataMissingFile(t *testing.T) {
 	resolver, _ := testResolver(t)
 	missing := filepath.Join(t.TempDir(), "missing.yaml")

@@ -296,6 +296,48 @@ func TestConcreteLifecyclePrepareRequiresKVM(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePreparePassesIPXEROMPath(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"network", "hd"},
+		IPXEEnabled:    true,
+		IPXEROMPath:    "/tmp/ipxe.rom",
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio", Boot: true}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if !strings.Contains(manager.definedXML, `<rom file="/tmp/ipxe.rom"/>`) {
+		t.Fatalf("domain XML missing iPXE ROM:\n%s", manager.definedXML)
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(filepath.Join(layout.VMImagesDir, "vm1"), 0o755); err != nil {

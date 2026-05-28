@@ -245,6 +245,7 @@ func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmD
 		BootISOPath:       l.bootISOPath,
 		FirmwareLoader:    l.firmware.LoaderPath,
 		FirmwareVars:      l.firmware.VarsPath,
+		IPXEROMPath:       cfg.IPXEROMPath,
 		KVMAvailable:      kvmAvailable,
 		EffectiveCPUModel: cfg.CPUModel,
 		IntelRenderNode:   fileExists("/dev/dri/renderD128"),

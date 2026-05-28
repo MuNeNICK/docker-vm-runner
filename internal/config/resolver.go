@@ -59,6 +59,8 @@ type VM struct {
 	BootFrom              string
 	BlankWorkDisk         bool
 	BootOrder             []string
+	IPXEEnabled           bool
+	IPXEROMPath           string
 	CloudInitEnabled      bool
 	CloudInitUserDataPath string
 	Password              string
@@ -178,6 +180,9 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
+	if networkConfig.IPXEEnabled && !contains(bootOrder, "network") {
+		bootOrder = append([]string{"network"}, bootOrder...)
+	}
 	filesystems, err := ParseFilesystems(env, FilesystemParseOptions{})
 	if err != nil {
 		return VM{}, err
@@ -289,6 +294,8 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		BootFrom:              bootFrom,
 		BlankWorkDisk:         blankDisk,
 		BootOrder:             bootOrder,
+		IPXEEnabled:           networkConfig.IPXEEnabled,
+		IPXEROMPath:           networkConfig.IPXEROMPath,
 		CloudInitEnabled:      cloudInit.Enabled,
 		CloudInitUserDataPath: cloudInit.UserDataPath,
 		Password:              env.Get("GUEST_PASSWORD", "password"),
