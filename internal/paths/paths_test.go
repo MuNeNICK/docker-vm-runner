@@ -6,7 +6,7 @@ import (
 )
 
 func TestDefaultConfigPath(t *testing.T) {
-	if DefaultConfigPath != "/config/distros.yaml" {
+	if DefaultConfigPath != "/config/os-iso-catalog/v1/supported.json" {
 		t.Fatalf("DefaultConfigPath = %q", DefaultConfigPath)
 	}
 }

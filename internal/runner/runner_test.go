@@ -34,7 +34,7 @@ func TestListDistrosFiltersByArch(t *testing.T) {
 	if err := r.Run(context.Background(), Options{ListDistros: true, ListArch: "arm64"}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if strings.Contains(stdout.String(), "ubuntu") || !strings.Contains(stdout.String(), "fedora-arm") {
+	if strings.Contains(stdout.String(), "ubuntu") || !strings.Contains(stdout.String(), "fedora-42-arm64") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "aarch64") {
@@ -105,7 +105,7 @@ func TestRunLifecycleNoConsole(t *testing.T) {
 	r := New()
 	r.Stdout = &bytes.Buffer{}
 	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
-	r.Env = config.MapEnv{"DISTRO": "ubuntu", "PERSIST": "1"}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "PERSIST": "1"}
 	r.Lifecycle = lifecycle
 
 	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
@@ -122,7 +122,7 @@ func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
 	r := New()
 	r.Stdout = &bytes.Buffer{}
 	r.DistroConfigPath = writeDistroConfig(t)
-	r.Env = config.MapEnv{"DISTRO": "ubuntu", "DATA_DIR": t.TempDir()}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "DATA_DIR": t.TempDir()}
 	r.Lifecycle = lifecycle
 
 	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
@@ -158,7 +158,7 @@ func TestRunWiresHostFileProbeIntoDefaultResolver(t *testing.T) {
 	r.Stdout = &bytes.Buffer{}
 	r.DistroConfigPath = writeDistroConfig(t)
 	r.Env = config.MapEnv{
-		"DISTRO":               "ubuntu",
+		"DISTRO":               "ubuntu-24.04-server",
 		"CLOUD_INIT_USER_DATA": filepath.Join(t.TempDir(), "missing.yaml"),
 	}
 	r.Lifecycle = lifecycle
@@ -177,7 +177,7 @@ func TestRunShowXML(t *testing.T) {
 	r := New()
 	r.Stdout = &stdout
 	r.DistroConfigPath = writeDistroConfig(t)
-	r.Env = config.MapEnv{"DISTRO": "ubuntu"}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
 	r.Lifecycle = &fakeLifecycle{}
 
 	if err := r.Run(context.Background(), Options{ShowXML: true}); err != nil {
@@ -186,7 +186,7 @@ func TestRunShowXML(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		`<domain type=`,
-		`<name>ubuntu</name>`,
+		`<name>ubuntu-24.04-server</name>`,
 		`<disk type="file" device="disk">`,
 	} {
 		if !strings.Contains(output, want) {
@@ -200,7 +200,7 @@ func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	r := New()
 	r.Stdout = &bytes.Buffer{}
 	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
-	r.Env = config.MapEnv{"DISTRO": "ubuntu"}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
 	r.Lifecycle = lifecycle
 
 	if err := r.Run(context.Background(), Options{NoConsole: true}); err == nil {
@@ -217,7 +217,7 @@ func TestRunCleanupModeOnlyCleansStaleResources(t *testing.T) {
 	r := New()
 	r.Stdout = &bytes.Buffer{}
 	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
-	r.Env = config.MapEnv{"DISTRO": "ubuntu"}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
 	r.Lifecycle = lifecycle
 
 	if err := r.Run(context.Background(), Options{Cleanup: true}); err != nil {
@@ -1408,20 +1408,38 @@ func (l *fakeLifecycle) StopServices(context.Context, config.VM) error {
 
 func writeDistroConfig(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "distros.yaml")
-	content := `
-distributions:
-  ubuntu:
-    name: Ubuntu
-    url: https://example.com/ubuntu.qcow2
-    user: user
-    arch: x86_64
-  fedora-arm:
-    name: Fedora ARM
-    url: https://example.com/fedora.qcow2
-    user: fedora
-    arch: aarch64
-`
+	path := filepath.Join(t.TempDir(), "supported.json")
+	content := `{
+  "meta": {"api_version": "v1", "count": 2},
+  "images": [
+    {
+      "id": "ubuntu-24.04-server",
+      "name": "Ubuntu 24.04 LTS",
+      "category": "linux",
+      "distro": "ubuntu",
+      "version": "24.04",
+      "edition": "Server",
+      "arch": "amd64",
+      "release_type": "stable",
+      "url": "https://example.com/ubuntu.qcow2",
+      "eol": {"standard": "2029-05-31", "is_rolling": false},
+      "status": "supported"
+    },
+    {
+      "id": "fedora-42-arm64",
+      "name": "Fedora 42",
+      "category": "linux",
+      "distro": "fedora",
+      "version": "42",
+      "edition": "Server",
+      "arch": "arm64",
+      "release_type": "stable",
+      "url": "https://example.com/fedora.qcow2",
+      "eol": {"standard": "2026-05-13", "is_rolling": false},
+      "status": "supported"
+    }
+  ]
+}`
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write distro config: %v", err)
 	}

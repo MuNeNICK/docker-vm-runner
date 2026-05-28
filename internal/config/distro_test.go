@@ -9,89 +9,71 @@ import (
 
 func writeDistroConfig(t *testing.T, content string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "distros.yaml")
+	path := filepath.Join(t.TempDir(), "supported.json")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write distro config: %v", err)
+		t.Fatalf("write catalog config: %v", err)
 	}
 	return path
 }
 
 func TestLoadDistroConfig(t *testing.T) {
-	path := writeDistroConfig(t, `
-distributions:
-  ubuntu-2404:
-    name: Ubuntu 24.04
-    url: https://example.com/ubuntu.qcow2
-    user: user
-  alma-aarch64:
-    name: AlmaLinux 9 (aarch64)
-    url: https://example.com/alma-aarch64.qcow2
-    user: user
-    arch: aarch64
-    shell: /bin/bash
-`)
+	path := writeDistroConfig(t, testCatalogJSON())
 
-	cfg, err := LoadDistroConfig(path, "ubuntu-2404")
+	cfg, err := LoadDistroConfig(path, "ubuntu-24.04-server")
 	if err != nil {
 		t.Fatalf("LoadDistroConfig returned error: %v", err)
 	}
-	if cfg.Name != "Ubuntu 24.04" {
+	if cfg.Name != "Ubuntu 24.04 LTS Server" {
 		t.Fatalf("Name = %q", cfg.Name)
 	}
-	if cfg.URL != "https://example.com/ubuntu.qcow2" {
+	if cfg.URL != "https://example.com/ubuntu.iso" {
 		t.Fatalf("URL = %q", cfg.URL)
 	}
 	if cfg.User != "user" {
 		t.Fatalf("User = %q", cfg.User)
 	}
-	if cfg.Arch != "" {
+	if cfg.Arch != "amd64" {
 		t.Fatalf("Arch = %q", cfg.Arch)
+	}
+	if cfg.ChecksumAlgorithm != "sha256" || cfg.ChecksumValue != "abc123" {
+		t.Fatalf("Checksum = %q %q", cfg.ChecksumAlgorithm, cfg.ChecksumValue)
 	}
 }
 
 func TestLoadDistroConfigUnknownDistro(t *testing.T) {
-	path := writeDistroConfig(t, `
-distributions:
-  ubuntu-2404:
-    name: Ubuntu 24.04
-    url: https://example.com/ubuntu.qcow2
-`)
+	path := writeDistroConfig(t, testCatalogJSON())
 	_, err := LoadDistroConfig(path, "nonexistent")
 	if err == nil {
 		t.Fatal("expected unknown distro error")
 	}
-	if !strings.Contains(err.Error(), "Unknown distro 'nonexistent'") {
+	if !strings.Contains(err.Error(), "Unknown catalog image 'nonexistent'") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "ubuntu-2404") {
-		t.Fatalf("error does not list available distros: %v", err)
+	if !strings.Contains(err.Error(), "ubuntu-24.04-server") {
+		t.Fatalf("error does not list available image IDs: %v", err)
 	}
 }
 
 func TestLoadDistroConfigMissingFile(t *testing.T) {
-	_, err := LoadDistroConfig(filepath.Join(t.TempDir(), "missing.yaml"), "ubuntu-2404")
+	_, err := LoadDistroConfig(filepath.Join(t.TempDir(), "missing.json"), "ubuntu-24.04-server")
 	if err == nil {
 		t.Fatal("expected missing file error")
 	}
-	if !strings.Contains(err.Error(), "distribution config missing") {
+	if !strings.Contains(err.Error(), "catalog config missing") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-func TestLoadDistroConfigMalformedYAML(t *testing.T) {
-	path := writeDistroConfig(t, "distributions: [")
-	_, err := LoadDistroConfig(path, "ubuntu-2404")
+func TestLoadDistroConfigMalformedJSON(t *testing.T) {
+	path := writeDistroConfig(t, `{"meta":`)
+	_, err := LoadDistroConfig(path, "ubuntu-24.04-server")
 	if err == nil {
-		t.Fatal("expected malformed YAML error")
+		t.Fatal("expected malformed JSON error")
 	}
 }
 
 func TestLoadDistroConfigMissingRequiredFields(t *testing.T) {
-	path := writeDistroConfig(t, `
-distributions:
-  broken:
-    name: Broken
-`)
+	path := writeDistroConfig(t, `{"meta":{"api_version":"v1"},"images":[{"id":"broken","name":"Broken","category":"linux","version":"1","arch":"amd64","status":"supported"}]}`)
 	_, err := LoadDistroConfig(path, "broken")
 	if err == nil {
 		t.Fatal("expected required field error")
@@ -99,6 +81,41 @@ distributions:
 	if !strings.Contains(err.Error(), "url") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+}
+
+func testCatalogJSON() string {
+	return `{
+	  "meta": {"api_version": "v1", "count": 2},
+	  "images": [
+	    {
+	      "id": "ubuntu-24.04-server",
+	      "name": "Ubuntu 24.04 LTS",
+	      "category": "linux",
+	      "distro": "ubuntu",
+	      "version": "24.04",
+	      "edition": "Server",
+	      "arch": "amd64",
+	      "release_type": "stable",
+	      "url": "https://example.com/ubuntu.iso",
+	      "checksum": {"algorithm": "sha256", "value": "abc123"},
+	      "eol": {"standard": "2029-05-31", "is_rolling": false},
+	      "status": "supported"
+	    },
+	    {
+	      "id": "alma-9-aarch64",
+	      "name": "AlmaLinux 9",
+	      "category": "linux",
+	      "distro": "almalinux",
+	      "version": "9",
+	      "edition": "DVD",
+	      "arch": "aarch64",
+	      "release_type": "stable",
+	      "url": "https://example.com/alma.iso",
+	      "eol": {"standard": "2032-05-31", "is_rolling": false},
+	      "status": "supported"
+	    }
+	  ]
+	}`
 }
 
 func TestNormalizeArchitecture(t *testing.T) {

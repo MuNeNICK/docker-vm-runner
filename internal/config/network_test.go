@@ -7,7 +7,7 @@ import (
 
 func TestParseNetworkDefaultPrimaryNIC(t *testing.T) {
 	cfg, err := ParseNetwork(MapEnv{}, NetworkParseOptions{
-		VMName:        "ubuntu-2404",
+		VMName:        "ubuntu-24.04-server",
 		DetectHostMTU: func() int { return 1500 },
 		ROMExists:     func(string) bool { return false },
 	})
@@ -34,7 +34,7 @@ func TestParseNetworkDefaultPrimaryNIC(t *testing.T) {
 
 func TestParseNetworkAutoDetectsPrimaryMTU(t *testing.T) {
 	cfg, err := ParseNetwork(MapEnv{}, NetworkParseOptions{
-		VMName:        "ubuntu-2404",
+		VMName:        "ubuntu-24.04-server",
 		DetectHostMTU: func() int { return 9000 },
 		ROMExists:     func(string) bool { return false },
 	})

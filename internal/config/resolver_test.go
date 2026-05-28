@@ -11,20 +11,7 @@ import (
 
 func testResolver(t *testing.T) (*Resolver, string) {
 	t.Helper()
-	configPath := writeDistroConfig(t, `
-distributions:
-  ubuntu-2404:
-    name: Ubuntu 24.04
-    url: https://example.com/ubuntu.qcow2
-    user: user
-    arch: x86_64
-    shell: /bin/bash
-  alma-aarch64:
-    name: AlmaLinux 9
-    url: https://example.com/alma-aarch64.qcow2
-    user: user
-    arch: aarch64
-`)
+	configPath := writeDistroConfig(t, testCatalogJSON())
 	resolver := &Resolver{
 		DistroConfigPath:     configPath,
 		Layout:               paths.ResolveLayout("", func(string) bool { return false }),
@@ -52,13 +39,13 @@ func TestResolveDefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if cfg.Distro != "ubuntu-2404" {
+	if cfg.Distro != "ubuntu-24.04-server" {
 		t.Fatalf("Distro = %q", cfg.Distro)
 	}
-	if cfg.DistroName != "Ubuntu 24.04" {
+	if cfg.DistroName != "Ubuntu 24.04 LTS Server" {
 		t.Fatalf("DistroName = %q", cfg.DistroName)
 	}
-	if cfg.ImageURL != "https://example.com/ubuntu.qcow2" {
+	if cfg.ImageURL != "https://example.com/ubuntu.iso" {
 		t.Fatalf("ImageURL = %q", cfg.ImageURL)
 	}
 	if cfg.LoginUser != "user" {
@@ -137,7 +124,7 @@ func TestResolveArchAlias(t *testing.T) {
 
 func TestResolveArchMismatch(t *testing.T) {
 	resolver, _ := testResolver(t)
-	_, err := resolver.Resolve(MapEnv{"DISTRO": "alma-aarch64", "ARCH": "x86_64"})
+	_, err := resolver.Resolve(MapEnv{"DISTRO": "alma-9-aarch64", "ARCH": "x86_64"})
 	if err == nil {
 		t.Fatal("expected mismatch error")
 	}

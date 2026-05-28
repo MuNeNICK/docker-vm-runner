@@ -6,19 +6,23 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/munenick/docker-vm-runner/internal/catalog"
 )
 
 type DistroConfig struct {
-	Name  string `yaml:"name"`
-	URL   string `yaml:"url"`
-	User  string `yaml:"user"`
-	Arch  string `yaml:"arch"`
-	Shell string `yaml:"shell"`
-}
-
-type distroConfigFile struct {
-	Distributions map[string]DistroConfig `yaml:"distributions"`
+	ID                string
+	Name              string
+	URL               string
+	User              string
+	Arch              string
+	Shell             string
+	Category          string
+	Distro            string
+	Version           string
+	Edition           string
+	Status            string
+	ChecksumAlgorithm string
+	ChecksumValue     string
 }
 
 type DistroSummary struct {
@@ -29,19 +33,9 @@ type DistroSummary struct {
 }
 
 func ListDistros(path string, archFilter string) ([]DistroSummary, string, error) {
-	content, err := os.ReadFile(path)
+	response, err := loadCatalog(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, "", fmt.Errorf("distribution config missing: %s", path)
-		}
-		return nil, "", fmt.Errorf("read distribution config %s: %w", path, err)
-	}
-	var file distroConfigFile
-	if err := yaml.Unmarshal(content, &file); err != nil {
-		return nil, "", fmt.Errorf("parse distribution config %s: %w", path, err)
-	}
-	if len(file.Distributions) == 0 {
-		return nil, "", nil
+		return nil, "", err
 	}
 	normalizedArch := ""
 	if strings.TrimSpace(archFilter) != "" {
@@ -51,63 +45,83 @@ func ListDistros(path string, archFilter string) ([]DistroSummary, string, error
 		}
 		normalizedArch = arch
 	}
-	summaries := make([]DistroSummary, 0, len(file.Distributions))
-	for key, distro := range file.Distributions {
-		arch := distro.Arch
-		if strings.TrimSpace(arch) == "" {
-			arch = "x86_64"
-		}
-		resolvedArch, err := NormalizeArchitecture(arch)
+	summaries := make([]DistroSummary, 0, len(response.Images))
+	for _, image := range response.Images {
+		resolvedArch, err := NormalizeArchitecture(image.Arch)
 		if err != nil {
-			return nil, "", fmt.Errorf("distribution %q declares unsupported arch %q: %w", key, arch, err)
+			return nil, "", fmt.Errorf("catalog image %q declares unsupported arch %q: %w", image.ID, image.Arch, err)
 		}
 		if normalizedArch != "" && resolvedArch != normalizedArch {
 			continue
 		}
-		name := distro.Name
+		name := image.Name
 		if name == "" {
-			name = key
+			name = image.ID
 		}
-		user := distro.User
-		if user == "" {
-			user = "user"
-		}
-		summaries = append(summaries, DistroSummary{Key: key, Name: name, Arch: resolvedArch, User: user})
+		summaries = append(summaries, DistroSummary{Key: image.ID, Name: name, Arch: resolvedArch, User: "user"})
 	}
 	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Key < summaries[j].Key })
 	return summaries, normalizedArch, nil
 }
 
 func LoadDistroConfig(path string, distro string) (DistroConfig, error) {
-	content, err := os.ReadFile(path)
+	response, err := loadCatalog(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return DistroConfig{}, fmt.Errorf("distribution config missing: %s", path)
-		}
-		return DistroConfig{}, fmt.Errorf("read distribution config %s: %w", path, err)
+		return DistroConfig{}, err
 	}
-
-	var file distroConfigFile
-	if err := yaml.Unmarshal(content, &file); err != nil {
-		return DistroConfig{}, fmt.Errorf("parse distribution config %s: %w", path, err)
-	}
-	if len(file.Distributions) == 0 {
-		return DistroConfig{}, fmt.Errorf("distribution config %s contains no distributions", path)
-	}
-
-	cfg, ok := file.Distributions[distro]
-	if !ok {
-		available := make([]string, 0, len(file.Distributions))
-		for name := range file.Distributions {
-			available = append(available, name)
+	image, err := catalog.Select(response, catalog.Query{ID: distro})
+	if err != nil {
+		available := make([]string, 0, len(response.Images))
+		for _, image := range response.Images {
+			available = append(available, image.ID)
 		}
 		sort.Strings(available)
-		return DistroConfig{}, fmt.Errorf("Unknown distro '%s'. Available distributions: %s", distro, strings.Join(available, ", "))
+		return DistroConfig{}, fmt.Errorf("Unknown catalog image '%s'. Available image IDs: %s", distro, strings.Join(available, ", "))
 	}
-	if cfg.URL == "" {
-		return DistroConfig{}, fmt.Errorf("distribution %q missing required field url", distro)
+	return distroConfigFromImage(image), nil
+}
+
+func loadCatalog(path string) (catalog.Response, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return catalog.Response{}, fmt.Errorf("catalog config missing: %s", path)
+		}
+		return catalog.Response{}, fmt.Errorf("read catalog config %s: %w", path, err)
 	}
-	return cfg, nil
+	defer file.Close()
+	response, err := catalog.Load(file)
+	if err != nil {
+		return catalog.Response{}, fmt.Errorf("load catalog config %s: %w", path, err)
+	}
+	return response, nil
+}
+
+func distroConfigFromImage(image catalog.Image) DistroConfig {
+	return DistroConfig{
+		ID:                image.ID,
+		Name:              displayImageName(image),
+		URL:               image.URL,
+		User:              "user",
+		Arch:              image.Arch,
+		Category:          image.Category,
+		Distro:            image.Distro,
+		Version:           image.Version,
+		Edition:           image.Edition,
+		Status:            image.Status,
+		ChecksumAlgorithm: image.Checksum.Algorithm,
+		ChecksumValue:     image.Checksum.Value,
+	}
+}
+
+func displayImageName(image catalog.Image) string {
+	if strings.TrimSpace(image.Edition) == "" {
+		return image.Name
+	}
+	if strings.Contains(strings.ToLower(image.Name), strings.ToLower(image.Edition)) {
+		return image.Name
+	}
+	return strings.TrimSpace(image.Name + " " + image.Edition)
 }
 
 func NormalizeArchitecture(raw string) (string, error) {

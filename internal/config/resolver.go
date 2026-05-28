@@ -100,7 +100,7 @@ type VM struct {
 func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	r.setDefaults()
 
-	distro := env.Get("DISTRO", "ubuntu-2404")
+	distro := env.Get("DISTRO", "ubuntu-24.04-server")
 	distroInfo, err := LoadDistroConfig(r.DistroConfigPath, distro)
 	if err != nil {
 		return VM{}, err

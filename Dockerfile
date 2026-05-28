@@ -139,7 +139,7 @@ cgroup_device_acl = [
 ]
 EOF
 
-COPY distros.yaml /config/distros.yaml
+COPY catalog/v1/supported.json /config/os-iso-catalog/v1/supported.json
 
 WORKDIR /
 
