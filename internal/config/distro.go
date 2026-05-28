@@ -21,6 +21,63 @@ type distroConfigFile struct {
 	Distributions map[string]DistroConfig `yaml:"distributions"`
 }
 
+type DistroSummary struct {
+	Key  string
+	Name string
+	Arch string
+	User string
+}
+
+func ListDistros(path string, archFilter string) ([]DistroSummary, string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", fmt.Errorf("distribution config missing: %s", path)
+		}
+		return nil, "", fmt.Errorf("read distribution config %s: %w", path, err)
+	}
+	var file distroConfigFile
+	if err := yaml.Unmarshal(content, &file); err != nil {
+		return nil, "", fmt.Errorf("parse distribution config %s: %w", path, err)
+	}
+	if len(file.Distributions) == 0 {
+		return nil, "", nil
+	}
+	normalizedArch := ""
+	if strings.TrimSpace(archFilter) != "" {
+		arch, err := NormalizeArchitecture(archFilter)
+		if err != nil {
+			return nil, "", err
+		}
+		normalizedArch = arch
+	}
+	summaries := make([]DistroSummary, 0, len(file.Distributions))
+	for key, distro := range file.Distributions {
+		arch := distro.Arch
+		if strings.TrimSpace(arch) == "" {
+			arch = "x86_64"
+		}
+		resolvedArch, err := NormalizeArchitecture(arch)
+		if err != nil {
+			return nil, "", fmt.Errorf("distribution %q declares unsupported arch %q: %w", key, arch, err)
+		}
+		if normalizedArch != "" && resolvedArch != normalizedArch {
+			continue
+		}
+		name := distro.Name
+		if name == "" {
+			name = key
+		}
+		user := distro.User
+		if user == "" {
+			user = "user"
+		}
+		summaries = append(summaries, DistroSummary{Key: key, Name: name, Arch: resolvedArch, User: user})
+	}
+	sort.Slice(summaries, func(i, j int) bool { return summaries[i].Key < summaries[j].Key })
+	return summaries, normalizedArch, nil
+}
+
 func LoadDistroConfig(path string, distro string) (DistroConfig, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {

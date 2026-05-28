@@ -1,19 +1,336 @@
 package runner
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"reflect"
+	"sort"
+	"strings"
+	"unicode"
+
+	"github.com/munenick/docker-vm-runner/internal/config"
+	"github.com/munenick/docker-vm-runner/internal/network"
+	"github.com/munenick/docker-vm-runner/internal/paths"
+)
 
 type Options struct {
 	NoConsole   bool
 	ListDistros bool
+	ListArch    string
 	ShowConfig  bool
+	ShowXML     bool
+	DryRun      bool
 }
 
-type Runner struct{}
+type Lifecycle interface {
+	StartServices(context.Context, config.VM) error
+	Connect(context.Context, config.VM) error
+	Prepare(context.Context, config.VM) error
+	StartVM(context.Context, config.VM) error
+	WaitForGuestReady(context.Context, config.VM) error
+	WaitUntilStopped(context.Context, config.VM) error
+	AttachConsole(context.Context, config.VM) (int, error)
+	MarkInstalled(context.Context, config.VM) error
+	Cleanup(context.Context, config.VM) error
+	Close(context.Context, config.VM) error
+	StopServices(context.Context, config.VM) error
+}
+
+type Runner struct {
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Env              config.MapEnv
+	Resolver         *config.Resolver
+	DistroConfigPath string
+	Lifecycle        Lifecycle
+}
 
 func New() *Runner {
-	return &Runner{}
+	return &Runner{
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		Env:    config.OSMapEnv(),
+	}
 }
 
 func (r *Runner) Run(ctx context.Context, opts Options) error {
+	r.applyDefaults()
+	if opts.ListDistros {
+		return r.printDistros(opts.ListArch)
+	}
+	cfg, err := r.Resolver.Resolve(r.Env)
+	if err != nil {
+		return err
+	}
+	if opts.ShowConfig {
+		PrintConfig(r.Stdout, cfg)
+		return nil
+	}
+	if opts.ShowXML {
+		return fmt.Errorf("--show-xml is not wired yet")
+	}
+	if opts.DryRun {
+		PrintConfig(r.Stdout, cfg)
+		PrintAccess(r.Stdout, cfg)
+		return nil
+	}
+	if r.Lifecycle == nil {
+		return nil
+	}
+	return r.runLifecycle(ctx, cfg, opts)
+}
+
+func (r *Runner) applyDefaults() {
+	if r.Stdout == nil {
+		r.Stdout = io.Discard
+	}
+	if r.Stderr == nil {
+		r.Stderr = io.Discard
+	}
+	if r.Env == nil {
+		r.Env = config.OSMapEnv()
+	}
+	if r.DistroConfigPath == "" {
+		r.DistroConfigPath = paths.DefaultConfigPath
+	}
+	if r.Resolver == nil {
+		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath}
+	}
+}
+
+func (r *Runner) printDistros(arch string) error {
+	distros, normalizedArch, err := config.ListDistros(r.DistroConfigPath, arch)
+	if err != nil {
+		return err
+	}
+	if normalizedArch != "" {
+		fmt.Fprintf(r.Stderr, "Showing distributions for arch: %s\n", normalizedArch)
+	}
+	if len(distros) == 0 {
+		fmt.Fprintln(r.Stderr, "No distributions found")
+		return nil
+	}
+	width := 0
+	for _, distro := range distros {
+		if len(distro.Key) > width {
+			width = len(distro.Key)
+		}
+	}
+	for _, distro := range distros {
+		fmt.Fprintf(r.Stdout, "  %-*s  %s  (arch=%s, user=%s)\n", width, distro.Key, distro.Name, distro.Arch, distro.User)
+	}
 	return nil
+}
+
+func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) (retErr error) {
+	vmStarted := false
+	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
+		return err
+	}
+	defer func() {
+		if err := r.Lifecycle.StopServices(ctx, cfg); retErr == nil && err != nil {
+			retErr = err
+		}
+	}()
+	if err := r.Lifecycle.Connect(ctx, cfg); err != nil {
+		return err
+	}
+	defer func() {
+		if err := r.Lifecycle.Close(ctx, cfg); retErr == nil && err != nil {
+			retErr = err
+		}
+	}()
+	defer func() {
+		if err := r.Lifecycle.Cleanup(ctx, cfg); retErr == nil && err != nil {
+			retErr = err
+		}
+	}()
+	if err := r.Lifecycle.Prepare(ctx, cfg); err != nil {
+		return err
+	}
+	if err := r.Lifecycle.StartVM(ctx, cfg); err != nil {
+		return err
+	}
+	vmStarted = true
+	PrintAccess(r.Stdout, cfg)
+	if opts.NoConsole {
+		if cfg.CloudInitEnabled {
+			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
+				return err
+			}
+		}
+		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
+			return err
+		}
+	} else {
+		if code, err := r.Lifecycle.AttachConsole(ctx, cfg); err != nil {
+			return err
+		} else if code != 0 {
+			return fmt.Errorf("console exited with status %d", code)
+		}
+	}
+	if vmStarted && cfg.Persist {
+		if err := r.Lifecycle.MarkInstalled(ctx, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func PrintConfig(w io.Writer, cfg config.VM) {
+	value := reflect.ValueOf(cfg)
+	typ := value.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		name := toSnake(field.Name)
+		if config.SensitiveFields[name] {
+			fmt.Fprintf(w, "  %s: ********\n", name)
+			continue
+		}
+		fmt.Fprintf(w, "  %s: %v\n", name, value.Field(i).Interface())
+	}
+}
+
+func PrintAccess(w io.Writer, cfg config.VM) {
+	printBlock(w, "Access", AccessLines(cfg))
+}
+
+func AccessLines(cfg config.VM) []string {
+	lines := []string{}
+	hasUserNIC := false
+	for _, nic := range cfg.NICs {
+		if nic.Mode == "user" {
+			hasUserNIC = true
+			break
+		}
+	}
+	portsToPublish := []string{}
+	if hasUserNIC && cfg.SSHPort != 0 {
+		if cfg.CloudInitEnabled {
+			lines = append(lines, fmt.Sprintf("SSH:     ssh -p %d %s@localhost", cfg.SSHPort, cfg.LoginUser))
+		} else {
+			lines = append(lines, fmt.Sprintf("SSH:     port %d -> guest:22", cfg.SSHPort))
+		}
+		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.SSHPort, cfg.SSHPort))
+	}
+	if cfg.CloudInitEnabled {
+		lines = append(lines, fmt.Sprintf("Login:   %s / %s", cfg.LoginUser, cfg.Password))
+	}
+	if cfg.NoVNCEnabled {
+		lines = append(lines, fmt.Sprintf("Console: https://localhost:%d/vnc.html", cfg.NoVNCPort))
+		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.NoVNCPort, cfg.NoVNCPort))
+	} else if cfg.GraphicsType == "vnc" {
+		lines = append(lines, fmt.Sprintf("VNC:     localhost:%d", cfg.VNCPort))
+		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.VNCPort, cfg.VNCPort))
+	}
+	if cfg.RedfishEnabled {
+		lines = append(lines, fmt.Sprintf("Redfish: https://localhost:%d/", cfg.RedfishPort))
+		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.RedfishPort, cfg.RedfishPort))
+	}
+	if len(cfg.PortForwards) > 0 && hasUserNIC {
+		forwardLines := make([]string, 0, len(cfg.PortForwards))
+		for _, forward := range cfg.PortForwards {
+			forwardLines = append(forwardLines, fmt.Sprintf("%d->%d", forward.HostPort, forward.GuestPort))
+			portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", forward.HostPort, forward.HostPort))
+		}
+		lines = append(lines, "Ports:   "+strings.Join(forwardLines, ", "))
+	}
+	if len(portsToPublish) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Publish: "+strings.Join(portsToPublish, " "))
+	}
+	return lines
+}
+
+func VMSummaryLines(cfg config.VM) []string {
+	lines := []string{
+		fmt.Sprintf("%d vCPU | %d MiB RAM | %s disk", cfg.CPUs, cfg.MemoryMB, cfg.DiskSize),
+		fmt.Sprintf("%s boot (%s) | %s bus", strings.ToUpper(cfg.BootMode), cfg.MachineType, cfg.DiskController),
+	}
+	features := []string{}
+	if cfg.TPMEnabled {
+		features = append(features, "TPM")
+	}
+	if cfg.HyperVEnabled {
+		features = append(features, "Hyper-V")
+	}
+	if cfg.IOThread {
+		features = append(features, "IOThread")
+	}
+	if cfg.BalloonEnabled {
+		features = append(features, "Balloon")
+	}
+	if cfg.RNGEnabled {
+		features = append(features, "RNG")
+	}
+	if cfg.GPUPassthrough != "" && cfg.GPUPassthrough != "off" {
+		features = append(features, "GPU:"+cfg.GPUPassthrough)
+	}
+	if len(features) > 0 {
+		lines = append(lines, strings.Join(features, " | "))
+	}
+	for index, nic := range cfg.NICs {
+		label := "NIC"
+		if len(cfg.NICs) > 1 {
+			label = fmt.Sprintf("NIC%d", index+1)
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s (%s)", label, nic.Mode, nic.Model))
+	}
+	lines = append(lines, "Boot: "+strings.Join(cfg.BootOrder, ", "))
+	return lines
+}
+
+func printBlock(w io.Writer, title string, lines []string) {
+	fmt.Fprintf(w, "== %s ==\n", title)
+	for _, line := range lines {
+		fmt.Fprintln(w, line)
+	}
+}
+
+func toSnake(name string) string {
+	var b strings.Builder
+	for i, r := range name {
+		if unicode.IsUpper(r) {
+			if i > 0 {
+				b.WriteByte('_')
+			}
+			b.WriteRune(unicode.ToLower(r))
+			continue
+		}
+		b.WriteRune(r)
+	}
+	replacements := map[string]string{
+		"v_n_c":     "vnc",
+		"no_v_n_c":  "novnc",
+		"s_s_h":     "ssh",
+		"t_p_m":     "tpm",
+		"c_p_us":    "cpus",
+		"u_s_b":     "usb",
+		"r_n_g":     "rng",
+		"g_p_u":     "gpu",
+		"i_o":       "io",
+		"h_t_t_p":   "http",
+		"redfish_i": "redfish_i",
+	}
+	out := b.String()
+	keys := make([]string, 0, len(replacements))
+	for key := range replacements {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
+	for _, key := range keys {
+		out = strings.ReplaceAll(out, key, replacements[key])
+	}
+	return out
+}
+
+func HasUserNIC(nics []network.Config) bool {
+	for _, nic := range nics {
+		if nic.Mode == "user" {
+			return true
+		}
+	}
+	return false
 }

@@ -15,6 +15,17 @@ func OSEnv(key string) (string, bool) {
 	return os.LookupEnv(key)
 }
 
+func OSMapEnv() MapEnv {
+	env := MapEnv{}
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	return env
+}
+
 func (e MapEnv) Lookup(key string) (string, bool) {
 	value, ok := e[key]
 	return value, ok

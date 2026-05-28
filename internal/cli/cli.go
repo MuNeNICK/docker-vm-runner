@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/munenick/docker-vm-runner/internal/runner"
 )
@@ -15,8 +16,19 @@ const version = "dev"
 type options struct {
 	noConsole   bool
 	listDistros bool
+	listArch    string
 	showConfig  bool
+	showXML     bool
+	dryRun      bool
 	version     bool
+}
+
+type appRunner interface {
+	Run(context.Context, runner.Options) error
+}
+
+var newRunner = func() appRunner {
+	return runner.New()
 }
 
 func Main(ctx context.Context, args []string) int {
@@ -33,11 +45,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer)
 		return 0
 	}
 
-	app := runner.New()
+	app := newRunner()
 	if err := app.Run(ctx, runner.Options{
 		NoConsole:   opts.noConsole,
 		ListDistros: opts.listDistros,
+		ListArch:    opts.listArch,
 		ShowConfig:  opts.showConfig,
+		ShowXML:     opts.showXML,
+		DryRun:      opts.dryRun,
 	}); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -52,9 +67,19 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.BoolVar(&opts.noConsole, "no-console", false, "do not attach to the VM console")
 	fs.BoolVar(&opts.listDistros, "list-distros", false, "list configured distributions and exit")
 	fs.BoolVar(&opts.showConfig, "show-config", false, "print resolved configuration and exit")
+	fs.BoolVar(&opts.showXML, "show-xml", false, "print resolved libvirt domain XML and exit")
+	fs.BoolVar(&opts.dryRun, "dry-run", false, "validate configuration without starting a VM")
 	fs.BoolVar(&opts.version, "version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
+	}
+	remaining := fs.Args()
+	if opts.listDistros && len(remaining) > 0 {
+		opts.listArch = remaining[0]
+		remaining = remaining[1:]
+	}
+	if len(remaining) > 0 {
+		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(remaining, " "))
 	}
 	return opts, nil
 }
