@@ -47,6 +47,26 @@ func TestParseFilesystemAutoDerivesTargetAndCreatesSource(t *testing.T) {
 	}
 }
 
+func TestParseFilesystemExpandsHomeSource(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	source := filepath.Join(home, "shared-data")
+
+	shares, err := ParseFilesystems(MapEnv{"FILESYSTEM_SOURCE": "~/shared-data"}, FilesystemParseOptions{})
+	if err != nil {
+		t.Fatalf("ParseFilesystems returned error: %v", err)
+	}
+	if len(shares) != 1 {
+		t.Fatalf("share count = %d", len(shares))
+	}
+	if shares[0].Source != source {
+		t.Fatalf("Source = %q want %q", shares[0].Source, source)
+	}
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("expanded source was not created: %v", err)
+	}
+}
+
 func TestParseFilesystemReadonlyMissingSourceRaises(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "missing-share")
 	_, err := ParseFilesystems(MapEnv{

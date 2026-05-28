@@ -52,7 +52,11 @@ func parseFilesystem(env MapEnv, index int) (FilesystemShare, bool, error) {
 	if strings.TrimSpace(sourceRaw) == "" {
 		return FilesystemShare{}, false, fmt.Errorf("FILESYSTEM%s_SOURCE is required when configuring a filesystem share", suffix)
 	}
-	source := filepath.Clean(strings.TrimSpace(sourceRaw))
+	source, err := expandUserPath(strings.TrimSpace(sourceRaw))
+	if err != nil {
+		return FilesystemShare{}, false, err
+	}
+	source = filepath.Clean(source)
 
 	target := strings.TrimSpace(targetRaw)
 	if target == "" {
@@ -131,6 +135,20 @@ func lookupFilesystem(env MapEnv, base string, index int) (string, bool) {
 		return env.Lookup(fmt.Sprintf("%s%d", base, index))
 	}
 	return env.Lookup(fmt.Sprintf("%s%d_%s", prefix, index, suffix))
+}
+
+func expandUserPath(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("expand FILESYSTEM_SOURCE %q: %w", path, err)
+		}
+		if path == "~" {
+			return home, nil
+		}
+		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
+	}
+	return path, nil
 }
 
 func filesystemSuffix(index int) string {
