@@ -190,12 +190,13 @@ func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
 	if cfg.CloudInitEnabled {
 		seedISOPath = filepath.Join(vmDir, "seed.iso")
 	}
+	bootISOPath := showXMLBootISOPath(cfg, layout)
 	return domain.NewRenderer().Render(domain.Request{
 		VM:                cfg,
 		VMDir:             vmDir,
 		WorkImagePath:     filepath.Join(vmDir, "disk."+imageFormat),
 		SeedISOPath:       seedISOPath,
-		BootISOPath:       cfg.BootFrom,
+		BootISOPath:       bootISOPath,
 		IPXEROMPath:       cfg.IPXEROMPath,
 		KVMAvailable:      hostinfo.FileExists("/dev/kvm"),
 		EffectiveCPUModel: cfg.CPUModel,
@@ -206,6 +207,20 @@ func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
 		BlockSectorSize:   hostinfo.BlockSectorSize,
 		NativeIOUnsafe:    hostinfo.NativeDiskIOUnsafe(filepath.Join(vmDir, "disk."+imageFormat)),
 	})
+}
+
+func showXMLBootISOPath(cfg config.VM, layout paths.Layout) string {
+	if strings.TrimSpace(cfg.BootFrom) == "" {
+		return ""
+	}
+	sourceType := strings.ToLower(strings.TrimSpace(cfg.SourceImageType))
+	if sourceType != "iso" && !isISOBootReference(cfg.BootFrom) {
+		return ""
+	}
+	if isRemoteReference(cfg.BootFrom) {
+		return filepath.Join(layout.BaseImagesDir, "boot", cacheName(cfg.BootFrom))
+	}
+	return cfg.BootFrom
 }
 
 func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {

@@ -32,15 +32,19 @@ func Detect(diskPath string) Info {
 		diskPath = "/"
 	}
 	memTotal, memAvail := parseMemInfo(readFile("/proc/meminfo"))
+	runtimeEngine := runtimeEngineFrom(readFile("/proc/1/cgroup"), fileExists("/.dockerenv"), fileExists("/run/.containerenv") || fileExists("/var/run/.containerenv"))
 	return Info{
-		CPUModel:       firstCPUModel(readFile("/proc/cpuinfo")),
-		CPUCount:       runtime.NumCPU(),
-		MemTotalBytes:  memTotal,
-		MemAvailBytes:  memAvail,
-		DiskAvailBytes: diskAvailable(diskPath),
-		DiskPath:       diskPath,
-		KVMAvailable:   fileExists("/dev/kvm"),
-		Kernel:         kernelRelease(),
+		CPUModel:        firstCPUModel(readFile("/proc/cpuinfo")),
+		CPUCount:        runtime.NumCPU(),
+		MemTotalBytes:   memTotal,
+		MemAvailBytes:   memAvail,
+		DiskAvailBytes:  diskAvailable(diskPath),
+		DiskPath:        diskPath,
+		KVMAvailable:    fileExists("/dev/kvm"),
+		Kernel:          kernelRelease(),
+		RuntimeEngine:   runtimeEngine,
+		RuntimeRootless: runtimeRootlessFromUIDMap(readFile("/proc/self/uid_map"), os.Geteuid()),
+		RuntimePriv:     runtimePrivilegedFromStatus(readFile("/proc/self/status")),
 	}
 }
 
@@ -302,6 +306,63 @@ func cpuFlags(content []byte) map[string]bool {
 		return flags
 	}
 	return flags
+}
+
+func runtimeEngineFrom(cgroup []byte, dockerEnv bool, containerEnv bool) string {
+	text := strings.ToLower(string(cgroup))
+	switch {
+	case strings.Contains(text, "docker"):
+		return "docker"
+	case strings.Contains(text, "libpod"), strings.Contains(text, "podman"):
+		return "podman"
+	case strings.Contains(text, "containerd"):
+		return "containerd"
+	case strings.Contains(text, "kubepods"):
+		return "kubernetes"
+	case dockerEnv:
+		return "docker"
+	case containerEnv:
+		return "podman"
+	default:
+		return ""
+	}
+}
+
+func runtimeRootlessFromUIDMap(content []byte, euid int) bool {
+	if euid != 0 {
+		return true
+	}
+	fields := strings.Fields(string(content))
+	if len(fields) < 3 {
+		return false
+	}
+	inside, errInside := strconv.ParseUint(fields[0], 10, 64)
+	outside, errOutside := strconv.ParseUint(fields[1], 10, 64)
+	if errInside != nil || errOutside != nil {
+		return false
+	}
+	return inside == 0 && outside != 0
+}
+
+func runtimePrivilegedFromStatus(content []byte) bool {
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "CapEff:") {
+			continue
+		}
+		_, raw, ok := strings.Cut(line, ":")
+		if !ok {
+			return false
+		}
+		caps, err := strconv.ParseUint(strings.TrimSpace(raw), 16, 64)
+		if err != nil {
+			return false
+		}
+		const capSysAdmin = 21
+		return caps&(1<<capSysAdmin) != 0
+	}
+	return false
 }
 
 func diskAvailable(path string) uint64 {

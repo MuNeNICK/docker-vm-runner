@@ -373,6 +373,48 @@ func TestRunShowXML(t *testing.T) {
 	}
 }
 
+func TestRunShowXMLDoesNotTreatDiskBootFromAsCDROM(t *testing.T) {
+	disk := filepath.Join(t.TempDir(), "disk.qcow2")
+	if err := os.WriteFile(disk, []byte("disk"), 0o644); err != nil {
+		t.Fatalf("write disk: %v", err)
+	}
+	var stdout bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.Stderr = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "BOOT_FROM": disk}
+
+	if err := r.Run(context.Background(), Options{ShowXML: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	output := stdout.String()
+	if strings.Contains(output, `<device="cdrom"`) || strings.Contains(output, `<source file="`+disk+`"`) {
+		t.Fatalf("show XML should not attach disk BOOT_FROM as CD-ROM:\n%s", output)
+	}
+}
+
+func TestRunShowXMLAttachesISOAsCDROM(t *testing.T) {
+	iso := filepath.Join(t.TempDir(), "installer.iso")
+	if err := os.WriteFile(iso, []byte("iso"), 0o644); err != nil {
+		t.Fatalf("write iso: %v", err)
+	}
+	var stdout bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.Stderr = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "BOOT_FROM": iso}
+
+	if err := r.Run(context.Background(), Options{ShowXML: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `<source file="`+iso+`"`) || !strings.Contains(output, `device="cdrom"`) {
+		t.Fatalf("show XML should attach ISO BOOT_FROM as CD-ROM:\n%s", output)
+	}
+}
+
 func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
 	r := New()
 	r.Stdout = &bytes.Buffer{}
@@ -513,6 +555,39 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 	}
 	if redfishProcess.stopCalls != 1 {
 		t.Fatalf("redfish stop calls = %d", redfishProcess.stopCalls)
+	}
+}
+
+func TestConcreteLifecycleStartsRedfishWhenStoragePoolEnsureFails(t *testing.T) {
+	service := &fakeServiceSupervisor{}
+	manager := &fakeLibvirtManager{
+		domain:         &fakeLibvirtDomain{name: "vm1"},
+		storagePoolErr: errors.New("pool unavailable"),
+	}
+	redfishManager := &fakeRedfishManager{}
+	var status bytes.Buffer
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	lifecycle.Service = service
+	lifecycle.Manager = manager
+	lifecycle.Redfish = redfishManager
+	lifecycle.NoVNC = nil
+	lifecycle.Status = &status
+	lifecycle.RedfishPool = libvirtmgr.StoragePoolRequest{Name: "default", TargetPath: filepath.Join(t.TempDir(), "pool")}
+
+	err := lifecycle.StartServices(context.Background(), config.VM{
+		RedfishEnabled:  true,
+		RedfishUser:     "admin",
+		RedfishPassword: "secret",
+		RedfishPort:     8443,
+	})
+	if err != nil {
+		t.Fatalf("StartServices returned error: %v", err)
+	}
+	if !redfishManager.started {
+		t.Fatal("Redfish was not started")
+	}
+	if !strings.Contains(status.String(), "Redfish storage pool") {
+		t.Fatalf("status = %q", status.String())
 	}
 }
 
@@ -1720,6 +1795,7 @@ type fakeLibvirtManager struct {
 	definedName      string
 	definedXML       string
 	storagePoolCalls int
+	storagePoolErr   error
 	reconcileCalls   int
 	startCalls       int
 	startErrs        []error
@@ -1750,7 +1826,7 @@ func (m *fakeLibvirtManager) Cleanup(libvirtmgr.Domain, libvirtmgr.CleanupOption
 }
 func (m *fakeLibvirtManager) EnsureStoragePool(libvirtmgr.StoragePoolRequest) (libvirtmgr.StoragePool, error) {
 	m.storagePoolCalls++
-	return nil, nil
+	return nil, m.storagePoolErr
 }
 func (m *fakeLibvirtManager) Close() error { return nil }
 

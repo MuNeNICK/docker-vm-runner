@@ -149,7 +149,7 @@ func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (e
 			l.Manager = manager
 		}
 		if _, err := manager.EnsureStoragePool(poolReq); err != nil {
-			return err
+			l.warnf("Redfish storage pool %q could not be ensured: %v", poolReq.Name, err)
 		}
 		if l.Redfish != nil {
 			result, err := l.Redfish.Start(ctx, redfish.Request{
@@ -171,6 +171,16 @@ func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (e
 		}
 	}
 	return nil
+}
+
+func (l *ConcreteLifecycle) warnf(format string, args ...interface{}) {
+	if l.Output != nil {
+		l.Output.Warn(fmt.Sprintf(format, args...))
+		return
+	}
+	if l.Status != nil {
+		fmt.Fprintf(l.Status, "[WARN] "+format+"\n", args...)
+	}
 }
 
 func (l *ConcreteLifecycle) Connect(ctx context.Context, _ config.VM) error {

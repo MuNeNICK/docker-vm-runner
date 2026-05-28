@@ -86,7 +86,7 @@ func applyEnvDefaults(args []string, lookup config.LookupFunc) []string {
 	if value, ok := lookup("NO_CONSOLE"); ok {
 		parsed, err := config.BoolValue("NO_CONSOLE", value)
 		if err == nil {
-			noConsole = parsed
+			return applyNoConsoleDefault(args, parsed)
 		}
 	}
 	graphics, _ := lookup("GRAPHICS")
@@ -96,6 +96,10 @@ func applyEnvDefaults(args []string, lookup config.LookupFunc) []string {
 	if !stdinIsTerminal() {
 		noConsole = true
 	}
+	return applyNoConsoleDefault(args, noConsole)
+}
+
+func applyNoConsoleDefault(args []string, noConsole bool) []string {
 	if !noConsole {
 		return args
 	}

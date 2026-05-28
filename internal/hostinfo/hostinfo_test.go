@@ -64,6 +64,42 @@ func TestLines(t *testing.T) {
 	}
 }
 
+func TestRuntimeEngineFromContainerMarkers(t *testing.T) {
+	if got := runtimeEngineFrom([]byte("0::/docker/abcdef\n"), false, false); got != "docker" {
+		t.Fatalf("docker cgroup engine = %q", got)
+	}
+	if got := runtimeEngineFrom([]byte("0::/libpod-abcdef.scope\n"), false, false); got != "podman" {
+		t.Fatalf("podman cgroup engine = %q", got)
+	}
+	if got := runtimeEngineFrom(nil, true, false); got != "docker" {
+		t.Fatalf("docker marker engine = %q", got)
+	}
+	if got := runtimeEngineFrom(nil, false, true); got != "podman" {
+		t.Fatalf("podman marker engine = %q", got)
+	}
+}
+
+func TestRuntimeRootlessFromUIDMap(t *testing.T) {
+	if !runtimeRootlessFromUIDMap([]byte("0 100000 65536\n"), 0) {
+		t.Fatal("rootless uid map was not detected")
+	}
+	if runtimeRootlessFromUIDMap([]byte("0 0 4294967295\n"), 0) {
+		t.Fatal("host uid map was detected as rootless")
+	}
+	if !runtimeRootlessFromUIDMap(nil, 1000) {
+		t.Fatal("non-root euid was not detected as rootless")
+	}
+}
+
+func TestRuntimePrivilegedFromStatus(t *testing.T) {
+	if !runtimePrivilegedFromStatus([]byte("CapEff:\t0000000000200000\n")) {
+		t.Fatal("CAP_SYS_ADMIN should be treated as privileged")
+	}
+	if runtimePrivilegedFromStatus([]byte("CapEff:\t0000000000000000\n")) {
+		t.Fatal("empty capabilities should not be privileged")
+	}
+}
+
 func TestFilesystemProbes(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "user-data.yaml")

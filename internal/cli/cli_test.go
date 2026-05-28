@@ -155,6 +155,37 @@ func TestRunDisablesConsoleForNoVNC(t *testing.T) {
 	}
 }
 
+func TestRunRespectsExplicitNoConsoleFalseForNoVNC(t *testing.T) {
+	original := newRunner
+	originalTTY := stdinIsTerminal
+	defer func() {
+		newRunner = original
+		stdinIsTerminal = originalTTY
+	}()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+	stdinIsTerminal = func() bool { return true }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(key string) (string, bool) {
+		switch key {
+		case "GRAPHICS":
+			return "novnc", true
+		case "NO_CONSOLE":
+			return "0", true
+		default:
+			return "", false
+		}
+	})
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
 func TestRunDisablesConsoleWithoutTTY(t *testing.T) {
 	originalRunner := newRunner
 	originalTTY := stdinIsTerminal
