@@ -7,7 +7,9 @@ require (
 	github.com/google/go-containerregistry v0.21.6
 	github.com/nwaples/rardecode/v2 v2.2.3
 	github.com/ulikunitz/xz v0.5.15
+	golang.org/x/crypto v0.52.0
 	gopkg.in/yaml.v3 v3.0.1
+	libvirt.org/go/libvirt v1.12003.0
 )
 
 require (
@@ -26,7 +28,7 @@ require (
 	github.com/stangelandcl/ppmd v0.1.0 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.44.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
-	libvirt.org/go/libvirt v1.12003.0 // indirect
+	gotest.tools/v3 v3.5.2 // indirect
 )
