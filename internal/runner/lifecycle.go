@@ -319,6 +319,11 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	if err := copyFile(baseImage, workImage); err != nil {
 		return fmt.Errorf("copy base image to work image: %w", err)
 	}
+	if cfg.DiskSize != "" {
+		if err := images.NewDiskManager(&l.CommandRunner).ResizeDisk(ctx, workImage, cfg.DiskSize); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

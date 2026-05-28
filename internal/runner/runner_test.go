@@ -165,6 +165,7 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
+	commandLog := installFakeQEMUImg(t)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -196,6 +197,9 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	}
 	if got := readFileString(t, filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")); got != "base" {
 		t.Fatalf("work image = %q", got)
+	}
+	if got := readFileString(t, commandLog); !strings.Contains(got, "resize") || !strings.Contains(got, "10G") {
+		t.Fatalf("qemu-img commands = %q", got)
 	}
 }
 
@@ -396,4 +400,21 @@ func readFileString(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(content)
+}
+
+func installFakeQEMUImg(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "qemu-img.log")
+	script := filepath.Join(dir, "qemu-img")
+	content := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
+	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
+		t.Fatalf("write fake qemu-img: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
