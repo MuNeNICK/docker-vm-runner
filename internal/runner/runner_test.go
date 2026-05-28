@@ -338,6 +338,43 @@ func TestConcreteLifecyclePreparePassesIPXEROMPath(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareSeedISOPassesFilesystems(t *testing.T) {
+	layout := testLayout(t)
+	installFakeCommand(t, "genisoimage", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\nexit 0\n"
+	})
+	lifecycle := NewConcreteLifecycle(layout)
+	output := filepath.Join(layout.VMImagesDir, "vm1", "seed.iso")
+
+	err := lifecycle.prepareSeedISO(context.Background(), config.VM{
+		VMName:     "vm1",
+		LoginUser:  "user",
+		LoginShell: "/bin/bash",
+		Password:   "password",
+		Filesystems: []config.FilesystemShare{
+			{Target: "data", Driver: "virtiofs"},
+			{Target: "ro-share", Driver: "9p", Readonly: true},
+		},
+	}, output)
+	if err != nil {
+		t.Fatalf("prepareSeedISO returned error: %v", err)
+	}
+	vendorData := readFileString(t, filepath.Join(filepath.Dir(output), "vendor-data"))
+	for _, want := range []string{
+		"- data",
+		"- /mnt/data",
+		"- virtiofs",
+		"- ro-share",
+		"- /mnt/ro-share",
+		"- 9p",
+		"trans=virtio,version=9p2000.L,_netdev,ro",
+	} {
+		if !strings.Contains(vendorData, want) {
+			t.Fatalf("vendor-data missing %q:\n%s", want, vendorData)
+		}
+	}
+}
+
 func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(filepath.Join(layout.VMImagesDir, "vm1"), 0o755); err != nil {

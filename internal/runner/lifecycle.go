@@ -630,6 +630,7 @@ func (l *ConcreteLifecycle) prepareSeedISO(ctx context.Context, cfg config.VM, o
 		PasswordHash: password.SHA512Crypt,
 		SSHPubKey:    cfg.SSHPubkey,
 		UserData:     userData,
+		Filesystems:  seedFilesystemMounts(cfg.Filesystems),
 	})
 	if err != nil {
 		return err
@@ -639,6 +640,21 @@ func (l *ConcreteLifecycle) prepareSeedISO(ctx context.Context, cfg config.VM, o
 	}
 	l.seedISOPath = outputPath
 	return nil
+}
+
+func seedFilesystemMounts(shares []config.FilesystemShare) []seediso.FilesystemMount {
+	if len(shares) == 0 {
+		return nil
+	}
+	mounts := make([]seediso.FilesystemMount, 0, len(shares))
+	for _, share := range shares {
+		mounts = append(mounts, seediso.FilesystemMount{
+			Tag:      share.Target,
+			Driver:   share.Driver,
+			Readonly: share.Readonly,
+		})
+	}
+	return mounts
 }
 
 func (l *ConcreteLifecycle) libvirtURI() string {
