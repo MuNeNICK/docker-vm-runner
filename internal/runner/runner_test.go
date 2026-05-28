@@ -21,10 +21,12 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/config"
 	"github.com/munenick/docker-vm-runner/internal/download"
 	"github.com/munenick/docker-vm-runner/internal/guestexec"
+	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/paths"
 	"github.com/munenick/docker-vm-runner/internal/redfish"
+	"github.com/munenick/docker-vm-runner/internal/services"
 	"github.com/munenick/docker-vm-runner/internal/tpm"
 	"github.com/munenick/docker-vm-runner/internal/vmstate"
 	"github.com/munenick/docker-vm-runner/internal/vncproxy"
@@ -330,6 +332,22 @@ func TestApplyRuntimeEnvConfiguresConcreteLifecycle(t *testing.T) {
 	}
 }
 
+func TestNewConcreteLifecyclePassesRuntimeInfoToSupervisor(t *testing.T) {
+	r := New()
+	r.DetectHostInfo = func(string) hostinfo.Info {
+		return hostinfo.Info{RuntimeEngine: "docker", RuntimeRootless: true, RuntimePriv: false}
+	}
+
+	lifecycle := r.newConcreteLifecycle()
+	supervisor, ok := lifecycle.Service.(*services.Supervisor)
+	if !ok {
+		t.Fatalf("Service = %T", lifecycle.Service)
+	}
+	if !supervisor.Options.Runtime.Rootless || supervisor.Options.Runtime.Privileged {
+		t.Fatalf("Runtime = %#v", supervisor.Options.Runtime)
+	}
+}
+
 func TestRunWiresHostFileProbeIntoDefaultResolver(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
 	r := New()
@@ -416,8 +434,9 @@ func TestRunShowXMLAttachesISOAsCDROM(t *testing.T) {
 }
 
 func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
+	var stdout bytes.Buffer
 	r := New()
-	r.Stdout = &bytes.Buffer{}
+	r.Stdout = &stdout
 	r.Stderr = &bytes.Buffer{}
 	r.DistroConfigPath = writeDistroConfig(t)
 	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "BOOT_FROM": filepath.Join(t.TempDir(), "missing.iso")}
@@ -428,6 +447,12 @@ func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "BOOT_FROM path not found") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	output := stdout.String()
+	for _, needle := range []string{"v_m_name:", "== Host ==", "== Access =="} {
+		if !strings.Contains(output, needle) {
+			t.Fatalf("dry-run output missing %q:\n%s", needle, output)
+		}
 	}
 }
 
@@ -444,6 +469,26 @@ func TestRunDryRunPrintsHostDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Host") || !strings.Contains(stdout.String(), "KVM") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunPrintsConfigWarnings(t *testing.T) {
+	userData := filepath.Join(t.TempDir(), "user-data.txt")
+	if err := os.WriteFile(userData, []byte("hostname: demo\n"), 0o644); err != nil {
+		t.Fatalf("write user-data: %v", err)
+	}
+	var stderr bytes.Buffer
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &stderr
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "CLOUD_INIT_USER_DATA": userData}
+
+	if err := r.Run(context.Background(), Options{ShowConfig: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "CLOUD_INIT_USER_DATA") {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 

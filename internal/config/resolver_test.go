@@ -290,6 +290,22 @@ func TestResolveCloudInitUserDataInvalidYAML(t *testing.T) {
 	}
 }
 
+func TestResolveCloudInitUserDataWarnsOnUnrecognizedHeader(t *testing.T) {
+	resolver, _ := testResolver(t)
+	userData := filepath.Join(t.TempDir(), "user-data.txt")
+	if err := os.WriteFile(userData, []byte("hostname: demo\n"), 0o644); err != nil {
+		t.Fatalf("write user-data: %v", err)
+	}
+
+	cfg, err := resolver.Resolve(MapEnv{"CLOUD_INIT_USER_DATA": userData})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "CLOUD_INIT_USER_DATA") {
+		t.Fatalf("Warnings = %#v", cfg.Warnings)
+	}
+}
+
 func TestResolveRedfish(t *testing.T) {
 	resolver, _ := testResolver(t)
 	cfg, err := resolver.Resolve(MapEnv{

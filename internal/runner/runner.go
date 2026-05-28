@@ -19,6 +19,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/oci"
 	"github.com/munenick/docker-vm-runner/internal/paths"
+	"github.com/munenick/docker-vm-runner/internal/services"
 )
 
 type Options struct {
@@ -56,6 +57,7 @@ type Runner struct {
 	DistroConfigPath string
 	Lifecycle        Lifecycle
 	IsMount          func(string) bool
+	DetectHostInfo   func(string) hostinfo.Info
 	OutputMode       OutputMode
 }
 
@@ -76,6 +78,7 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
+	r.printWarnings(cfg.Warnings)
 	if opts.ShowConfig {
 		PrintConfig(r.Stdout, cfg)
 		return nil
@@ -89,13 +92,10 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if opts.DryRun {
-		if err := r.validateDryRun(cfg); err != nil {
-			return err
-		}
 		PrintConfig(r.Stdout, cfg)
-		r.output().Section("Host", normalizedLines(hostinfo.Lines(hostinfo.Detect(workImageProbePath(cfg)))))
+		r.output().Section("Host", normalizedLines(hostinfo.Lines(r.hostInfo(cfg))))
 		r.output().Section("Access", AccessLines(cfg))
-		return nil
+		return r.validateDryRun(cfg)
 	}
 	if r.Lifecycle == nil {
 		r.Lifecycle = r.newConcreteLifecycle()
@@ -107,11 +107,15 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 }
 
 func (r *Runner) validateDryRun(cfg config.VM) error {
+	var failures []string
 	if cfg.RequireKVM && !hostinfo.FileExists("/dev/kvm") {
-		return fmt.Errorf("REQUIRE_KVM=1 requires /dev/kvm")
+		failures = append(failures, "REQUIRE_KVM=1 requires /dev/kvm")
 	}
 	if cfg.BootFrom != "" && !isRemoteReference(cfg.BootFrom) && !oci.IsReference(cfg.BootFrom) && !hostinfo.FileExists(cfg.BootFrom) {
-		return fmt.Errorf("BOOT_FROM path not found: %s", cfg.BootFrom)
+		failures = append(failures, fmt.Sprintf("BOOT_FROM path not found: %s", cfg.BootFrom))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("dry-run validation failed: %s", strings.Join(failures, "; "))
 	}
 	return nil
 }
@@ -135,6 +139,9 @@ func (r *Runner) applyDefaults() {
 	}
 	if r.IsMount == nil {
 		r.IsMount = hostinfo.IsMount
+	}
+	if r.DetectHostInfo == nil {
+		r.DetectHostInfo = hostinfo.Detect
 	}
 	if r.Resolver == nil {
 		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath}
@@ -228,8 +235,39 @@ func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {
 	output := r.output()
 	lifecycle.Status = r.Stderr
 	lifecycle.Output = &output
+	applyRuntimeInfo(lifecycle, r.hostInfo(config.VM{}))
 	applyRuntimeEnv(lifecycle, r.Env)
 	return lifecycle
+}
+
+func (r *Runner) hostInfo(cfg config.VM) hostinfo.Info {
+	if r.DetectHostInfo == nil {
+		r.DetectHostInfo = hostinfo.Detect
+	}
+	return r.DetectHostInfo(workImageProbePath(cfg))
+}
+
+func applyRuntimeInfo(lifecycle *ConcreteLifecycle, info hostinfo.Info) {
+	if lifecycle == nil {
+		return
+	}
+	runtimeInfo := services.RuntimeInfo{Rootless: info.RuntimeRootless, Privileged: info.RuntimePriv}
+	if supervisor, ok := lifecycle.Service.(*services.Supervisor); ok {
+		supervisor.Options.Runtime = runtimeInfo
+		return
+	}
+	if lifecycle.Service == nil {
+		lifecycle.Service = services.NewSupervisor(services.Options{Runtime: runtimeInfo})
+	}
+}
+
+func (r *Runner) printWarnings(warnings []string) {
+	output := r.output()
+	for _, warning := range warnings {
+		if strings.TrimSpace(warning) != "" {
+			output.Warn(warning)
+		}
+	}
 }
 
 func (r *Runner) output() Output {

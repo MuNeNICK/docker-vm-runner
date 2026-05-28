@@ -104,6 +104,7 @@ type VM struct {
 	DownloadRetries        int
 	DownloadMaxBytes       int64
 	ExtractMaxBytes        int64
+	Warnings               []string
 }
 
 func (r *Resolver) Resolve(env MapEnv) (VM, error) {
@@ -408,6 +409,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		DownloadRetries:        downloadRetries,
 		DownloadMaxBytes:       downloadMaxBytes,
 		ExtractMaxBytes:        extractMaxBytes,
+		Warnings:               cloudInit.Warnings,
 	}, nil
 }
 
@@ -495,6 +497,7 @@ func (r *Resolver) resourceProbe() units.ResourceProbe {
 type cloudInitResolution struct {
 	Enabled      bool
 	UserDataPath string
+	Warnings     []string
 }
 
 func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitResolution, error) {
@@ -529,9 +532,28 @@ func (r *Resolver) resolveCloudInit(env MapEnv, isoRequested bool) (cloudInitRes
 			if err := yaml.Unmarshal(content, &parsed); err != nil {
 				return cloudInitResolution{}, fmt.Errorf("CLOUD_INIT_USER_DATA contains invalid YAML: %w", err)
 			}
+		} else if firstLine != "" && !isKnownCloudInitHeader(firstLine) {
+			warnings := []string{fmt.Sprintf("CLOUD_INIT_USER_DATA has an unrecognized first line %q; cloud-init may ignore it", firstLine)}
+			return cloudInitResolution{Enabled: enabled, UserDataPath: userDataPath, Warnings: warnings}, nil
 		}
 	}
 	return cloudInitResolution{Enabled: enabled, UserDataPath: userDataPath}, nil
+}
+
+func isKnownCloudInitHeader(firstLine string) bool {
+	switch {
+	case firstLine == "#cloud-config",
+		firstLine == "#include",
+		firstLine == "#include-once",
+		firstLine == "#cloud-boothook",
+		firstLine == "#part-handler",
+		firstLine == "#cloud-config-archive",
+		strings.HasPrefix(firstLine, "#!"),
+		strings.HasPrefix(strings.ToLower(firstLine), "content-type:"):
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveGraphics(display string) (string, bool, error) {

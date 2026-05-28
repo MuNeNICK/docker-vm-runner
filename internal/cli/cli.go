@@ -86,12 +86,13 @@ func applyEnvDefaults(args []string, lookup config.LookupFunc) []string {
 	if value, ok := lookup("NO_CONSOLE"); ok {
 		parsed, err := config.BoolValue("NO_CONSOLE", value)
 		if err == nil {
-			return applyNoConsoleDefault(args, parsed)
+			noConsole = parsed
 		}
-	}
-	graphics, _ := lookup("GRAPHICS")
-	if strings.EqualFold(strings.TrimSpace(graphics), "novnc") {
-		noConsole = true
+	} else {
+		graphics, _ := lookup("GRAPHICS")
+		if strings.EqualFold(strings.TrimSpace(graphics), "novnc") {
+			noConsole = true
+		}
 	}
 	if !stdinIsTerminal() {
 		noConsole = true
