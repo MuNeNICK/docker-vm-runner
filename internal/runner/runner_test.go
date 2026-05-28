@@ -244,6 +244,100 @@ func TestConcreteLifecyclePrepareKeepsPersistentWorkImage(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareCreatesExtraDisks(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	commandLog := installFakeQEMUImg(t)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:          "ubuntu",
+		VMName:          "vm1",
+		Arch:            "x86_64",
+		BootMode:        "legacy",
+		ImageFormat:     "qcow2",
+		CPUModel:        "qemu64",
+		MemoryMB:        1024,
+		CPUs:            1,
+		DiskSize:        "10G",
+		BootOrder:       []string{"hd"},
+		MachineType:     "q35",
+		DiskController:  "virtio",
+		DiskCache:       "none",
+		DiskIO:          "native",
+		NICs:            []network.Config{{Mode: "user", Model: "virtio"}},
+		ExtraDisks:      []config.Disk{{Index: 2, Size: "5G"}, {Index: 4, Size: "20G"}},
+		DiskPreallocate: true,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	log := readFileString(t, commandLog)
+	for _, want := range []string{
+		"create -f qcow2 -o preallocation=falloc " + filepath.Join(layout.VMImagesDir, "vm1", "disk2.qcow2") + " 5G",
+		"create -f qcow2 -o preallocation=falloc " + filepath.Join(layout.VMImagesDir, "vm1", "disk4.qcow2") + " 20G",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("qemu-img commands missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestConcreteLifecyclePrepareKeepsPersistentExtraDisk(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vmDir, "disk.qcow2"), []byte("existing-main"), 0o644); err != nil {
+		t.Fatalf("write work image: %v", err)
+	}
+	extraDisk := filepath.Join(vmDir, "disk2.qcow2")
+	if err := os.WriteFile(extraDisk, []byte("existing-extra"), 0o644); err != nil {
+		t.Fatalf("write extra disk: %v", err)
+	}
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		ExtraDisks:     []config.Disk{{Index: 2, Size: "5G"}},
+		Persist:        true,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if got := readFileString(t, extraDisk); got != "existing-extra" {
+		t.Fatalf("extra disk = %q", got)
+	}
+}
+
 func TestEmulatorPackageMapsSupportedArchitectures(t *testing.T) {
 	tests := []struct {
 		arch       string

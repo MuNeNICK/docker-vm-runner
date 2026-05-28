@@ -167,6 +167,9 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 	if err := l.prepareDisk(ctx, cfg, l.workImagePath); err != nil {
 		return err
 	}
+	if err := l.prepareExtraDisks(ctx, cfg, vmDir); err != nil {
+		return err
+	}
 	if l.EnsureEmulator != nil {
 		if err := l.EnsureEmulator(ctx, cfg.Arch); err != nil {
 			return err
@@ -321,6 +324,34 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	}
 	if cfg.DiskSize != "" {
 		if err := images.NewDiskManager(&l.CommandRunner).ResizeDisk(ctx, workImage, cfg.DiskSize); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *ConcreteLifecycle) prepareExtraDisks(ctx context.Context, cfg config.VM, vmDir string) error {
+	if len(cfg.ExtraDisks) == 0 {
+		return nil
+	}
+	diskManager := images.NewDiskManager(&l.CommandRunner)
+	format := defaultString(cfg.ImageFormat, "qcow2")
+	for _, disk := range cfg.ExtraDisks {
+		path := filepath.Join(vmDir, fmt.Sprintf("disk%d.%s", disk.Index, format))
+		if fileExists(path) {
+			if cfg.Persist {
+				continue
+			}
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("replace extra disk %s: %w", path, err)
+			}
+		}
+		if err := diskManager.CreateDisk(ctx, images.CreateDiskRequest{
+			Path:        path,
+			Format:      format,
+			Size:        disk.Size,
+			Preallocate: cfg.DiskPreallocate,
+		}); err != nil {
 			return err
 		}
 	}

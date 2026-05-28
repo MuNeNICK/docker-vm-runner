@@ -203,6 +203,50 @@ func TestRenderDomainWithGraphics(t *testing.T) {
 	}
 }
 
+func TestRenderDomainWithNoVNCBackend(t *testing.T) {
+	vm := testVM()
+	vm.GraphicsType = "vnc"
+	vm.NoVNCEnabled = true
+	vm.VNCPort = 5901
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<graphics type="vnc" listen="0.0.0.0" port="5901" autoport="no"/>`,
+		`<video>`,
+		`<model type="virtio" heads="1" primary="yes">`,
+		`<channel type="qemu-vdagent">`,
+		`<clipboard copypaste="yes"/>`,
+		`<mouse mode="client"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
+func TestRenderDomainDeviceOrdering(t *testing.T) {
+	vm := testVM()
+	vm.GraphicsType = "vnc"
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		SeedISOPath:       "/vm/seed.iso",
+		EffectiveCPUModel: "qemu64",
+	})
+	names := deviceChildNames(t, xmlText)
+	assertOrder(t, names, "disk", "interface")
+	assertOrder(t, names, "interface", "controller")
+	assertOrder(t, names, "controller", "channel")
+	assertOrder(t, names, "channel", "serial")
+	assertOrder(t, names, "serial", "console")
+	assertOrder(t, names, "console", "graphics")
+	assertOrder(t, names, "graphics", "video")
+}
+
 func TestRenderDomainWithSeedAndBootISO(t *testing.T) {
 	vm := testVM()
 	vm.BootOrder = []string{"cdrom", "hd"}
@@ -313,4 +357,44 @@ func TestRenderDomainWithExtraDisksBlockDeviceAndQEMUArgs(t *testing.T) {
 			t.Fatalf("XML missing %q:\n%s", want, xmlText)
 		}
 	}
+}
+
+type domainXML struct {
+	Devices struct {
+		Children []xml.Name `xml:",any"`
+	} `xml:"devices"`
+}
+
+func deviceChildNames(t *testing.T, xmlText string) []string {
+	t.Helper()
+	var parsed domainXML
+	if err := xml.Unmarshal([]byte(xmlText), &parsed); err != nil {
+		t.Fatalf("unmarshal domain XML: %v", err)
+	}
+	var names []string
+	for _, name := range parsed.Devices.Children {
+		names = append(names, name.Local)
+	}
+	return names
+}
+
+func assertOrder(t *testing.T, names []string, before string, after string) {
+	t.Helper()
+	beforeIndex := indexOf(names, before)
+	afterIndex := indexOf(names, after)
+	if beforeIndex == -1 || afterIndex == -1 {
+		t.Fatalf("names missing %q or %q: %#v", before, after, names)
+	}
+	if beforeIndex >= afterIndex {
+		t.Fatalf("device order %q before %q not satisfied: %#v", before, after, names)
+	}
+}
+
+func indexOf(values []string, want string) int {
+	for index, value := range values {
+		if value == want {
+			return index
+		}
+	}
+	return -1
 }

@@ -381,6 +381,17 @@ func TestResolveExtraDisks(t *testing.T) {
 	}
 }
 
+func TestResolveInvalidExtraDiskSize(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"DISK2_SIZE": "not-a-size"})
+	if err == nil {
+		t.Fatal("expected extra disk size error")
+	}
+	if !strings.Contains(err.Error(), "invalid DISK2_SIZE") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveFilesystems(t *testing.T) {
 	resolver, _ := testResolver(t)
 	source := t.TempDir()
