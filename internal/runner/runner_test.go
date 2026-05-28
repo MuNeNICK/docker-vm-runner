@@ -172,6 +172,29 @@ func TestRunWiresHostFileProbeIntoDefaultResolver(t *testing.T) {
 	}
 }
 
+func TestRunShowXML(t *testing.T) {
+	var stdout bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu"}
+	r.Lifecycle = &fakeLifecycle{}
+
+	if err := r.Run(context.Background(), Options{ShowXML: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		`<domain type=`,
+		`<name>ubuntu</name>`,
+		`<disk type="file" device="disk">`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("show XML output missing %q:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	lifecycle := &fakeLifecycle{prepareErr: os.ErrPermission}
 	r := New()

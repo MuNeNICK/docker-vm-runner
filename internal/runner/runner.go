@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/munenick/docker-vm-runner/internal/config"
+	"github.com/munenick/docker-vm-runner/internal/domain"
 	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
@@ -73,7 +75,12 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if opts.ShowXML {
-		return fmt.Errorf("--show-xml is not wired yet")
+		xmlText, err := r.renderDomainXML(cfg)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(r.Stdout, xmlText)
+		return nil
 	}
 	if opts.DryRun {
 		PrintConfig(r.Stdout, cfg)
@@ -143,6 +150,34 @@ func (r *Runner) applyResolverDefaults() {
 
 func (r *Runner) layout() paths.Layout {
 	return paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), nil)
+}
+
+func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
+	layout := r.layout()
+	vmDir := filepath.Join(layout.VMImagesDir, cfg.VMName)
+	imageFormat := cfg.ImageFormat
+	if imageFormat == "" {
+		imageFormat = "qcow2"
+	}
+	seedISOPath := ""
+	if cfg.CloudInitEnabled {
+		seedISOPath = filepath.Join(vmDir, "seed.iso")
+	}
+	return domain.NewRenderer().Render(domain.Request{
+		VM:                cfg,
+		VMDir:             vmDir,
+		WorkImagePath:     filepath.Join(vmDir, "disk."+imageFormat),
+		SeedISOPath:       seedISOPath,
+		BootISOPath:       cfg.BootFrom,
+		IPXEROMPath:       cfg.IPXEROMPath,
+		KVMAvailable:      hostinfo.FileExists("/dev/kvm"),
+		EffectiveCPUModel: cfg.CPUModel,
+		IPv6Enabled:       hostinfo.IPv6Available(),
+		IntelRenderNode:   hostinfo.FileExists("/dev/dri/renderD128"),
+		HostCPUVendor:     hostinfo.CPUVendor(),
+		HostCPUFlags:      hostinfo.CPUFlags(),
+		BlockSectorSize:   hostinfo.BlockSectorSize,
+	})
 }
 
 func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {
