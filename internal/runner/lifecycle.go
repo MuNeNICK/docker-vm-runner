@@ -291,6 +291,15 @@ func (l *ConcreteLifecycle) StopServices(ctx context.Context, _ config.VM) error
 
 func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, workImage string) error {
 	if cfg.BlankWorkDisk {
+		if cfg.BootFrom != "" {
+			source, err := l.resolveBootSource(ctx, cfg.BootFrom, cfg.DownloadRetries)
+			if err != nil {
+				return err
+			}
+			if isISO(source) {
+				l.bootISOPath = source
+			}
+		}
 		return images.NewDiskManager(&l.CommandRunner).CreateDisk(ctx, images.CreateDiskRequest{
 			Path:        workImage,
 			Format:      defaultString(cfg.ImageFormat, "qcow2"),

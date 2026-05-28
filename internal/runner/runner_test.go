@@ -280,6 +280,50 @@ func TestConcreteLifecyclePrepareCreatesBlankWorkDisk(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareAttachesBootISOWithBlankWorkDisk(t *testing.T) {
+	layout := testLayout(t)
+	bootISO := filepath.Join(t.TempDir(), "installer.iso")
+	if err := os.WriteFile(bootISO, []byte("iso"), 0o644); err != nil {
+		t.Fatalf("write boot iso: %v", err)
+	}
+	commandLog := installFakeQEMUImg(t)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "custom",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "8G",
+		BootFrom:       bootISO,
+		BlankWorkDisk:  true,
+		BootOrder:      []string{"cdrom", "hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if !strings.Contains(manager.definedXML, `<source file="`+bootISO+`"/>`) {
+		t.Fatalf("domain XML missing boot ISO %q:\n%s", bootISO, manager.definedXML)
+	}
+	want := "create -f qcow2 " + filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2") + " 8G"
+	if got := readFileString(t, commandLog); !strings.Contains(got, want) {
+		t.Fatalf("qemu-img commands missing %q:\n%s", want, got)
+	}
+}
+
 func TestConcreteLifecyclePrepareCreatesExtraDisks(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
