@@ -105,7 +105,7 @@ func TestStartReusesExistingCertificatePair(t *testing.T) {
 		return fakeProcess{running: true}, nil
 	}
 
-	if _, err := manager.Start(context.Background(), Request{Enabled: true}); err != nil {
+	if _, err := manager.Start(context.Background(), Request{Enabled: true, Password: "secret"}); err != nil {
 		t.Fatalf("Start returned error: %v", err)
 	}
 	if got := readText(t, certPath); got != "existing cert" {
@@ -116,13 +116,29 @@ func TestStartReusesExistingCertificatePair(t *testing.T) {
 	}
 }
 
+func TestStartRejectsDefaultPassword(t *testing.T) {
+	manager := NewManager(Options{StateDir: t.TempDir()})
+	manager.StartProcess = func(context.Context, process.Command) (Process, error) {
+		t.Fatal("StartProcess should not be called")
+		return nil, nil
+	}
+
+	_, err := manager.Start(context.Background(), Request{Enabled: true})
+	if err == nil {
+		t.Fatal("expected default password error")
+	}
+	if !strings.Contains(err.Error(), "password must be changed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestStartMissingSushyEmulator(t *testing.T) {
 	manager := NewManager(Options{StateDir: t.TempDir()})
 	manager.StartProcess = func(context.Context, process.Command) (Process, error) {
 		return nil, os.ErrNotExist
 	}
 
-	_, err := manager.Start(context.Background(), Request{Enabled: true})
+	_, err := manager.Start(context.Background(), Request{Enabled: true, Password: "secret"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -138,7 +154,7 @@ func TestStartFailsWhenProcessExits(t *testing.T) {
 		return fakeProcess{running: false, stderr: "bind failed"}, nil
 	}
 
-	_, err := manager.Start(context.Background(), Request{Enabled: true})
+	_, err := manager.Start(context.Background(), Request{Enabled: true, Password: "secret"})
 	if err == nil {
 		t.Fatal("expected error")
 	}

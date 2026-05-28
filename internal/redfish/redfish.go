@@ -84,6 +84,9 @@ func (m *Manager) Start(ctx context.Context, req Request) (Result, error) {
 		return Result{}, nil
 	}
 	applyRequestDefaults(&req)
+	if req.Password == "password" {
+		return Result{}, fmt.Errorf("Redfish password must be changed from the default")
+	}
 	if err := os.MkdirAll(m.Options.ConfigDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create sushy config directory: %w", err)
 	}

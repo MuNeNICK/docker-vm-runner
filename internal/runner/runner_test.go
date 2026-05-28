@@ -331,7 +331,8 @@ func TestRunCleanupModeOnlyCleansStaleResources(t *testing.T) {
 func TestConcreteLifecycleStartsServices(t *testing.T) {
 	service := &fakeServiceSupervisor{}
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
-	redfishManager := &fakeRedfishManager{}
+	redfishProcess := &fakeRedfishProcess{}
+	redfishManager := &fakeRedfishManager{process: redfishProcess}
 	novnc := &fakeNoVNCProxy{}
 	lifecycle := NewConcreteLifecycle(testLayout(t))
 	lifecycle.Service = service
@@ -354,6 +355,13 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 	}
 	if service.startCalls != 1 || manager.storagePoolCalls != 1 || !redfishManager.started || !novnc.started {
 		t.Fatalf("service=%d storage=%d redfish=%v novnc=%v", service.startCalls, manager.storagePoolCalls, redfishManager.started, novnc.started)
+	}
+
+	if err := lifecycle.StopServices(context.Background(), config.VM{}); err != nil {
+		t.Fatalf("StopServices returned error: %v", err)
+	}
+	if redfishProcess.stopCalls != 1 {
+		t.Fatalf("redfish stop calls = %d", redfishProcess.stopCalls)
 	}
 }
 
@@ -1404,11 +1412,29 @@ func (s *fakeServiceSupervisor) Stop(context.Context) error {
 
 type fakeRedfishManager struct {
 	started bool
+	process redfish.Process
 }
 
 func (m *fakeRedfishManager) Start(context.Context, redfish.Request) (redfish.Result, error) {
 	m.started = true
-	return redfish.Result{Started: true}, nil
+	return redfish.Result{Started: true, Process: m.process}, nil
+}
+
+type fakeRedfishProcess struct {
+	stopCalls int
+}
+
+func (p *fakeRedfishProcess) Running() bool {
+	return true
+}
+
+func (p *fakeRedfishProcess) Stderr() string {
+	return ""
+}
+
+func (p *fakeRedfishProcess) Stop() error {
+	p.stopCalls++
+	return nil
 }
 
 type guestExecResponse struct {

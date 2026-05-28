@@ -219,6 +219,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
+	redfishPassword := env.Get("REDFISH_PASSWORD", "password")
+	if redfishEnabled && redfishPassword == "password" {
+		return VM{}, fmt.Errorf("REDFISH_PASSWORD must be changed when REDFISH_ENABLE=1")
+	}
 	bootMode, err := resolveBootModeSetting(env.Get("BOOT_MODE", "uefi"))
 	if err != nil {
 		return VM{}, err
@@ -367,7 +371,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		ForceISO:               forceISO,
 		SSHPubkey:              env.Get("SSH_PUBKEY", ""),
 		RedfishUser:            env.Get("REDFISH_USERNAME", "admin"),
-		RedfishPassword:        env.Get("REDFISH_PASSWORD", "password"),
+		RedfishPassword:        redfishPassword,
 		RedfishPort:            redfishPort,
 		RedfishSystemID:        env.Get("REDFISH_SYSTEM_ID", vmName),
 		RedfishEnabled:         redfishEnabled,

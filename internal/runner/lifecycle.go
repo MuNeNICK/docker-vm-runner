@@ -57,14 +57,15 @@ type ConcreteLifecycle struct {
 	CPUVendor       func() string
 	CPUFlags        func() map[string]bool
 
-	workImagePath string
-	seedISOPath   string
-	bootISOPath   string
-	vmDir         string
-	currentConfig config.VM
-	disablePasst  bool
-	firmware      firmware.Result
-	tpmProcess    tpm.Process
+	workImagePath  string
+	seedISOPath    string
+	bootISOPath    string
+	vmDir          string
+	currentConfig  config.VM
+	disablePasst   bool
+	firmware       firmware.Result
+	tpmProcess     tpm.Process
+	redfishProcess redfish.Process
 }
 
 type libvirtManager interface {
@@ -149,15 +150,17 @@ func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (e
 			return err
 		}
 		if l.Redfish != nil {
-			if _, err := l.Redfish.Start(ctx, redfish.Request{
+			result, err := l.Redfish.Start(ctx, redfish.Request{
 				Enabled:    true,
 				User:       cfg.RedfishUser,
 				Password:   cfg.RedfishPassword,
 				Port:       cfg.RedfishPort,
 				LibvirtURI: l.libvirtURI(),
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
+			l.redfishProcess = result.Process
 		}
 	}
 	if cfg.NoVNCEnabled && l.NoVNC != nil {
@@ -418,6 +421,12 @@ func (l *ConcreteLifecycle) Close(_ context.Context, _ config.VM) error {
 }
 
 func (l *ConcreteLifecycle) StopServices(ctx context.Context, _ config.VM) error {
+	if l.redfishProcess != nil {
+		if err := l.redfishProcess.Stop(); err != nil {
+			return err
+		}
+		l.redfishProcess = nil
+	}
 	if l.Service == nil {
 		return nil
 	}

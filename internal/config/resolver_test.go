@@ -285,6 +285,17 @@ func TestResolveRedfish(t *testing.T) {
 	}
 }
 
+func TestResolveRedfishRejectsDefaultPassword(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"REDFISH_ENABLE": "1"})
+	if err == nil {
+		t.Fatal("expected default password error")
+	}
+	if !strings.Contains(err.Error(), "REDFISH_PASSWORD must be changed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolvePortForwardAndConflict(t *testing.T) {
 	resolver, _ := testResolver(t)
 	cfg, err := resolver.Resolve(MapEnv{"PORT_FWD": "8080:80,8443:443"})
