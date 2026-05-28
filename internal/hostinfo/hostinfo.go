@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -40,6 +42,57 @@ func Detect(diskPath string) Info {
 		KVMAvailable:   fileExists("/dev/kvm"),
 		Kernel:         kernelRelease(),
 	}
+}
+
+func AvailableMemoryBytes() int64 {
+	_, available := parseMemInfo(readFile("/proc/meminfo"))
+	return int64(available)
+}
+
+func CPUCount() int {
+	return runtime.NumCPU()
+}
+
+func AvailableDiskBytes(path string) int64 {
+	return int64(diskAvailable(path))
+}
+
+func DetectHostMTU() int {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return 1500
+	}
+	mtu := 0
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 || iface.MTU <= 0 {
+			continue
+		}
+		if iface.MTU > mtu {
+			mtu = iface.MTU
+		}
+	}
+	if mtu == 0 {
+		return 1500
+	}
+	return mtu
+}
+
+func FileExists(path string) bool {
+	return fileExists(path)
+}
+
+func IsFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+func IsBlockDevice(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	mode := info.Mode()
+	return mode&os.ModeDevice != 0 && mode&os.ModeCharDevice == 0
 }
 
 func Lines(info Info) []string {
@@ -116,11 +169,28 @@ func firstCPUModel(content []byte) string {
 }
 
 func diskAvailable(path string) uint64 {
+	path = existingPathForStatfs(path)
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
 		return 0
 	}
 	return stat.Bavail * uint64(stat.Bsize)
+}
+
+func existingPathForStatfs(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "/"
+	}
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return path
+		}
+		path = parent
+	}
 }
 
 func kernelRelease() string {

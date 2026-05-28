@@ -127,6 +127,26 @@ func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
 	}
 }
 
+func TestRunWiresHostFileProbeIntoDefaultResolver(t *testing.T) {
+	lifecycle := &fakeLifecycle{}
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{
+		"DISTRO":               "ubuntu",
+		"CLOUD_INIT_USER_DATA": filepath.Join(t.TempDir(), "missing.yaml"),
+	}
+	r.Lifecycle = lifecycle
+
+	err := r.Run(context.Background(), Options{NoConsole: true})
+	if err == nil {
+		t.Fatal("expected missing user-data error")
+	}
+	if !strings.Contains(err.Error(), "CLOUD_INIT_USER_DATA file not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunLifecycleCleansUpOnPrepareError(t *testing.T) {
 	lifecycle := &fakeLifecycle{prepareErr: os.ErrPermission}
 	r := New()

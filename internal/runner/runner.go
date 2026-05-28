@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/munenick/docker-vm-runner/internal/config"
+	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/paths"
 )
@@ -96,9 +97,41 @@ func (r *Runner) applyDefaults() {
 		r.DistroConfigPath = paths.DefaultConfigPath
 	}
 	if r.Resolver == nil {
-		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath, Layout: r.layout()}
-	} else if r.Resolver.Layout == (paths.Layout{}) {
+		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath}
+	}
+	r.applyResolverDefaults()
+}
+
+func (r *Runner) applyResolverDefaults() {
+	if r.Resolver.Layout == (paths.Layout{}) {
 		r.Resolver.Layout = r.layout()
+	}
+	if r.Resolver.AvailableMemoryBytes == nil {
+		r.Resolver.AvailableMemoryBytes = hostinfo.AvailableMemoryBytes
+	}
+	if r.Resolver.CPUCount == nil {
+		r.Resolver.CPUCount = hostinfo.CPUCount
+	}
+	if r.Resolver.AvailableDiskBytes == nil {
+		r.Resolver.AvailableDiskBytes = hostinfo.AvailableDiskBytes
+	}
+	if r.Resolver.DetectHostMTU == nil {
+		r.Resolver.DetectHostMTU = hostinfo.DetectHostMTU
+	}
+	if r.Resolver.ROMExists == nil {
+		r.Resolver.ROMExists = hostinfo.FileExists
+	}
+	if r.Resolver.FileExists == nil {
+		r.Resolver.FileExists = hostinfo.FileExists
+	}
+	if r.Resolver.IsFile == nil {
+		r.Resolver.IsFile = hostinfo.IsFile
+	}
+	if r.Resolver.IsBlockDevice == nil {
+		r.Resolver.IsBlockDevice = hostinfo.IsBlockDevice
+	}
+	if r.Resolver.ReadFile == nil {
+		r.Resolver.ReadFile = os.ReadFile
 	}
 }
 

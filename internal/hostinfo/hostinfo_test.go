@@ -1,6 +1,8 @@
 package hostinfo
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -44,5 +46,32 @@ func TestLines(t *testing.T) {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("missing %q in:\n%s", needle, text)
 		}
+	}
+}
+
+func TestFilesystemProbes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "user-data.yaml")
+	if err := os.WriteFile(file, []byte("#cloud-config\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if !FileExists(file) {
+		t.Fatal("FileExists = false")
+	}
+	if !IsFile(file) {
+		t.Fatal("IsFile = false")
+	}
+	if IsFile(dir) {
+		t.Fatal("IsFile directory = true")
+	}
+	if IsBlockDevice(file) {
+		t.Fatal("IsBlockDevice regular file = true")
+	}
+}
+
+func TestAvailableDiskBytesUsesExistingParent(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing", "vms")
+	if got := AvailableDiskBytes(missing); got <= 0 {
+		t.Fatalf("AvailableDiskBytes(%q) = %d", missing, got)
 	}
 }
