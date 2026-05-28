@@ -159,6 +159,26 @@ func TestPullNoDiskFound(t *testing.T) {
 	}
 }
 
+func TestPullFromIntegrationReference(t *testing.T) {
+	reference := os.Getenv("OCI_INTEGRATION_REF")
+	if reference == "" {
+		t.Skip("set OCI_INTEGRATION_REF to validate OCI registry pulling")
+	}
+	result, err := NewPuller().Pull(context.Background(), reference, t.TempDir())
+	if err != nil {
+		t.Fatalf("Pull returned error: %v", err)
+	}
+	if filepath.Base(result.Path) != "disk.qcow2" {
+		t.Fatalf("Path = %s", result.Path)
+	}
+	if string(readFile(t, result.Path)) != "oci-disk\n" {
+		t.Fatalf("extracted payload = %q", readFile(t, result.Path))
+	}
+	if result.Fallback {
+		t.Fatalf("Fallback = true")
+	}
+}
+
 type fakeFetcher struct {
 	image Image
 	err   error
