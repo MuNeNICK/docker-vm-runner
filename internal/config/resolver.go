@@ -200,8 +200,8 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
-	if networkConfig.IPXEEnabled && !contains(bootOrder, "network") {
-		bootOrder = append([]string{"network"}, bootOrder...)
+	if networkConfig.IPXEEnabled {
+		bootOrder = moveBootDeviceFirst(bootOrder, "network")
 	}
 	filesystems, err := ParseFilesystems(env, FilesystemParseOptions{})
 	if err != nil {
@@ -618,6 +618,16 @@ func contains(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func moveBootDeviceFirst(values []string, needle string) []string {
+	result := []string{needle}
+	for _, value := range values {
+		if value != needle {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func ptr(value int) *int {

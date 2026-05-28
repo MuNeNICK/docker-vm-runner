@@ -103,6 +103,18 @@ func IsBlockDevice(path string) bool {
 	return mode&os.ModeDevice != 0 && mode&os.ModeCharDevice == 0
 }
 
+func IsMount(path string) bool {
+	return isMount(path, "/proc/self/mountinfo", os.ReadFile)
+}
+
+func NativeDiskIOUnsafe(path string) bool {
+	fsType, ok := filesystemType(path)
+	if !ok {
+		return false
+	}
+	return fsType == 0x01021994 || fsType == 0xf15f
+}
+
 func BlockSectorSize(path string) (int, bool) {
 	return blockSectorSize(path, "/sys/class/block", os.ReadFile)
 }
@@ -133,6 +145,45 @@ func blockSectorSize(path string, sysClassBlock string, readFile func(string) ([
 		return 0, false
 	}
 	return size, true
+}
+
+func isMount(path string, mountInfoPath string, readFile func(string) ([]byte, error)) bool {
+	cleaned := filepath.Clean(path)
+	content, err := readFile(mountInfoPath)
+	if err != nil {
+		return false
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(content))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 5 {
+			continue
+		}
+		if unescapeMountInfoPath(fields[4]) == cleaned {
+			return true
+		}
+	}
+	return false
+}
+
+func filesystemType(path string) (int64, bool) {
+	cleaned := filepath.Clean(path)
+	for {
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(cleaned, &stat); err == nil {
+			return int64(stat.Type), true
+		}
+		parent := filepath.Dir(cleaned)
+		if parent == cleaned {
+			return 0, false
+		}
+		cleaned = parent
+	}
+}
+
+func unescapeMountInfoPath(value string) string {
+	replacer := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+	return filepath.Clean(replacer.Replace(value))
 }
 
 func Lines(info Info) []string {

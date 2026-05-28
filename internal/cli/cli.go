@@ -36,6 +36,11 @@ var newRunner = func() appRunner {
 	return runner.New()
 }
 
+var stdinIsTerminal = func() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
 func Main(ctx context.Context, args []string) int {
 	return runWithEnv(ctx, args, os.Stdout, os.Stderr, config.OSEnv)
 }
@@ -77,7 +82,20 @@ func runWithEnv(ctx context.Context, args []string, stdout io.Writer, stderr io.
 }
 
 func applyEnvDefaults(args []string, lookup config.LookupFunc) []string {
-	noConsole, _ := config.BoolFrom(lookup, "NO_CONSOLE", false)
+	noConsole := false
+	if value, ok := lookup("NO_CONSOLE"); ok {
+		parsed, err := config.BoolValue("NO_CONSOLE", value)
+		if err == nil {
+			noConsole = parsed
+		}
+	}
+	graphics, _ := lookup("GRAPHICS")
+	if strings.EqualFold(strings.TrimSpace(graphics), "novnc") {
+		noConsole = true
+	}
+	if !stdinIsTerminal() {
+		noConsole = true
+	}
 	if !noConsole {
 		return args
 	}
@@ -106,6 +124,10 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	}
 	remaining := fs.Args()
 	if len(remaining) > 0 {
+		if opts.listDistros && opts.listArch == "" && len(remaining) == 1 {
+			opts.listArch = remaining[0]
+			return opts, nil
+		}
 		return options{}, fmt.Errorf("unexpected arguments: %s", strings.Join(remaining, " "))
 	}
 	return opts, nil

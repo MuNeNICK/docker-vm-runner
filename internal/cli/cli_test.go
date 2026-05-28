@@ -51,12 +51,20 @@ func TestRunListDistrosWithArch(t *testing.T) {
 	}
 }
 
-func TestRunListDistrosRejectsPositionalArch(t *testing.T) {
+func TestRunListDistrosAcceptsPositionalArch(t *testing.T) {
+	original := newRunner
+	defer func() { newRunner = original }()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+
 	var stdout, stderr bytes.Buffer
 	code := run(context.Background(), []string{"--list-distros", "arm64"}, &stdout, &stderr)
 
-	if code != 2 {
-		t.Fatalf("code = %d", code)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.ListDistros || fake.options.ListArch != "arm64" {
+		t.Fatalf("options = %#v", fake.options)
 	}
 }
 
@@ -133,11 +141,60 @@ func TestRunReadsNoConsoleFromEnv(t *testing.T) {
 	}
 }
 
-func TestRunNoConsoleFlagOverridesEnvDefault(t *testing.T) {
+func TestRunDisablesConsoleForNoVNC(t *testing.T) {
 	original := newRunner
 	defer func() { newRunner = original }()
 	fake := &fakeRunner{}
 	newRunner = func() appRunner { return fake }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(key string) (string, bool) {
+		if key == "GRAPHICS" {
+			return "novnc", true
+		}
+		return "", false
+	})
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
+func TestRunDisablesConsoleWithoutTTY(t *testing.T) {
+	originalRunner := newRunner
+	originalTTY := stdinIsTerminal
+	defer func() {
+		newRunner = originalRunner
+		stdinIsTerminal = originalTTY
+	}()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+	stdinIsTerminal = func() bool { return false }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(string) (string, bool) { return "", false })
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if !fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
+func TestRunNoConsoleFlagOverridesEnvDefault(t *testing.T) {
+	original := newRunner
+	originalTTY := stdinIsTerminal
+	defer func() {
+		newRunner = original
+		stdinIsTerminal = originalTTY
+	}()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+	stdinIsTerminal = func() bool { return true }
 
 	var stdout, stderr bytes.Buffer
 	code := runWithEnv(context.Background(), []string{"--no-console=false"}, &stdout, &stderr, func(key string) (string, bool) {

@@ -290,7 +290,8 @@ type CommandRunner interface {
 }
 
 type VirshClient struct {
-	Runner CommandRunner
+	Runner     CommandRunner
+	LibvirtURI string
 }
 
 func NewVirshClient(runner CommandRunner) *VirshClient {
@@ -298,7 +299,8 @@ func NewVirshClient(runner CommandRunner) *VirshClient {
 }
 
 func (c *VirshClient) ListRunningDomains(ctx context.Context) ([]string, error) {
-	result, err := c.Runner.Run(ctx, process.Command{Name: "virsh", Args: []string{"list", "--name", "--state-running"}})
+	args := c.virshArgs("list", "--name", "--state-running")
+	result, err := c.Runner.Run(ctx, process.Command{Name: "virsh", Args: args})
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +320,7 @@ func (c *VirshClient) Execute(ctx context.Context, domain string, command Comman
 	}
 	result, err := c.Runner.Run(ctx, process.Command{
 		Name: "virsh",
-		Args: []string{"qemu-agent-command", domain, string(payload)},
+		Args: c.virshArgs("qemu-agent-command", domain, string(payload)),
 	})
 	if err != nil {
 		var exitErr *process.ExitError
@@ -337,4 +339,11 @@ func (c *VirshClient) Execute(ctx context.Context, domain string, command Comman
 		return nil, fmt.Errorf("decode qemu guest agent response: %w", err)
 	}
 	return envelope.Return, nil
+}
+
+func (c *VirshClient) virshArgs(args ...string) []string {
+	if strings.TrimSpace(c.LibvirtURI) == "" {
+		return args
+	}
+	return append([]string{"-c", c.LibvirtURI}, args...)
 }

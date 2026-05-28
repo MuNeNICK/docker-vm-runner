@@ -1,11 +1,13 @@
 package libvirtmgr
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 var ErrNotFound = errors.New("libvirt domain not found")
@@ -45,7 +47,10 @@ type Manager struct {
 }
 
 type CleanupOptions struct {
-	HasNVRAM bool
+	HasNVRAM        bool
+	Context         context.Context
+	ShutdownTimeout time.Duration
+	ShutdownPoll    time.Duration
 }
 
 type StoragePoolRequest struct {
@@ -55,6 +60,12 @@ type StoragePoolRequest struct {
 
 func New(conn Connection) *Manager {
 	return &Manager{Conn: conn}
+}
+
+func (m *Manager) UseContext(ctx context.Context) {
+	if setter, ok := m.Conn.(interface{ UseContext(context.Context) }); ok {
+		setter.UseContext(ctx)
+	}
 }
 
 func (m *Manager) EnsureDefined(name string, xml string) (Domain, error) {
@@ -196,8 +207,10 @@ func (m *Manager) Cleanup(domain Domain, opts CleanupOptions) error {
 	}
 	active, err := domain.IsActive()
 	if err == nil && active {
-		if err := domain.Destroy(); err != nil {
-			return fmt.Errorf("destroy libvirt domain %s: %w", domain.Name(), err)
+		if stopped := gracefulShutdown(domain, opts); !stopped {
+			if err := domain.Destroy(); err != nil {
+				return fmt.Errorf("destroy libvirt domain %s: %w", domain.Name(), err)
+			}
 		}
 	}
 	if err != nil {
@@ -213,6 +226,36 @@ func (m *Manager) Cleanup(domain Domain, opts CleanupOptions) error {
 		return fmt.Errorf("undefine libvirt domain %s: %w", domain.Name(), err)
 	}
 	return nil
+}
+
+func gracefulShutdown(domain Domain, opts CleanupOptions) bool {
+	if opts.Context == nil || opts.ShutdownTimeout <= 0 {
+		return false
+	}
+	if err := domain.Shutdown(); err != nil {
+		return false
+	}
+	deadline := time.Now().Add(opts.ShutdownTimeout)
+	interval := opts.ShutdownPoll
+	if interval <= 0 {
+		interval = time.Second
+	}
+	for {
+		active, err := domain.IsActive()
+		if err == nil && !active {
+			return true
+		}
+		if err != nil || time.Now().After(deadline) {
+			return false
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-opts.Context.Done():
+			timer.Stop()
+			return false
+		case <-timer.C:
+		}
+	}
 }
 
 func (m *Manager) Close() error {

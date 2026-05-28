@@ -38,6 +38,7 @@ type Request struct {
 	HostCPUVendor     string
 	HostCPUFlags      map[string]bool
 	BlockSectorSize   func(string) (int, bool)
+	NativeIOUnsafe    bool
 }
 
 func (r *Renderer) Render(req Request) (string, error) {
@@ -147,11 +148,17 @@ func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) er
 	if vm.DiskController == "scsi" {
 		empty(b, "controller", attr{"type", "scsi"}, attr{"model", "virtio-scsi-pci"})
 	}
+	diskCache := defaultString(vm.DiskCache, "none")
+	diskIO := defaultString(vm.DiskIO, "native")
+	if req.NativeIOUnsafe && diskCache == "none" && diskIO == "native" {
+		diskCache = "writeback"
+		diskIO = "threads"
+	}
 	driverAttrs := []attr{
 		{"name", "qemu"},
 		{"type", defaultString(vm.ImageFormat, "qcow2")},
-		{"cache", defaultString(vm.DiskCache, "none")},
-		{"io", defaultString(vm.DiskIO, "native")},
+		{"cache", diskCache},
+		{"io", diskIO},
 	}
 	if vm.IOThread && ctrl.bus == "virtio" {
 		driverAttrs = append(driverAttrs, attr{"iothread", "1"})

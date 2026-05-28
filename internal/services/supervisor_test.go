@@ -149,6 +149,9 @@ func TestWaitForLibvirtNonRootlessRaises(t *testing.T) {
 	if !strings.Contains(err.Error(), "libvirt socket did not appear") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !strings.Contains(err.Error(), "--privileged") || !strings.Contains(err.Error(), "--cgroupns=host") {
+		t.Fatalf("error lacks runtime hints: %v", err)
+	}
 }
 
 func TestCleanupStaleSocket(t *testing.T) {

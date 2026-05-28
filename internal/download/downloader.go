@@ -21,9 +21,11 @@ const (
 )
 
 type Downloader struct {
-	Client   *http.Client
-	Sleep    func(context.Context, time.Duration) error
-	MaxBytes int64
+	Client           *http.Client
+	Sleep            func(context.Context, time.Duration) error
+	MaxBytes         int64
+	Progress         func(Progress)
+	ProgressInterval time.Duration
 }
 
 type Checksum struct {
@@ -31,14 +33,26 @@ type Checksum struct {
 	Value     string
 }
 
+type Progress struct {
+	URL        string
+	Written    int64
+	Total      int64
+	Attempt    int
+	Attempts   int
+	Done       bool
+	RetryDelay time.Duration
+	Err        error
+}
+
 func NewDownloader(client *http.Client) *Downloader {
 	if client == nil {
 		client = &http.Client{}
 	}
 	return &Downloader{
-		Client:   client,
-		Sleep:    sleepContext,
-		MaxBytes: DefaultMaxBytes,
+		Client:           client,
+		Sleep:            sleepContext,
+		MaxBytes:         DefaultMaxBytes,
+		ProgressInterval: time.Second,
 	}
 }
 
@@ -47,6 +61,10 @@ func (d *Downloader) Download(ctx context.Context, url string, destination strin
 }
 
 func (d *Downloader) DownloadChecked(ctx context.Context, url string, destination string, checksum Checksum) error {
+	return d.downloadChecked(ctx, url, destination, checksum, 1, 1)
+}
+
+func (d *Downloader) downloadChecked(ctx context.Context, url string, destination string, checksum Checksum, attempt int, attempts int) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
@@ -81,7 +99,14 @@ func (d *Downloader) DownloadChecked(ctx context.Context, url string, destinatio
 		}
 	}()
 
-	if _, err := copyWithLimit(tmp, resp.Body, d.MaxBytes, "download "+url); err != nil {
+	if _, err := copyWithLimit(tmp, resp.Body, d.MaxBytes, "download "+url, progressWriter{
+		URL:      url,
+		Total:    resp.ContentLength,
+		Attempt:  attempt,
+		Attempts: attempts,
+		Interval: d.ProgressInterval,
+		Progress: d.Progress,
+	}); err != nil {
 		_ = tmp.Close()
 		return err
 	}
@@ -95,6 +120,7 @@ func (d *Downloader) DownloadChecked(ctx context.Context, url string, destinatio
 		return fmt.Errorf("move download into place: %w", err)
 	}
 	keepTemp = true
+	d.reportProgress(Progress{URL: url, Written: fileSize(destination), Total: resp.ContentLength, Attempt: attempt, Attempts: attempts, Done: true})
 	return nil
 }
 
@@ -109,12 +135,13 @@ func (d *Downloader) DownloadWithRetryChecked(ctx context.Context, url string, d
 	delays := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}
 	var lastErr error
 	for attempt := 1; attempt <= retries; attempt++ {
-		if err := d.DownloadChecked(ctx, url, destination, checksum); err != nil {
+		if err := d.downloadChecked(ctx, url, destination, checksum, attempt, retries); err != nil {
 			lastErr = err
 			if attempt == retries {
 				break
 			}
 			delay := delays[min(attempt-1, len(delays)-1)]
+			d.reportProgress(Progress{URL: url, Attempt: attempt, Attempts: retries, Err: err, RetryDelay: delay})
 			if sleepErr := d.Sleep(ctx, delay); sleepErr != nil {
 				return sleepErr
 			}
@@ -149,16 +176,19 @@ func VerifyChecksum(path string, checksum Checksum) error {
 	return nil
 }
 
-func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string) (int64, error) {
+func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string, progress progressWriter) (int64, error) {
+	if progress.Progress != nil {
+		progress.report(0, false)
+	}
 	if maxBytes <= 0 {
-		n, err := io.Copy(dst, src)
+		n, err := copyWithProgress(dst, src, progress)
 		if err != nil {
 			return n, fmt.Errorf("write %s: %w", label, err)
 		}
 		return n, nil
 	}
 	limited := &io.LimitedReader{R: src, N: maxBytes + 1}
-	n, err := io.Copy(dst, limited)
+	n, err := copyWithProgress(dst, limited, progress)
 	if err != nil {
 		return n, fmt.Errorf("write %s: %w", label, err)
 	}
@@ -166,6 +196,77 @@ func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string) (
 		return n, fmt.Errorf("%s exceeds maximum size: %d > %d bytes", label, n, maxBytes)
 	}
 	return n, nil
+}
+
+type progressWriter struct {
+	URL          string
+	Total        int64
+	Attempt      int
+	Attempts     int
+	Interval     time.Duration
+	Progress     func(Progress)
+	written      int64
+	lastReported time.Time
+}
+
+func copyWithProgress(dst io.Writer, src io.Reader, progress progressWriter) (int64, error) {
+	if progress.Progress == nil {
+		return io.Copy(dst, src)
+	}
+	buffer := make([]byte, 128*1024)
+	for {
+		nr, er := src.Read(buffer)
+		if nr > 0 {
+			nw, ew := dst.Write(buffer[:nr])
+			progress.written += int64(nw)
+			progress.report(progress.written, false)
+			if ew != nil {
+				return progress.written, ew
+			}
+			if nr != nw {
+				return progress.written, io.ErrShortWrite
+			}
+		}
+		if er != nil {
+			if er == io.EOF {
+				return progress.written, nil
+			}
+			return progress.written, er
+		}
+	}
+}
+
+func (p *progressWriter) report(written int64, done bool) {
+	if p.Progress == nil {
+		return
+	}
+	now := time.Now()
+	if !done && written > 0 && p.Interval > 0 && !p.lastReported.IsZero() && now.Sub(p.lastReported) < p.Interval {
+		return
+	}
+	p.lastReported = now
+	p.Progress(Progress{
+		URL:      p.URL,
+		Written:  written,
+		Total:    p.Total,
+		Attempt:  p.Attempt,
+		Attempts: p.Attempts,
+		Done:     done,
+	})
+}
+
+func (d *Downloader) reportProgress(progress Progress) {
+	if d.Progress != nil {
+		d.Progress(progress)
+	}
+}
+
+func fileSize(path string) int64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 func checksumHasher(algorithm string) (hash.Hash, string, error) {

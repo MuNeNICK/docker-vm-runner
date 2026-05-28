@@ -56,6 +56,7 @@ type ConcreteLifecycle struct {
 	IPv6Available   func() bool
 	CPUVendor       func() string
 	CPUFlags        func() map[string]bool
+	Status          io.Writer
 
 	workImagePath  string
 	seedISOPath    string
@@ -272,6 +273,7 @@ func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmD
 		HostCPUVendor:     l.cpuVendor(),
 		HostCPUFlags:      l.cpuFlags(),
 		BlockSectorSize:   l.blockSectorSize,
+		NativeIOUnsafe:    hostinfo.NativeDiskIOUnsafe(l.workImagePath),
 	})
 	if err != nil {
 		return err
@@ -367,6 +369,9 @@ func (l *ConcreteLifecycle) AttachConsole(ctx context.Context, cfg config.VM) (i
 	if l.Console == nil {
 		return 0, nil
 	}
+	if runner, ok := l.Console.(*console.Runner); ok {
+		runner.LibvirtURI = l.libvirtURI()
+	}
 	return l.Console.Run(ctx, cfg.VMName)
 }
 
@@ -384,7 +389,15 @@ func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 	}
 	var cleanupErr error
 	if l.Manager != nil && l.Domain != nil {
-		cleanupErr = l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{HasNVRAM: l.firmware.VarsPath != ""})
+		if setter, ok := l.Manager.(interface{ UseContext(context.Context) }); ok {
+			setter.UseContext(ctx)
+		}
+		cleanupErr = l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{
+			HasNVRAM:        l.firmware.VarsPath != "",
+			Context:         ctx,
+			ShutdownTimeout: 20 * time.Second,
+			ShutdownPoll:    time.Second,
+		})
 	}
 	if !cfg.Persist && cfg.VMName != "" {
 		vmDir := filepath.Join(l.Layout.VMImagesDir, cfg.VMName)
@@ -622,8 +635,7 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 		return "", fmt.Errorf("image URL is empty and base image is missing: %s", baseImage)
 	}
 	downloadPath := filepath.Join(l.Layout.BaseImagesDir, "downloads", cacheName(cfg.ImageURL))
-	downloader := download.NewDownloader(nil)
-	downloader.MaxBytes = cfg.DownloadMaxBytes
+	downloader := l.newDownloader(cfg)
 	if err := downloader.DownloadWithRetryChecked(ctx, cfg.ImageURL, downloadPath, cfg.DownloadRetries, download.Checksum{
 		Algorithm: cfg.ImageChecksumAlgorithm,
 		Value:     cfg.ImageChecksumValue,
@@ -649,8 +661,7 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 			}
 			_ = os.Remove(destination)
 		}
-		downloader := download.NewDownloader(nil)
-		downloader.MaxBytes = cfg.DownloadMaxBytes
+		downloader := l.newDownloader(cfg)
 		if checksum.Algorithm != "" || checksum.Value != "" {
 			if err := downloader.DownloadWithRetryChecked(ctx, ref, destination, cfg.DownloadRetries, checksum); err != nil {
 				return "", err
@@ -673,6 +684,61 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 		return "", fmt.Errorf("BOOT_FROM path not found: %s", ref)
 	}
 	return ref, nil
+}
+
+func (l *ConcreteLifecycle) newDownloader(cfg config.VM) *download.Downloader {
+	downloader := download.NewDownloader(nil)
+	downloader.MaxBytes = cfg.DownloadMaxBytes
+	downloader.Progress = l.reportDownloadProgress
+	return downloader
+}
+
+func (l *ConcreteLifecycle) reportDownloadProgress(progress download.Progress) {
+	if l.Status == nil {
+		return
+	}
+	if progress.RetryDelay > 0 && progress.Err != nil {
+		fmt.Fprintf(l.Status, "\ndocker-vm-runner: download failed on attempt %d/%d, retrying in %s: %v\n", progress.Attempt, progress.Attempts, progress.RetryDelay, progress.Err)
+		return
+	}
+	if progress.Done {
+		fmt.Fprintf(l.Status, "\rdocker-vm-runner: download complete: %s\n", shortURL(progress.URL))
+		return
+	}
+	if progress.Total > 0 {
+		percent := float64(progress.Written) * 100 / float64(progress.Total)
+		fmt.Fprintf(l.Status, "\rdocker-vm-runner: downloading %s [%6.2f%%] %s/%s", shortURL(progress.URL), percent, formatBytes(progress.Written), formatBytes(progress.Total))
+		return
+	}
+	fmt.Fprintf(l.Status, "\rdocker-vm-runner: downloading %s %s", shortURL(progress.URL), formatBytes(progress.Written))
+}
+
+func shortURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return raw
+	}
+	name := filepath.Base(parsed.Path)
+	if name == "." || name == "/" || name == "" {
+		return parsed.Host
+	}
+	return parsed.Host + "/" + name
+}
+
+func formatBytes(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	v := float64(value)
+	for _, suffix := range units {
+		v /= unit
+		if v < unit {
+			return fmt.Sprintf("%.1f %s", v, suffix)
+		}
+	}
+	return fmt.Sprintf("%.1f PiB", v/unit)
 }
 
 type imagePostProcessOptions struct {
@@ -888,7 +954,9 @@ func (l *ConcreteLifecycle) guestClient() guestexec.Client {
 	if l.GuestClient != nil {
 		return l.GuestClient
 	}
-	return guestexec.NewVirshClient(&l.CommandRunner)
+	client := guestexec.NewVirshClient(&l.CommandRunner)
+	client.LibvirtURI = l.libvirtURI()
+	return client
 }
 
 func (l *ConcreteLifecycle) blockSectorSize(path string) (int, bool) {

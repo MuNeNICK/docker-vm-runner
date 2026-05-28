@@ -1,9 +1,11 @@
 package libvirtmgr
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnsureDefinedRejectsExistingUnmanagedDomain(t *testing.T) {
@@ -163,6 +165,27 @@ func TestCleanupDestroysAndUndefines(t *testing.T) {
 	}
 }
 
+func TestCleanupGracefullyShutsDownBeforeUndefine(t *testing.T) {
+	domain := &fakeDomain{name: "test-vm", active: true}
+	err := New(nil).Cleanup(domain, CleanupOptions{
+		Context:         context.Background(),
+		ShutdownTimeout: time.Second,
+		ShutdownPoll:    time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if domain.shutdownCalls != 1 {
+		t.Fatalf("shutdownCalls = %d", domain.shutdownCalls)
+	}
+	if domain.destroyCalls != 0 {
+		t.Fatalf("destroyCalls = %d", domain.destroyCalls)
+	}
+	if domain.undefineCalls != 1 {
+		t.Fatalf("undefineCalls = %d", domain.undefineCalls)
+	}
+}
+
 func TestCleanupUsesNVRAMUndefineFlag(t *testing.T) {
 	domain := &fakeDomain{name: "test-vm", active: false}
 	err := New(nil).Cleanup(domain, CleanupOptions{HasNVRAM: true})
@@ -287,6 +310,7 @@ type fakeDomain struct {
 	active             bool
 	createCalls        int
 	destroyCalls       int
+	shutdownCalls      int
 	undefineCalls      int
 	undefineNVRAMCalls int
 	createErr          error
@@ -315,6 +339,7 @@ func (d *fakeDomain) Create() error {
 }
 
 func (d *fakeDomain) Shutdown() error {
+	d.shutdownCalls++
 	d.active = false
 	return nil
 }

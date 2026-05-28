@@ -245,6 +245,24 @@ func TestResolveIPXEStoresROMAndBootsNetwork(t *testing.T) {
 	}
 }
 
+func TestResolveIPXEMovesExistingNetworkBootFirst(t *testing.T) {
+	resolver, _ := testResolver(t)
+	rom := "/tmp/ipxe.rom"
+	resolver.ROMExists = func(path string) bool { return path == rom }
+
+	cfg, err := resolver.Resolve(MapEnv{
+		"IPXE_ENABLE":   "1",
+		"IPXE_ROM_PATH": rom,
+		"BOOT_ORDER":    "hd,network",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if got := strings.Join(cfg.BootOrder, ","); got != "network,hd" {
+		t.Fatalf("BootOrder = %#v", cfg.BootOrder)
+	}
+}
+
 func TestResolveCloudInitUserDataMissingFile(t *testing.T) {
 	resolver, _ := testResolver(t)
 	missing := filepath.Join(t.TempDir(), "missing.yaml")

@@ -144,6 +144,28 @@ func TestRunLifecycleNoConsole(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleTreatsGuestReadyFailureAsWarningInNoConsole(t *testing.T) {
+	lifecycle := &fakeLifecycle{waitGuestReadyErr: errors.New("agent not ready")}
+	var stderr bytes.Buffer
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &stderr
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "PERSIST": "1"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := "start-services,connect,prepare,start-vm,wait-guest-ready,wait-stopped,cleanup,close,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+	if !strings.Contains(stderr.String(), "guest readiness check did not complete") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunLifecycleMarksISOInstalledAfterNoConsoleStop(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
 	r := New()
@@ -190,6 +212,24 @@ func TestRunWiresDataDirIntoDefaultResolver(t *testing.T) {
 	}
 	if containsCall(lifecycle.calls, "mark-installed") {
 		t.Fatalf("cloud image should not be marked installed: %s", strings.Join(lifecycle.calls, ","))
+	}
+}
+
+func TestRunAutoDetectsDataMountForPersistence(t *testing.T) {
+	var stdout bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.Stderr = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
+	r.IsMount = func(path string) bool { return path == "/data" }
+
+	if err := r.Run(context.Background(), Options{ShowConfig: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "persist: true") {
+		t.Fatalf("expected /data mount to enable persistence, output:\n%s", output)
 	}
 }
 
@@ -252,6 +292,38 @@ func TestRunShowXML(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("show XML output missing %q:\n%s", want, output)
 		}
+	}
+}
+
+func TestRunDryRunValidatesMissingBootFrom(t *testing.T) {
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "BOOT_FROM": filepath.Join(t.TempDir(), "missing.iso")}
+
+	err := r.Run(context.Background(), Options{DryRun: true})
+	if err == nil {
+		t.Fatal("expected missing BOOT_FROM error")
+	}
+	if !strings.Contains(err.Error(), "BOOT_FROM path not found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDryRunPrintsHostDiagnostics(t *testing.T) {
+	var stdout bytes.Buffer
+	r := New()
+	r.Stdout = &stdout
+	r.Stderr = &bytes.Buffer{}
+	r.DistroConfigPath = writeDistroConfig(t)
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server"}
+
+	if err := r.Run(context.Background(), Options{DryRun: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Host") || !strings.Contains(stdout.String(), "KVM:") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
@@ -1480,6 +1552,7 @@ type fakeLifecycle struct {
 	calls              []string
 	startServicesErr   error
 	prepareErr         error
+	waitGuestReadyErr  error
 	cleanupContextErrs []error
 }
 
@@ -1636,7 +1709,7 @@ func (l *fakeLifecycle) StartVM(context.Context, config.VM) error {
 }
 func (l *fakeLifecycle) WaitForGuestReady(context.Context, config.VM) error {
 	l.calls = append(l.calls, "wait-guest-ready")
-	return nil
+	return l.waitGuestReadyErr
 }
 func (l *fakeLifecycle) WaitUntilStopped(context.Context, config.VM) error {
 	l.calls = append(l.calls, "wait-stopped")

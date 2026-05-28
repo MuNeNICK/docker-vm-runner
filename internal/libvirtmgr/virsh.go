@@ -33,6 +33,13 @@ func NewVirshConnection(ctx context.Context, uri string, runner CommandRunner) *
 	return &VirshConnection{URI: uri, Runner: runner, ctx: ctx}
 }
 
+func (c *VirshConnection) UseContext(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.ctx = ctx
+}
+
 func (c *VirshConnection) LookupDomain(name string) (Domain, error) {
 	if _, err := c.virsh("dominfo", name); err != nil {
 		if isVirshNotFound(err) {

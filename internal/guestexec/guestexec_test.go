@@ -185,6 +185,20 @@ func TestVirshClientBuildsCommands(t *testing.T) {
 	}
 }
 
+func TestVirshClientUsesLibvirtURI(t *testing.T) {
+	runner := &fakeRunner{}
+	runner.results = []process.Result{{Stdout: "vm-a\n"}}
+	client := NewVirshClient(runner)
+	client.LibvirtURI = "qemu:///session"
+
+	if _, err := client.ListRunningDomains(context.Background()); err != nil {
+		t.Fatalf("ListRunningDomains returned error: %v", err)
+	}
+	if got := strings.Join(runner.commands[0].Args, " "); got != "-c qemu:///session list --name --state-running" {
+		t.Fatalf("args = %#v", runner.commands[0].Args)
+	}
+}
+
 func TestVirshClientMapsNotConnectedError(t *testing.T) {
 	runner := &fakeRunner{err: &process.ExitError{Name: "virsh", ExitCode: 1, Stderr: "error: agent is not connected"}}
 	client := NewVirshClient(runner)

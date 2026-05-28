@@ -195,6 +195,32 @@ func TestDownloadWithRetryRetriesOnce(t *testing.T) {
 	}
 }
 
+func TestDownloadReportsProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "11")
+		_, _ = w.Write([]byte("hello-world"))
+	}))
+	defer server.Close()
+
+	var events []Progress
+	downloader := NewDownloader(nil)
+	downloader.ProgressInterval = 0
+	downloader.Progress = func(progress Progress) {
+		events = append(events, progress)
+	}
+
+	if err := downloader.Download(context.Background(), server.URL, filepath.Join(t.TempDir(), "image.qcow2")); err != nil {
+		t.Fatalf("Download returned error: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected progress events")
+	}
+	last := events[len(events)-1]
+	if !last.Done || last.Written != 11 || last.Total != 11 {
+		t.Fatalf("last progress = %#v", last)
+	}
+}
+
 func TestDownloadWithRetryReturnsLastError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad", http.StatusBadGateway)

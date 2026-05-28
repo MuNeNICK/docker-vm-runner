@@ -17,6 +17,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
+	"github.com/munenick/docker-vm-runner/internal/oci"
 	"github.com/munenick/docker-vm-runner/internal/paths"
 )
 
@@ -54,6 +55,7 @@ type Runner struct {
 	Resolver         *config.Resolver
 	DistroConfigPath string
 	Lifecycle        Lifecycle
+	IsMount          func(string) bool
 }
 
 func New() *Runner {
@@ -86,7 +88,11 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	if opts.DryRun {
+		if err := r.validateDryRun(cfg); err != nil {
+			return err
+		}
 		PrintConfig(r.Stdout, cfg)
+		PrintHost(r.Stdout, cfg)
 		PrintAccess(r.Stdout, cfg)
 		return nil
 	}
@@ -97,6 +103,20 @@ func (r *Runner) Run(ctx context.Context, opts Options) error {
 		return r.runCleanup(ctx, cfg)
 	}
 	return r.runLifecycle(ctx, cfg, opts)
+}
+
+func (r *Runner) validateDryRun(cfg config.VM) error {
+	if cfg.RequireKVM && !hostinfo.FileExists("/dev/kvm") {
+		return fmt.Errorf("REQUIRE_KVM=1 requires /dev/kvm")
+	}
+	if cfg.BootFrom != "" && !isRemoteReference(cfg.BootFrom) && !oci.IsReference(cfg.BootFrom) && !hostinfo.FileExists(cfg.BootFrom) {
+		return fmt.Errorf("BOOT_FROM path not found: %s", cfg.BootFrom)
+	}
+	return nil
+}
+
+func isRemoteReference(value string) bool {
+	return strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 func (r *Runner) applyDefaults() {
@@ -111,6 +131,9 @@ func (r *Runner) applyDefaults() {
 	}
 	if r.DistroConfigPath == "" {
 		r.DistroConfigPath = paths.DefaultConfigPath
+	}
+	if r.IsMount == nil {
+		r.IsMount = hostinfo.IsMount
 	}
 	if r.Resolver == nil {
 		r.Resolver = &config.Resolver{DistroConfigPath: r.DistroConfigPath}
@@ -152,7 +175,7 @@ func (r *Runner) applyResolverDefaults() {
 }
 
 func (r *Runner) layout() paths.Layout {
-	return paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), nil)
+	return paths.ResolveLayout(r.Env.Get("DATA_DIR", ""), r.IsMount)
 }
 
 func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
@@ -180,11 +203,13 @@ func (r *Runner) renderDomainXML(cfg config.VM) (string, error) {
 		HostCPUVendor:     hostinfo.CPUVendor(),
 		HostCPUFlags:      hostinfo.CPUFlags(),
 		BlockSectorSize:   hostinfo.BlockSectorSize,
+		NativeIOUnsafe:    hostinfo.NativeDiskIOUnsafe(filepath.Join(vmDir, "disk."+imageFormat)),
 	})
 }
 
 func (r *Runner) newConcreteLifecycle() *ConcreteLifecycle {
 	lifecycle := NewConcreteLifecycle(r.layout())
+	lifecycle.Status = r.Stderr
 	applyRuntimeEnv(lifecycle, r.Env)
 	return lifecycle
 }
@@ -287,7 +312,7 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		r.printStatus("Waiting for VM shutdown")
 		if cfg.CloudInitEnabled {
 			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
-				return err
+				r.printStatus(fmt.Sprintf("guest readiness check did not complete; VM will keep running: %v", err))
 			}
 		}
 		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
@@ -376,6 +401,17 @@ func PrintConfig(w io.Writer, cfg config.VM) {
 
 func PrintAccess(w io.Writer, cfg config.VM) {
 	printBlock(w, "Access", AccessLines(cfg))
+}
+
+func PrintHost(w io.Writer, cfg config.VM) {
+	printBlock(w, "Host", hostinfo.Lines(hostinfo.Detect(workImageProbePath(cfg))))
+}
+
+func workImageProbePath(cfg config.VM) string {
+	if cfg.Persist {
+		return "/data"
+	}
+	return "/images"
 }
 
 func AccessLines(cfg config.VM) []string {

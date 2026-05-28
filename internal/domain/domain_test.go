@@ -83,6 +83,21 @@ func TestRenderMinimalDomainXML(t *testing.T) {
 	}
 }
 
+func TestRenderFallsBackDiskIOWhenNativeIOUnsafe(t *testing.T) {
+	vm := testVM()
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		KVMAvailable:      true,
+		EffectiveCPUModel: "host",
+		NativeIOUnsafe:    true,
+	})
+
+	if !strings.Contains(xmlText, `cache="writeback"`) || !strings.Contains(xmlText, `io="threads"`) {
+		t.Fatalf("expected disk IO fallback in:\n%s", xmlText)
+	}
+}
+
 func TestRenderNVMEDiskTargets(t *testing.T) {
 	vm := testVM()
 	vm.DiskController = "nvme"

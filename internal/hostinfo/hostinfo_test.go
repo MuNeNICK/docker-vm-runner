@@ -84,6 +84,23 @@ func TestFilesystemProbes(t *testing.T) {
 	}
 }
 
+func TestIsMountReadsMountInfo(t *testing.T) {
+	mountInfo := "42 24 0:39 / / rw,relatime - overlay overlay rw\n" +
+		"43 42 0:40 / /data rw,relatime - ext4 /dev/sda1 rw\n" +
+		"44 42 0:41 / /path\\040with\\040space rw,relatime - ext4 /dev/sda2 rw\n"
+	readFile := func(string) ([]byte, error) { return []byte(mountInfo), nil }
+
+	if !isMount("/data", "/proc/self/mountinfo", readFile) {
+		t.Fatal("/data mount was not detected")
+	}
+	if !isMount("/path with space", "/proc/self/mountinfo", readFile) {
+		t.Fatal("escaped mount path was not detected")
+	}
+	if isMount("/images", "/proc/self/mountinfo", readFile) {
+		t.Fatal("/images incorrectly detected as mount")
+	}
+}
+
 func TestBlockSectorSizeReadsSysfs(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "vdb", "queue")
