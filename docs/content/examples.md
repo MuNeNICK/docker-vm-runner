@@ -189,8 +189,111 @@ curl -k -I https://localhost:6080/
 docker compose down -v
 ```
 
+## iPXE Boot With netboot.xyz
+
+Directory:
+
+```text
+examples/ipxe-netbootxyz/
+```
+
+Files:
+
+- `docker-compose.yaml` - runs netboot.xyz and one iPXE-booting VM.
+- `.env.example` - contains bridge, DHCP range, and console port defaults.
+- `README.md` - shows host bridge preparation, startup, monitoring, and cleanup commands.
+
+### Use Case
+
+Use this example when you want to test the network boot path used by PXE-style installer environments.
+
+### What It Reproduces
+
+The example reproduces a small PXE network:
+
+- `netbootxyz`: DHCP, TFTP, HTTP, and web UI from the netboot.xyz container.
+- `ipxe-client`: a `docker-vm-runner` VM attached to a host bridge and configured for iPXE boot.
+
+The VM uses an empty disk, legacy boot, a bootable bridged NIC, and an iPXE ROM. The expected path is DHCP lease, TFTP download of `netboot.xyz.kpxe`, then iPXE menu files from the netboot.xyz service.
+
+### Run
+
+Run it from the example directory:
+
+```bash
+cd examples/ipxe-netbootxyz
+cp .env.example .env
+```
+
+Create the bridge:
+
+```bash
+set -a
+. ./.env
+set +a
+
+sudo ip link add "$PXE_BRIDGE_NAME" type bridge
+sudo ip addr add "$NETBOOT_ROUTER/${NETBOOT_SUBNET#*/}" dev "$PXE_BRIDGE_NAME"
+sudo ip link set "$PXE_BRIDGE_NAME" up
+```
+
+Start the stack:
+
+```bash
+docker compose up -d
+```
+
+Open the VM console:
+
+```text
+https://localhost:6081/
+```
+
+Watch DHCP and TFTP requests:
+
+```bash
+docker compose logs -f netbootxyz
+```
+
+Remove containers and persistent VM state:
+
+```bash
+docker compose down -v
+```
+
+Remove the bridge:
+
+```bash
+set -a
+. ./.env
+set +a
+
+sudo ip link set "$PXE_BRIDGE_NAME" down
+sudo ip link delete "$PXE_BRIDGE_NAME" type bridge
+```
+
+See `examples/ipxe-netbootxyz/README.md` for the full walkthrough.
+
+### Verification
+
+This example was checked with:
+
+```bash
+docker compose config
+docker compose run --rm --no-deps ipxe-client --dry-run
+docker compose up -d
+docker compose logs netbootxyz
+curl -I http://localhost:3000/
+curl -k -I https://localhost:6081/
+docker compose down -v
+```
+
+The observed netboot.xyz logs included DHCP offer/ack records and TFTP sends for `netboot.xyz.kpxe`, `menu.ipxe`, and `boot.cfg`.
+
 ## Host Requirements
 
 The current examples map `/dev/kvm` into VM containers for hardware acceleration. On hosts without KVM, remove the `devices` block from the Compose file; the VMs will run more slowly through software emulation.
 
 Use distinct published ports for each VM service. Docker cannot publish the same host port from multiple containers in one Compose project.
+
+The iPXE example also needs permission to create and delete a host bridge, unless you override `PXE_BRIDGE_NAME` and the addressing variables to use an existing bridge.
