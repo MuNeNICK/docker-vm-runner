@@ -983,8 +983,13 @@ func TestConcreteLifecycleResolveBaseImageRejectsInvalidCachedImage(t *testing.T
 
 func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) {
 	layout := testLayout(t)
-	source := filepath.Join(t.TempDir(), "cached-image")
+	sourceDir := t.TempDir()
+	source := filepath.Join(sourceDir, "cached-image")
 	writeGzip(t, source, []byte("disk-image"))
+	sibling := filepath.Join(sourceDir, "cached-image.qcow2")
+	if err := os.WriteFile(sibling, []byte("do-not-overwrite"), 0o644); err != nil {
+		t.Fatalf("write sibling: %v", err)
+	}
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
 	lifecycle := NewConcreteLifecycle(layout)
 
@@ -1007,6 +1012,12 @@ func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) 
 	}
 	if _, err := os.Stat(source); err != nil {
 		t.Fatalf("user-provided source should not be removed: %v", err)
+	}
+	if content := readFileString(t, sibling); content != "do-not-overwrite" {
+		t.Fatalf("sibling file was overwritten: %q", content)
+	}
+	if entries, err := os.ReadDir(filepath.Join(layout.BaseImagesDir, "extract")); err == nil && len(entries) != 0 {
+		t.Fatalf("extract cache not cleaned: %v", entries)
 	}
 }
 
@@ -1089,6 +1100,55 @@ func TestConcreteLifecyclePrepareUsesOverlayForLocalBootDisk(t *testing.T) {
 	}
 	if got := readOptionalFile(t, workImage); got == "custom-disk" {
 		t.Fatalf("local boot disk was fully copied to %s", workImage)
+	}
+}
+
+func TestConcreteLifecyclePrepareUsesOverlayForRemoteBootDiskCache(t *testing.T) {
+	layout := testLayout(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("remote-disk"))
+	}))
+	defer server.Close()
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "20G",
+		BootOrder:      []string{"hd"},
+		BootFrom:       server.URL + "/boot.qcow2",
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	bootCache := filepath.Join(layout.BaseImagesDir, "boot", cacheName(server.URL+"/boot.qcow2"))
+	workImage := filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")
+	log := readFileString(t, commandLog)
+	want := "create -f qcow2 -F qcow2 -b " + bootCache + " " + workImage
+	if !strings.Contains(log, want) {
+		t.Fatalf("qemu-img commands missing %q:\n%s", want, log)
+	}
+	if content := readFileString(t, bootCache); content != "remote-disk" {
+		t.Fatalf("boot cache content = %q", content)
+	}
+	if _, err := os.Stat(filepath.Join(layout.VMImagesDir, "vm1", "boot.qcow2")); !os.IsNotExist(err) {
+		t.Fatalf("remote boot source should not be duplicated into VM boot image: %v", err)
 	}
 }
 

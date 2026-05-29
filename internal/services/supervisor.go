@@ -140,6 +140,10 @@ func (s *Supervisor) startAndAssert(ctx context.Context, name string, cmd proces
 		return nil, fmt.Errorf("start %s: %w", name, err)
 	}
 	if err := s.Sleep(ctx, 500*time.Millisecond); err != nil {
+		_ = proc.Terminate()
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = proc.Wait(stopCtx, 5*time.Second)
 		return nil, err
 	}
 	if !proc.Running() {

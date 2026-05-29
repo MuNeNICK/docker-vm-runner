@@ -130,6 +130,28 @@ func TestStartRollsBackStartedProcessesOnFailure(t *testing.T) {
 	}
 }
 
+func TestStartTerminatesProcessWhenPostStartSleepFails(t *testing.T) {
+	root := t.TempDir()
+	virtlogd := &fakeProcess{running: true}
+	supervisor := NewSupervisor(Options{
+		RunDir:    filepath.Join(root, "run"),
+		VarRunDir: filepath.Join(root, "var-run"),
+		Runtime:   RuntimeInfo{Rootless: false},
+	})
+	supervisor.StartProcess = func(ctx context.Context, cmd process.Command) (Process, error) {
+		return virtlogd, nil
+	}
+	supervisor.Sleep = func(context.Context, time.Duration) error { return context.Canceled }
+
+	err := supervisor.Start(context.Background())
+	if err == nil {
+		t.Fatal("expected start error")
+	}
+	if virtlogd.terminateCalls != 1 {
+		t.Fatalf("terminateCalls = %d", virtlogd.terminateCalls)
+	}
+}
+
 func TestWaitForLibvirtRootlessWarnsInsteadOfError(t *testing.T) {
 	var warnings bytes.Buffer
 	supervisor := NewSupervisor(Options{Runtime: RuntimeInfo{Rootless: true}, WarningWriter: &warnings})

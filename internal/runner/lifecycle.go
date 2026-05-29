@@ -644,7 +644,14 @@ func (l *ConcreteLifecycle) shouldCreateBackingOverlay(baseImage string, workIma
 	if filepath.Clean(baseImage) == filepath.Clean(workImage) {
 		return false
 	}
-	return !pathWithin(l.Layout.BaseImagesDir, baseImage) && !pathWithin(l.Layout.VMImagesDir, baseImage)
+	if pathWithin(l.Layout.VMImagesDir, baseImage) {
+		return false
+	}
+	if pathWithin(l.Layout.BaseImagesDir, baseImage) {
+		first := firstPathElement(l.Layout.BaseImagesDir, baseImage)
+		return first == "boot" || first == "oci"
+	}
+	return true
 }
 
 func pathWithin(root string, path string) bool {
@@ -656,6 +663,14 @@ func pathWithin(root string, path string) bool {
 		return false
 	}
 	return true
+}
+
+func firstPathElement(root string, path string) string {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return ""
+	}
+	return strings.Split(rel, string(os.PathSeparator))[0]
 }
 
 func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, workImage string) error {
@@ -855,10 +870,11 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 			return "", err
 		}
 		return l.postProcessImage(ctx, source, filepath.Join(vmDir, "boot."+defaultString(cfg.ImageFormat, "qcow2")), imagePostProcessOptions{
-			DesiredFormat:     defaultString(cfg.ImageFormat, "qcow2"),
-			SourceFormat:      cfg.SourceImageFormat,
-			SourceCompression: cfg.SourceImageCompression,
-			MaxExtractBytes:   cfg.ExtractMaxBytes,
+			DesiredFormat:          defaultString(cfg.ImageFormat, "qcow2"),
+			SourceFormat:           cfg.SourceImageFormat,
+			SourceCompression:      cfg.SourceImageCompression,
+			MaxExtractBytes:        cfg.ExtractMaxBytes,
+			ReturnSourceWhenUsable: true,
 		})
 	}
 	desiredFormat := defaultString(cfg.ImageFormat, "qcow2")
@@ -942,20 +958,30 @@ func (l *ConcreteLifecycle) newDownloader(cfg config.VM, label string) *download
 }
 
 type imagePostProcessOptions struct {
-	DesiredFormat     string
-	SourceFormat      string
-	SourceCompression string
-	MaxExtractBytes   int64
+	DesiredFormat          string
+	SourceFormat           string
+	SourceCompression      string
+	MaxExtractBytes        int64
+	ReturnSourceWhenUsable bool
 }
 
 func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, opts imagePostProcessOptions) (string, error) {
 	current := source
 	intermediates := []string{source}
+	var cleanupDirs []string
+	defer func() {
+		l.cleanupExtractionDirs(cleanupDirs)
+	}()
 	extractor := archive.NewExtractor()
 	extractor.MaxBytes = opts.MaxExtractBytes
 	if shouldExtractByMetadata(current, opts.SourceCompression) {
 		l.infof("Extracting compressed image %s", current)
-		result, err := extractor.ExtractCompressedStream(ctx, current, filepath.Dir(current), opts.SourceFormat, opts.SourceCompression)
+		extractDir, err := l.extractDirFor(current, destination)
+		if err != nil {
+			return "", err
+		}
+		cleanupDirs = appendExtractCleanupDir(cleanupDirs, extractDir, current)
+		result, err := extractor.ExtractCompressedStream(ctx, current, extractDir, opts.SourceFormat, opts.SourceCompression)
 		if err != nil {
 			return "", err
 		}
@@ -964,7 +990,12 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	}
 	if shouldExtractArchiveByMetadata(current, opts.SourceFormat) {
 		l.infof("Extracting archive image %s", current)
-		result, err := extractor.ExtractByFormat(ctx, current, filepath.Dir(current), opts.SourceFormat)
+		extractDir, err := l.extractDirFor(current, destination)
+		if err != nil {
+			return "", err
+		}
+		cleanupDirs = appendExtractCleanupDir(cleanupDirs, extractDir, current)
+		result, err := extractor.ExtractByFormat(ctx, current, extractDir, opts.SourceFormat)
 		if err != nil {
 			return "", err
 		}
@@ -973,7 +1004,12 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	}
 	for isArchive(current) {
 		l.infof("Extracting image archive %s", current)
-		result, err := extractor.ExtractWithResult(ctx, current, filepath.Dir(current))
+		extractDir, err := l.extractDirFor(current, destination)
+		if err != nil {
+			return "", err
+		}
+		cleanupDirs = appendExtractCleanupDir(cleanupDirs, extractDir, current)
+		result, err := extractor.ExtractWithResult(ctx, current, extractDir)
 		if err != nil {
 			return "", err
 		}
@@ -987,7 +1023,7 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	if err == nil && info.Format != "" {
 		currentFormat = info.Format
 	}
-	if current == source && !l.shouldCleanupIntermediate(current, destination) && currentFormat == desiredFormat {
+	if current == source && currentFormat == desiredFormat && (!l.shouldCleanupIntermediate(current, destination) || opts.ReturnSourceWhenUsable) {
 		return current, nil
 	}
 	if currentFormat != "" && currentFormat != desiredFormat {
@@ -1012,6 +1048,36 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	}
 	l.cleanupIntermediateImages(intermediates, destination)
 	return destination, nil
+}
+
+func (l *ConcreteLifecycle) extractDirFor(source string, destination string) (string, error) {
+	if l.shouldCleanupIntermediate(source, destination) {
+		return filepath.Dir(source), nil
+	}
+	root := filepath.Join(l.Layout.BaseImagesDir, "extract")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("create extract cache directory: %w", err)
+	}
+	dir, err := os.MkdirTemp(root, "image-*")
+	if err != nil {
+		return "", fmt.Errorf("create extract work directory: %w", err)
+	}
+	return dir, nil
+}
+
+func appendExtractCleanupDir(dirs []string, extractDir string, source string) []string {
+	if filepath.Clean(extractDir) == filepath.Clean(filepath.Dir(source)) {
+		return dirs
+	}
+	return append(dirs, extractDir)
+}
+
+func (l *ConcreteLifecycle) cleanupExtractionDirs(dirs []string) {
+	for _, dir := range dirs {
+		if err := os.RemoveAll(dir); err != nil && !os.IsNotExist(err) {
+			l.warnf("Could not remove extract directory %s: %v", dir, err)
+		}
+	}
 }
 
 func (l *ConcreteLifecycle) cleanupIntermediateImages(paths []string, destination string) {
@@ -1041,7 +1107,7 @@ func (l *ConcreteLifecycle) shouldCleanupIntermediate(path string, destination s
 		return false
 	}
 	first := strings.Split(rel, string(os.PathSeparator))[0]
-	return first == "downloads" || first == "boot" || first == "oci"
+	return first == "downloads" || first == "boot" || first == "oci" || first == "extract"
 }
 
 func (l *ConcreteLifecycle) validateCachedImage(ctx context.Context, path string, desiredFormat string) error {
