@@ -1,0 +1,51 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - go.mod
+      - go.sum
+      - cmd/**
+      - internal/**
+      - Makefile
+      - .github/workflows/test.yaml
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+      - cmd/**
+      - internal/**
+      - Makefile
+      - .github/workflows/test.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
