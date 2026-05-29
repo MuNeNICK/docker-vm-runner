@@ -288,16 +288,18 @@ func renderCDROM(b *strings.Builder, path string, dev string, order int) {
 }
 
 func renderNetworks(b *strings.Builder, req Request, networkOrder int) error {
-	for idx, nic := range req.VM.NICs {
+	forwardingApplied := false
+	for _, nic := range req.VM.NICs {
 		order := 0
 		if nic.Boot {
 			order = networkOrder
 		}
 		sshPort := 0
 		var forwards []network.PortForward
-		if idx == 0 && nic.Mode == "user" {
+		if !forwardingApplied && nic.Mode == "user" {
 			sshPort = req.VM.SSHPort
 			forwards = req.VM.PortForwards
+			forwardingApplied = true
 		}
 		xmlText, _, err := network.RenderInterface(nic, network.RenderOptions{
 			SSHPort:      sshPort,

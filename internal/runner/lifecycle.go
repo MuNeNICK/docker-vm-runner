@@ -133,19 +133,8 @@ func NewConcreteLifecycle(layout paths.Layout) *ConcreteLifecycle {
 }
 
 func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (err error) {
-	started := false
-	defer func() {
-		if err != nil && started {
-			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			_ = l.StopServices(stopCtx, cfg)
-		}
-	}()
-	if l.Service != nil {
-		if err := l.Service.Start(ctx); err != nil {
-			return err
-		}
-		started = true
+	if err := l.StartCleanupServices(ctx, cfg); err != nil {
+		return err
 	}
 	if cfg.RedfishEnabled {
 		poolReq := l.redfishPool()
@@ -180,6 +169,24 @@ func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (e
 		if _, err := l.NoVNC.Start(ctx, vncproxy.Request{Enabled: true, NoVNCPort: cfg.NoVNCPort, VNCPort: cfg.VNCPort}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (l *ConcreteLifecycle) StartCleanupServices(ctx context.Context, cfg config.VM) (err error) {
+	started := false
+	defer func() {
+		if err != nil && started {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = l.StopServices(stopCtx, cfg)
+		}
+	}()
+	if l.Service != nil {
+		if err := l.Service.Start(ctx); err != nil {
+			return err
+		}
+		started = true
 	}
 	return nil
 }
@@ -348,7 +355,7 @@ func (l *ConcreteLifecycle) StartVM(ctx context.Context, cfg config.VM) error {
 	}
 	l.disablePasst = true
 	if l.Domain != nil {
-		if cleanupErr := l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{HasNVRAM: l.firmware.VarsPath != ""}); cleanupErr != nil {
+		if cleanupErr := l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{HasNVRAM: l.firmware.VarsPath != "", HasTPM: cfg.TPMEnabled}); cleanupErr != nil {
 			return cleanupErr
 		}
 	}
@@ -717,8 +724,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	l.warnDiskPreparationIssues(filepath.Dir(workImage), workImage, cfg.DiskSize)
 	if fileExists(workImage) && cfg.Persist {
 		if _, err := diskManager.ImageInfo(ctx, workImage); err != nil {
-			_ = os.Remove(workImage)
-			l.warnf("Persistent disk %s is not a valid image and will be recreated: %v", workImage, err)
+			return fmt.Errorf("validate persistent disk %s: %w", workImage, err)
 		} else {
 			l.infof("Reusing persistent disk %s", workImage)
 			if cfg.BootFrom != "" {

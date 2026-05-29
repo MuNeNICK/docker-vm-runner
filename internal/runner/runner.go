@@ -37,6 +37,7 @@ type Options struct {
 
 type Lifecycle interface {
 	StartServices(context.Context, config.VM) error
+	StartCleanupServices(context.Context, config.VM) error
 	Connect(context.Context, config.VM) error
 	Prepare(context.Context, config.VM) error
 	StartVM(context.Context, config.VM) error
@@ -441,7 +442,7 @@ func isISOBootReference(value string) bool {
 }
 
 func (r *Runner) runCleanup(ctx context.Context, cfg config.VM) (retErr error) {
-	if err := r.Lifecycle.StartServices(ctx, cfg); err != nil {
+	if err := r.Lifecycle.StartCleanupServices(ctx, cfg); err != nil {
 		stopCtx, cancel := lifecycleCleanupContext()
 		defer cancel()
 		_ = r.Lifecycle.StopServices(stopCtx, cfg)

@@ -122,6 +122,32 @@ func TestRenderNVMEDiskTargets(t *testing.T) {
 	}
 }
 
+func TestRenderPortForwardOnFirstUserModeNIC(t *testing.T) {
+	vm := testVM()
+	vm.SSHPort = 2222
+	vm.PortForwards = []network.PortForward{{HostPort: 8080, GuestPort: 80}}
+	vm.NICs = []network.Config{
+		{Mode: "bridge", BridgeName: "br0", MACAddress: "52:54:00:11:22:33", Model: "virtio"},
+		{Mode: "user", MACAddress: "52:54:00:aa:bb:cc", Model: "virtio"},
+	}
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<interface type="bridge">`,
+		`<interface type="user">`,
+		`<range start="2222" to="22"/>`,
+		`<range start="8080" to="80"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
 func TestRenderRunnerOwnershipMetadata(t *testing.T) {
 	vm := testVM()
 	xmlText := renderForTest(t, Request{

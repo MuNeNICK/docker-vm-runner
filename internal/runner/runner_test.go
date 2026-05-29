@@ -645,7 +645,7 @@ func TestRunCleanupModeOnlyCleansStaleResources(t *testing.T) {
 	if err := r.Run(context.Background(), Options{Cleanup: true}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	want := "start-services,connect,cleanup-stale,close,stop-services"
+	want := "start-cleanup-services,connect,cleanup-stale,close,stop-services"
 	if got := strings.Join(lifecycle.calls, ","); got != want {
 		t.Fatalf("calls = %s want %s", got, want)
 	}
@@ -1605,14 +1605,8 @@ func TestConcreteLifecyclePrepareDoesNotShrinkPersistentWorkImage(t *testing.T) 
 	}
 }
 
-func TestConcreteLifecyclePrepareRecreatesInvalidPersistentWorkImage(t *testing.T) {
+func TestConcreteLifecyclePrepareRejectsInvalidPersistentWorkImage(t *testing.T) {
 	layout := testLayout(t)
-	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
-		t.Fatalf("mkdir base: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
-		t.Fatalf("write base image: %v", err)
-	}
 	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
 	if err := os.MkdirAll(vmDir, 0o755); err != nil {
 		t.Fatalf("mkdir vm: %v", err)
@@ -1628,10 +1622,8 @@ func TestConcreteLifecyclePrepareRecreatesInvalidPersistentWorkImage(t *testing.
 			"exit 0\n"
 	})
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
-	var status bytes.Buffer
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
-	lifecycle.Status = &status
 	lifecycle.TPM = nil
 	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
 
@@ -1653,14 +1645,14 @@ func TestConcreteLifecyclePrepareRecreatesInvalidPersistentWorkImage(t *testing.
 		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
 		Persist:        true,
 	})
-	if err != nil {
-		t.Fatalf("Prepare returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected invalid persistent disk error")
 	}
-	if got := readFileString(t, workImage); got != "base" {
+	if !strings.Contains(err.Error(), "validate persistent disk") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := readFileString(t, workImage); got != "partial" {
 		t.Fatalf("work image = %q", got)
-	}
-	if !strings.Contains(status.String(), "not a valid image") {
-		t.Fatalf("status missing invalid persistent warning: %q", status.String())
 	}
 }
 
@@ -2257,8 +2249,45 @@ func TestConcreteLifecycleStartVMFallsBackFromPasstBackend(t *testing.T) {
 	if manager.startCalls != 2 {
 		t.Fatalf("startCalls = %d", manager.startCalls)
 	}
+	if manager.lastCleanupOpts.HasTPM {
+		t.Fatalf("HasTPM = true")
+	}
 	if strings.Contains(manager.definedXML, `<backend type="passt"/>`) {
 		t.Fatalf("fallback XML still contains passt backend:\n%s", manager.definedXML)
+	}
+}
+
+func TestConcreteLifecycleStartVMFallbackPassesTPMFlag(t *testing.T) {
+	lifecycle := NewConcreteLifecycle(testLayout(t))
+	manager := &fakeLibvirtManager{
+		domain:    &fakeLibvirtDomain{name: "vm1"},
+		startErrs: []error{errors.New("failed to create network backend"), nil},
+	}
+	lifecycle.Manager = manager
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.vmDir = filepath.Join(lifecycle.Layout.VMImagesDir, "vm1")
+	lifecycle.currentConfig = config.VM{
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		TPMEnabled:     true,
+	}
+
+	if err := lifecycle.StartVM(context.Background(), lifecycle.currentConfig); err != nil {
+		t.Fatalf("StartVM returned error: %v", err)
+	}
+	if !manager.lastCleanupOpts.HasTPM {
+		t.Fatalf("HasTPM = false")
 	}
 }
 
@@ -2675,6 +2704,10 @@ func (d *fakeLibvirtDomain) unusedTpmReference(tpm.Result) {}
 
 func (l *fakeLifecycle) StartServices(context.Context, config.VM) error {
 	l.calls = append(l.calls, "start-services")
+	return l.startServicesErr
+}
+func (l *fakeLifecycle) StartCleanupServices(context.Context, config.VM) error {
+	l.calls = append(l.calls, "start-cleanup-services")
 	return l.startServicesErr
 }
 func (l *fakeLifecycle) Connect(context.Context, config.VM) error {
