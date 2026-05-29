@@ -17,8 +17,10 @@ Use `docker-vm-runner` when a normal container is not enough:
 
 - A VM started from a public catalog image by default.
 - Console access by default.
+- NAT networking by default.
 - Optional SSH, VNC, noVNC, and Redfish access.
 - Persistent VM state when `/data` is mounted.
+- Disk sizing, extra disks, and filesystem sharing configuration.
 - Support for cloud images, installer ISOs, disk images, local boot media, remote URLs, and OCI references.
 
 ## Image

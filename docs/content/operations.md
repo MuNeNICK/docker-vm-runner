@@ -2,6 +2,8 @@
 
 ## Persistence
 
+For disk sizing and extra storage configuration, see [Storage](storage.md).
+
 Mount `/data` when you want VM state to survive container removal:
 
 ```bash

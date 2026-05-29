@@ -36,6 +36,8 @@ nav:
   - Overview: index.md
   - Quick Start: quick-start.md
   - Images: images.md
+  - Networking: networking.md
+  - Storage: storage.md
   - Access: access.md
   - Operations: operations.md
   - Reference: reference.md

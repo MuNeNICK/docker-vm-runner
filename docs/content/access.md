@@ -98,6 +98,8 @@ Use comma-separated values for multiple forwards:
 -e PORT_FWD=8080:80,8443:443
 ```
 
+For network configuration beyond access ports, see [Networking](networking.md).
+
 ## noVNC
 
 Enable browser access with noVNC:
