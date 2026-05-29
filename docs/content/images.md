@@ -62,56 +62,22 @@ docker run --rm -it \
 
 Cloud images are usually the best starting point for day-to-day use.
 
-Use ISO images when you want to run an installer.
+Use ISO images when you want to run an installer. See [Boot](boot.md) for ISO install, boot order, boot mode, and iPXE network boot workflows.
 
 ## ISO installs
 
-When an ISO-backed persistent VM stops after installation, `docker-vm-runner` treats it as installed. The next run reuses the VM disk and boots from disk instead of attaching the ISO again.
-
-Keep the ISO attached on the next run when you need to boot the installer or rescue media again:
-
-```bash
-docker run --rm -it \
-  --device /dev/kvm \
-  -e BOOT_FROM=https://example.com/installer.iso \
-  -e FORCE_ISO=1 \
-  -v docker-vm-runner-data:/data \
-  ghcr.io/munenick/docker-vm-runner:latest
-```
+When an ISO-backed persistent VM stops after installation, the next run reuses the VM disk and boots from disk. See [Boot](boot.md#iso-install) for the full flow and `FORCE_ISO=1`.
 
 ## Boot from a custom source
 
-Use `BOOT_FROM` for a URL, local path, OCI reference, or ISO.
+Use `BOOT_FROM` when you want to start from a URL, local path, OCI reference, ISO, disk image, or `blank`. See [Boot](boot.md#boot-from-a-custom-source) for the full boot-source workflow.
 
-Remote image:
+Remote image preview:
 
 ```bash
-docker run --rm -it \
-  --device /dev/kvm \
+docker run --rm \
   -e BOOT_FROM=https://example.com/image.qcow2 \
-  -v docker-vm-runner-data:/data \
-  ghcr.io/munenick/docker-vm-runner:latest
-```
-
-Installer ISO:
-
-```bash
-docker run --rm -it \
-  --device /dev/kvm \
-  -e BOOT_FROM=https://example.com/installer.iso \
-  -v docker-vm-runner-data:/data \
-  ghcr.io/munenick/docker-vm-runner:latest
-```
-
-Local file:
-
-```bash
-docker run --rm -it \
-  --device /dev/kvm \
-  -v "$PWD/images:/boot-media:ro" \
-  -v docker-vm-runner-data:/data \
-  -e BOOT_FROM=/boot-media/image.qcow2 \
-  ghcr.io/munenick/docker-vm-runner:latest
+  ghcr.io/munenick/docker-vm-runner:latest --show-config
 ```
 
 ## Catalog cache

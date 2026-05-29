@@ -185,6 +185,28 @@ docker run -d --name direct-vm \
 
 Replace `eth0` with the host interface from `ip -br link`.
 
+## Network Boot With iPXE
+
+Use iPXE when the VM should boot from your network boot infrastructure.
+
+```bash
+docker run --rm -it \
+  --network host \
+  --cap-add NET_ADMIN \
+  --device /dev/kvm \
+  --device /dev/net/tun \
+  --device /dev/vhost-net \
+  -e IPXE_ENABLE=1 \
+  -e BOOT_ORDER=network,hd \
+  -e NETWORK_MODE=bridge \
+  -e NETWORK_BRIDGE=br0 \
+  -e GUEST_NAME=ipxe-vm \
+  -v ipxe-vm-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Use the bridge or direct network mode that reaches your DHCP/TFTP/HTTP boot services.
+
 ## Share A Host Directory
 
 Use filesystem sharing when the VM should read or write a host directory.

@@ -6,6 +6,7 @@
 - [Quick Start](content/quick-start.md)
 - [Use Cases](content/use-cases.md)
 - [Images](content/images.md)
+- [Boot](content/boot.md)
 - [Networking](content/networking.md)
 - [Storage](content/storage.md)
 - [Access](content/access.md)

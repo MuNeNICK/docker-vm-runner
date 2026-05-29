@@ -37,6 +37,7 @@ nav:
   - Quick Start: quick-start.md
   - Use Cases: use-cases.md
   - Images: images.md
+  - Boot: boot.md
   - Networking: networking.md
   - Storage: storage.md
   - Access: access.md

@@ -19,6 +19,7 @@ Use `docker-vm-runner` when a normal container is not enough:
 - Console access by default.
 - NAT networking by default.
 - Optional SSH, VNC, noVNC, and Redfish access.
+- Boot from catalog images, custom disks, installer ISOs, blank disks, or iPXE.
 - Persistent VM state when `/data` is mounted.
 - Disk sizing, extra disks, and filesystem sharing configuration.
 - Support for cloud images, installer ISOs, disk images, local boot media, remote URLs, and OCI references.
@@ -33,4 +34,4 @@ ghcr.io/munenick/docker-vm-runner:latest
 
 ## Next step
 
-Start with [Quick Start](quick-start.md) to boot your first VM.
+Start with [Quick Start](quick-start.md) to boot your first VM, or jump to [Use Cases](use-cases.md) for task-oriented examples.

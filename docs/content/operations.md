@@ -2,7 +2,7 @@
 
 ## Persistence
 
-For disk sizing and extra storage configuration, see [Storage](storage.md).
+For disk sizing, extra disks, and filesystem sharing, see [Storage](storage.md).
 
 Mount `/data` when you want VM state to survive container removal:
 
@@ -31,7 +31,7 @@ docker run --rm -it \
 | `/data` | Persistent VM disks, state, and image cache. |
 | `/config` | Optional catalog cache. |
 
-Mount both when you want to keep VM disks and the catalog cache across runs:
+Mount both when you want to keep VM disks and the catalog cache across runs. See [Images](images.md#catalog-cache) for catalog cache usage.
 
 ```bash
 docker run --rm -it \
@@ -63,7 +63,7 @@ If you detach from the console, the VM may continue running. This is useful for 
 
 ## Resource sizing
 
-The common sizing variables are:
+The common sizing variables are below. See [Storage](storage.md#disk-size) for disk sizing details.
 
 | Variable | Default | Description |
 | --- | --- | --- |
