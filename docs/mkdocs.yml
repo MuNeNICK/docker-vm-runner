@@ -36,6 +36,7 @@ nav:
   - Overview: index.md
   - Quick Start: quick-start.md
   - Use Cases: use-cases.md
+  - Examples: examples.md
   - Agent Skills: agent-skills.md
   - Images: images.md
   - Boot: boot.md
