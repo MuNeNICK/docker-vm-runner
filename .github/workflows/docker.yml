@@ -2,10 +2,10 @@ name: Build and Publish Docker Image
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "v1" ]
     tags: [ "v*", "release-*" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "v1" ]
 
 permissions:
   contents: read
@@ -40,7 +40,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=v1,enable=${{ github.ref == 'refs/heads/v1' }}
             type=sha
             type=ref,event=tag
 
