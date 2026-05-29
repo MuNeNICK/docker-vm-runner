@@ -160,6 +160,16 @@ func (d *VirshDomain) UndefineNVRAM() error {
 	return err
 }
 
+func (d *VirshDomain) UndefineNVRAMTPM() error {
+	_, err := d.Conn.virsh("undefine", "--nvram", "--tpm", d.NameValue)
+	return err
+}
+
+func (d *VirshDomain) UndefineTPM() error {
+	_, err := d.Conn.virsh("undefine", "--tpm", d.NameValue)
+	return err
+}
+
 type VirshStoragePool struct {
 	NameValue string
 	Conn      *VirshConnection

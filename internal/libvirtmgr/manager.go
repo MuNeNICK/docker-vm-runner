@@ -34,6 +34,8 @@ type Domain interface {
 	Destroy() error
 	Undefine() error
 	UndefineNVRAM() error
+	UndefineNVRAMTPM() error
+	UndefineTPM() error
 }
 
 type StoragePool interface {
@@ -48,6 +50,7 @@ type Manager struct {
 
 type CleanupOptions struct {
 	HasNVRAM        bool
+	HasTPM          bool
 	Context         context.Context
 	ShutdownTimeout time.Duration
 	ShutdownPoll    time.Duration
@@ -110,7 +113,7 @@ func (m *Manager) ReconcileStaleDomain(name string) error {
 	if !inspection.Metadata.Managed || inspection.Metadata.VMName != name {
 		return fmt.Errorf("libvirt domain %s already exists and is not managed by docker-vm-runner", name)
 	}
-	if err := m.Cleanup(domain, CleanupOptions{HasNVRAM: inspection.HasNVRAM}); err != nil {
+	if err := m.Cleanup(domain, CleanupOptions{HasNVRAM: inspection.HasNVRAM, HasTPM: inspection.HasTPM}); err != nil {
 		return fmt.Errorf("cleanup stale libvirt domain %s: %w", name, err)
 	}
 	return nil
@@ -119,6 +122,7 @@ func (m *Manager) ReconcileStaleDomain(name string) error {
 type domainInspection struct {
 	Metadata RunnerMetadata
 	HasNVRAM bool
+	HasTPM   bool
 }
 
 func inspectDomain(domain Domain, name string) (domainInspection, error) {
@@ -130,7 +134,7 @@ func inspectDomain(domain Domain, name string) (domainInspection, error) {
 	if err != nil {
 		return domainInspection{}, fmt.Errorf("parse libvirt domain %s metadata: %w", name, err)
 	}
-	return domainInspection{Metadata: metadata, HasNVRAM: domainHasNVRAM(xmlText)}, nil
+	return domainInspection{Metadata: metadata, HasNVRAM: domainHasElement(xmlText, "nvram"), HasTPM: domainHasElement(xmlText, "tpm")}, nil
 }
 
 type RunnerMetadata struct {
@@ -138,7 +142,7 @@ type RunnerMetadata struct {
 	VMName  string
 }
 
-func domainHasNVRAM(xmlText string) bool {
+func domainHasElement(xmlText string, element string) bool {
 	decoder := xml.NewDecoder(strings.NewReader(xmlText))
 	for {
 		token, err := decoder.Token()
@@ -146,7 +150,7 @@ func domainHasNVRAM(xmlText string) bool {
 			return false
 		}
 		start, ok := token.(xml.StartElement)
-		if ok && start.Name.Local == "nvram" {
+		if ok && start.Name.Local == element {
 			return true
 		}
 	}
@@ -222,14 +226,23 @@ func (m *Manager) Cleanup(domain Domain, opts CleanupOptions) error {
 	if err != nil {
 		return fmt.Errorf("check domain active state: %w", err)
 	}
-	if opts.HasNVRAM {
+	switch {
+	case opts.HasNVRAM && opts.HasTPM:
+		if err := domain.UndefineNVRAMTPM(); err != nil {
+			return fmt.Errorf("undefine libvirt domain %s with nvram and tpm: %w", domain.Name(), err)
+		}
+	case opts.HasNVRAM:
 		if err := domain.UndefineNVRAM(); err != nil {
 			return fmt.Errorf("undefine libvirt domain %s with nvram: %w", domain.Name(), err)
 		}
-		return nil
-	}
-	if err := domain.Undefine(); err != nil {
-		return fmt.Errorf("undefine libvirt domain %s: %w", domain.Name(), err)
+	case opts.HasTPM:
+		if err := domain.UndefineTPM(); err != nil {
+			return fmt.Errorf("undefine libvirt domain %s with tpm: %w", domain.Name(), err)
+		}
+	default:
+		if err := domain.Undefine(); err != nil {
+			return fmt.Errorf("undefine libvirt domain %s: %w", domain.Name(), err)
+		}
 	}
 	return nil
 }

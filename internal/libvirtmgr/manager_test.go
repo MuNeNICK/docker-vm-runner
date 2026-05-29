@@ -203,6 +203,34 @@ func TestCleanupUsesNVRAMUndefineFlag(t *testing.T) {
 	}
 }
 
+func TestCleanupUsesTPMUndefineFlag(t *testing.T) {
+	domain := &fakeDomain{name: "test-vm", active: false}
+	err := New(nil).Cleanup(domain, CleanupOptions{HasTPM: true})
+	if err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if domain.undefineCalls != 0 || domain.undefineNVRAMCalls != 0 {
+		t.Fatalf("unexpected undefine calls plain=%d nvram=%d", domain.undefineCalls, domain.undefineNVRAMCalls)
+	}
+	if domain.undefineTPMCalls != 1 {
+		t.Fatalf("undefineTPMCalls = %d", domain.undefineTPMCalls)
+	}
+}
+
+func TestCleanupUsesNVRAMAndTPMUndefineFlags(t *testing.T) {
+	domain := &fakeDomain{name: "test-vm", active: false}
+	err := New(nil).Cleanup(domain, CleanupOptions{HasNVRAM: true, HasTPM: true})
+	if err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if domain.undefineCalls != 0 || domain.undefineNVRAMCalls != 0 || domain.undefineTPMCalls != 0 {
+		t.Fatalf("unexpected undefine calls plain=%d nvram=%d tpm=%d", domain.undefineCalls, domain.undefineNVRAMCalls, domain.undefineTPMCalls)
+	}
+	if domain.undefineNVRAMTPMCalls != 1 {
+		t.Fatalf("undefineNVRAMTPMCalls = %d", domain.undefineNVRAMTPMCalls)
+	}
+}
+
 func TestCleanupTreatsMissingDomainAsAlreadyCleaned(t *testing.T) {
 	domain := &fakeDomain{name: "test-vm", isActiveErr: ErrNotFound}
 	err := New(nil).Cleanup(domain, CleanupOptions{HasNVRAM: true})
@@ -316,17 +344,19 @@ func (c *fakeConnection) DefineStoragePool(xml string) (StoragePool, error) {
 }
 
 type fakeDomain struct {
-	name               string
-	xmlText            string
-	active             bool
-	createCalls        int
-	destroyCalls       int
-	shutdownCalls      int
-	undefineCalls      int
-	undefineNVRAMCalls int
-	createErr          error
-	isActiveErr        error
-	undefined          bool
+	name                  string
+	xmlText               string
+	active                bool
+	createCalls           int
+	destroyCalls          int
+	shutdownCalls         int
+	undefineCalls         int
+	undefineNVRAMCalls    int
+	undefineNVRAMTPMCalls int
+	undefineTPMCalls      int
+	createErr             error
+	isActiveErr           error
+	undefined             bool
 }
 
 func (d *fakeDomain) Name() string {
@@ -373,6 +403,18 @@ func (d *fakeDomain) Undefine() error {
 
 func (d *fakeDomain) UndefineNVRAM() error {
 	d.undefineNVRAMCalls++
+	d.undefined = true
+	return nil
+}
+
+func (d *fakeDomain) UndefineNVRAMTPM() error {
+	d.undefineNVRAMTPMCalls++
+	d.undefined = true
+	return nil
+}
+
+func (d *fakeDomain) UndefineTPM() error {
+	d.undefineTPMCalls++
 	d.undefined = true
 	return nil
 }

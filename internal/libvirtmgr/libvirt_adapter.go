@@ -104,6 +104,14 @@ func (d *LibvirtDomain) UndefineNVRAM() error {
 	return d.domain.UndefineFlags(libvirt.DOMAIN_UNDEFINE_NVRAM)
 }
 
+func (d *LibvirtDomain) UndefineNVRAMTPM() error {
+	return d.domain.UndefineFlags(libvirt.DOMAIN_UNDEFINE_NVRAM | libvirt.DOMAIN_UNDEFINE_TPM)
+}
+
+func (d *LibvirtDomain) UndefineTPM() error {
+	return d.domain.UndefineFlags(libvirt.DOMAIN_UNDEFINE_TPM)
+}
+
 type LibvirtStoragePool struct {
 	pool *libvirt.StoragePool
 }

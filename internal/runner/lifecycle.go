@@ -547,6 +547,7 @@ func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 		}
 		cleanupErr = l.Manager.Cleanup(l.Domain, libvirtmgr.CleanupOptions{
 			HasNVRAM:        l.firmware.VarsPath != "",
+			HasTPM:          cfg.TPMEnabled,
 			Context:         ctx,
 			ShutdownTimeout: 20 * time.Second,
 			ShutdownPoll:    time.Second,
@@ -556,6 +557,9 @@ func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
 		}
 	}
 	if !cfg.Persist && cfg.VMName != "" {
+		if cleanupErr != nil {
+			return cleanupErr
+		}
 		vmDir, err := l.vmDirFor(cfg.VMName)
 		if err != nil {
 			if cleanupErr == nil {

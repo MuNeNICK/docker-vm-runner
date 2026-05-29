@@ -1947,6 +1947,30 @@ func TestConcreteLifecycleCleanupRemovesNonPersistentVMDir(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecycleCleanupKeepsNonPersistentVMDirWhenLibvirtCleanupFails(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(vmDir, "disk.qcow2"), []byte("disk"), 0o644); err != nil {
+		t.Fatalf("write disk: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}, cleanupErr: errors.New("destroy failed")}
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.TPM = nil
+	lifecycle.NoVNC = nil
+
+	err := lifecycle.Cleanup(context.Background(), config.VM{VMName: "vm1", Persist: false})
+	if err == nil {
+		t.Fatal("expected cleanup error")
+	}
+	if _, statErr := os.Stat(vmDir); statErr != nil {
+		t.Fatalf("vm dir should remain after cleanup failure: %v", statErr)
+	}
+}
+
 func TestConcreteLifecycleCleanupRejectsUnsafeVMName(t *testing.T) {
 	layout := testLayout(t)
 	outside := filepath.Join(filepath.Dir(layout.VMImagesDir), "outside")
@@ -1984,6 +2008,23 @@ func TestConcreteLifecycleCleanupKeepsPersistentVMDir(t *testing.T) {
 	}
 	if _, err := os.Stat(vmDir); err != nil {
 		t.Fatalf("vm dir stat err=%v", err)
+	}
+}
+
+func TestConcreteLifecycleCleanupPassesTPMFlag(t *testing.T) {
+	layout := testLayout(t)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.Domain = &fakeLibvirtDomain{name: "vm1"}
+	lifecycle.TPM = nil
+	lifecycle.NoVNC = nil
+
+	if err := lifecycle.Cleanup(context.Background(), config.VM{VMName: "vm1", Persist: true, TPMEnabled: true}); err != nil {
+		t.Fatalf("Cleanup returned error: %v", err)
+	}
+	if !manager.lastCleanupOpts.HasTPM {
+		t.Fatalf("HasTPM = false")
 	}
 }
 
@@ -2488,6 +2529,7 @@ type fakeLibvirtManager struct {
 	reconcileCalls   int
 	startCalls       int
 	startErrs        []error
+	lastCleanupOpts  libvirtmgr.CleanupOptions
 }
 
 func (m *fakeLibvirtManager) ReconcileStaleDomain(string) error {
@@ -2510,7 +2552,8 @@ func (m *fakeLibvirtManager) Start(libvirtmgr.Domain) error {
 	m.startErrs = m.startErrs[1:]
 	return err
 }
-func (m *fakeLibvirtManager) Cleanup(libvirtmgr.Domain, libvirtmgr.CleanupOptions) error {
+func (m *fakeLibvirtManager) Cleanup(_ libvirtmgr.Domain, opts libvirtmgr.CleanupOptions) error {
+	m.lastCleanupOpts = opts
 	return m.cleanupErr
 }
 func (m *fakeLibvirtManager) EnsureStoragePool(libvirtmgr.StoragePoolRequest) (libvirtmgr.StoragePool, error) {
@@ -2538,6 +2581,8 @@ func (d *fakeLibvirtDomain) Shutdown() error               { d.active = false; r
 func (d *fakeLibvirtDomain) Destroy() error                { d.active = false; return nil }
 func (d *fakeLibvirtDomain) Undefine() error               { return nil }
 func (d *fakeLibvirtDomain) UndefineNVRAM() error          { return nil }
+func (d *fakeLibvirtDomain) UndefineNVRAMTPM() error       { return nil }
+func (d *fakeLibvirtDomain) UndefineTPM() error            { return nil }
 func (d *fakeLibvirtDomain) unusedTpmReference(tpm.Result) {}
 
 func (l *fakeLifecycle) StartServices(context.Context, config.VM) error {
