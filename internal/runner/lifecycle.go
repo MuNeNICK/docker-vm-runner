@@ -732,7 +732,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 				if err != nil {
 					return err
 				}
-				if isISO(source) {
+				if isISOImage(cfg, source) {
 					l.bootISOPath = source
 				}
 			}
@@ -745,7 +745,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 			if err != nil {
 				return err
 			}
-			if isISO(source) {
+			if isISOImage(cfg, source) {
 				l.bootISOPath = source
 			}
 		}
@@ -910,7 +910,7 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 		if err != nil {
 			return "", err
 		}
-		if isISO(source) {
+		if isISOImage(cfg, source) {
 			l.bootISOPath = source
 			return "", nil
 		}
@@ -1382,6 +1382,10 @@ func (l *ConcreteLifecycle) cpuFlags() map[string]bool {
 
 func isISO(path string) bool {
 	return strings.EqualFold(filepath.Ext(path), ".iso")
+}
+
+func isISOImage(cfg config.VM, path string) bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.SourceImageType), "iso") || isISO(path)
 }
 
 func isArchive(path string) bool {

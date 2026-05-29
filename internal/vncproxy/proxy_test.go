@@ -166,6 +166,36 @@ func TestWebSocketBridgeCopiesBothDirections(t *testing.T) {
 	}
 }
 
+func TestStopCancelsActiveWebSocketBridge(t *testing.T) {
+	root := writeAssets(t)
+	targetClient, targetServer := net.Pipe()
+	defer targetServer.Close()
+	proxy := New(Options{
+		StateDir:      t.TempDir(),
+		AssetRoots:    []string{root},
+		ListenAddress: "127.0.0.1:0",
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return targetClient, nil
+		},
+	})
+	result, err := proxy.Start(context.Background(), Request{Enabled: true})
+	if err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	wsConn, _, err := websocket.Dial(context.Background(), "wss://"+result.ListenAddress+"/websockify", &websocket.DialOptions{HTTPClient: client})
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer wsConn.Close(websocket.StatusNormalClosure, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := proxy.Stop(ctx); err != nil {
+		t.Fatalf("Stop returned error with active websocket: %v", err)
+	}
+}
+
 func writeAssets(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

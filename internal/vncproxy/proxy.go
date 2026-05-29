@@ -47,9 +47,10 @@ type Result struct {
 }
 
 type Proxy struct {
-	Options  Options
-	server   *http.Server
-	listener net.Listener
+	Options      Options
+	server       *http.Server
+	listener     net.Listener
+	serverCancel context.CancelFunc
 }
 
 func New(opts Options) *Proxy {
@@ -99,9 +100,12 @@ func (p *Proxy) Start(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("listen for noVNC: %w", err)
 	}
+	serverCtx, serverCancel := context.WithCancel(ctx)
 	p.listener = listener
+	p.serverCancel = serverCancel
 	p.server = &http.Server{
-		Handler: p.Handler(HandlerOptions{AssetRoot: assetRoot, TargetAddress: target}),
+		Handler:     p.Handler(HandlerOptions{AssetRoot: assetRoot, TargetAddress: target}),
+		BaseContext: func(net.Listener) context.Context { return serverCtx },
 	}
 	go func() {
 		err := p.server.Serve(listener)
@@ -123,9 +127,13 @@ func (p *Proxy) Stop(ctx context.Context) error {
 	if p.server == nil {
 		return nil
 	}
+	if p.serverCancel != nil {
+		p.serverCancel()
+	}
 	err := p.server.Shutdown(ctx)
 	p.server = nil
 	p.listener = nil
+	p.serverCancel = nil
 	return err
 }
 
@@ -161,7 +169,7 @@ func (p *Proxy) serveWebSocket(w http.ResponseWriter, r *http.Request, target st
 		return
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	websocketConn := websocket.NetConn(ctx, wsConn, websocket.MessageBinary)
 	_ = bridge(websocketConn, targetConn)

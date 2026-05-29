@@ -255,14 +255,31 @@ func extractLayerMember(layer Layer, memberName string, outputPath string, maxBy
 		if header.Name != memberName || header.Typeflag != tar.TypeReg {
 			continue
 		}
-		output, err := os.Create(outputPath)
-		if err != nil {
-			return fmt.Errorf("create OCI disk %s: %w", outputPath, err)
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+			return fmt.Errorf("create OCI disk directory: %w", err)
 		}
-		defer output.Close()
+		output, err := os.CreateTemp(filepath.Dir(outputPath), "."+filepath.Base(outputPath)+".tmp-*")
+		if err != nil {
+			return fmt.Errorf("create temporary OCI disk %s: %w", outputPath, err)
+		}
+		tempPath := output.Name()
+		cleanup := true
+		defer func() {
+			if cleanup {
+				_ = os.Remove(tempPath)
+			}
+		}()
 		if _, err := copyWithLimit(output, tarReader, maxBytes, "extract OCI disk member "+memberName); err != nil {
+			_ = output.Close()
 			return fmt.Errorf("extract OCI disk member %s: %w", memberName, err)
 		}
+		if err := output.Close(); err != nil {
+			return fmt.Errorf("close OCI disk %s: %w", tempPath, err)
+		}
+		if err := os.Rename(tempPath, outputPath); err != nil {
+			return fmt.Errorf("move OCI disk to %s: %w", outputPath, err)
+		}
+		cleanup = false
 		return nil
 	}
 	return fmt.Errorf("OCI layer member disappeared: %s", memberName)

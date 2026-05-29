@@ -170,6 +170,29 @@ func TestPullRejectsOversizedLayerMember(t *testing.T) {
 	}
 }
 
+func TestExtractLayerMemberDoesNotLeavePartialOutput(t *testing.T) {
+	dir := t.TempDir()
+	outputPath := filepath.Join(dir, "disk.qcow2")
+	layer := fakeLayer(tarBytes(t, map[string][]byte{
+		"disk.qcow2": bytes.Repeat([]byte("x"), 11),
+	}))
+
+	err := extractLayerMember(layer, "disk.qcow2", outputPath, 10)
+	if err == nil {
+		t.Fatal("expected max size error")
+	}
+	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
+		t.Fatalf("partial output remains, stat err = %v", statErr)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".disk.qcow2.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary outputs remain: %v", matches)
+	}
+}
+
 func TestPullNoDiskFound(t *testing.T) {
 	cacheDir := t.TempDir()
 	fetcher := &fakeFetcher{image: fakeImage{

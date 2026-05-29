@@ -1054,6 +1054,59 @@ func TestConcreteLifecycleResolveBaseImageUsesCompressionMetadata(t *testing.T) 
 	}
 }
 
+func TestConcreteLifecycleResolveBaseImageUsesSourceImageTypeISO(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(t.TempDir(), "installer")
+	if err := os.WriteFile(source, []byte("iso"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	lifecycle := NewConcreteLifecycle(layout)
+
+	got, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
+		Distro:          "custom",
+		VMName:          "vm1",
+		BootFrom:        source,
+		SourceImageType: "iso",
+		ImageFormat:     "qcow2",
+	})
+	if err != nil {
+		t.Fatalf("resolveBaseImage returned error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("base image = %s", got)
+	}
+	if lifecycle.bootISOPath != source {
+		t.Fatalf("bootISOPath = %s", lifecycle.bootISOPath)
+	}
+}
+
+func TestConcreteLifecyclePrepareDiskUsesSourceImageTypeISO(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(t.TempDir(), "installer")
+	if err := os.WriteFile(source, []byte("iso"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	installFakeQEMUImg(t)
+	lifecycle := NewConcreteLifecycle(layout)
+	workImage := filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")
+
+	err := lifecycle.prepareDisk(context.Background(), config.VM{
+		Distro:          "custom",
+		VMName:          "vm1",
+		BootFrom:        source,
+		SourceImageType: "iso",
+		BlankWorkDisk:   true,
+		ImageFormat:     "qcow2",
+		DiskSize:        "10G",
+	}, workImage)
+	if err != nil {
+		t.Fatalf("prepareDisk returned error: %v", err)
+	}
+	if lifecycle.bootISOPath != source {
+		t.Fatalf("bootISOPath = %s", lifecycle.bootISOPath)
+	}
+}
+
 func TestConcreteLifecycleResolveBaseImageDoesNotOverwriteDistroCacheForBootFromDisk(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
