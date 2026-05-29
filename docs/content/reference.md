@@ -25,7 +25,7 @@ docker exec <container> guest-exec [--wait] <command> [args...]
 
 | Option | Description |
 | --- | --- |
-| `--wait` | Wait for the QEMU guest agent to become available before running the command. |
+| `--wait` | Wait for the VM domain to appear and for the QEMU guest agent to become available before running the command. |
 
 Examples:
 

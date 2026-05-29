@@ -20,7 +20,7 @@ import (
 const (
 	defaultPollInterval      = 300 * time.Millisecond
 	defaultPollTimeout       = 300 * time.Second
-	defaultAgentWaitTimeout  = 60 * time.Second
+	defaultAgentWaitTimeout  = 300 * time.Second
 	defaultAgentWaitInterval = 2 * time.Second
 )
 
@@ -28,6 +28,7 @@ var (
 	ErrAgentNotConnected = errors.New("guest agent is not connected")
 	ErrAgentWaitTimeout  = errors.New("guest agent wait timeout")
 	ErrCommandTimeout    = errors.New("guest command timeout")
+	ErrDomainWaitTimeout = errors.New("running VM wait timeout")
 )
 
 type Invocation struct {
@@ -100,7 +101,7 @@ func ParseArgs(args []string) (Invocation, error) {
 
 func (e *Executor) Run(ctx context.Context, inv Invocation) (Result, error) {
 	e.applyDefaults()
-	domain, err := e.discoverDomain(ctx)
+	domain, err := e.domainForInvocation(ctx, inv)
 	if err != nil {
 		return Result{}, err
 	}
@@ -109,7 +110,7 @@ func (e *Executor) Run(ctx context.Context, inv Invocation) (Result, error) {
 
 func (e *Executor) RunStreaming(ctx context.Context, inv Invocation, stdout io.Writer, stderr io.Writer) (Result, error) {
 	e.applyDefaults()
-	domain, err := e.discoverDomain(ctx)
+	domain, err := e.domainForInvocation(ctx, inv)
 	if err != nil {
 		return Result{}, err
 	}
@@ -118,7 +119,7 @@ func (e *Executor) RunStreaming(ctx context.Context, inv Invocation, stdout io.W
 
 func (e *Executor) Stream(ctx context.Context, inv Invocation, stdout io.Writer, stderr io.Writer) (int, error) {
 	e.applyDefaults()
-	domain, err := e.discoverDomain(ctx)
+	domain, err := e.domainForInvocation(ctx, inv)
 	if err != nil {
 		return 0, err
 	}
@@ -215,6 +216,46 @@ func (e *Executor) discoverDomain(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("list running domains: %w", err)
 	}
+	return selectDomain(names)
+}
+
+func (e *Executor) domainForInvocation(ctx context.Context, inv Invocation) (string, error) {
+	if inv.Wait {
+		return e.waitForDomain(ctx)
+	}
+	return e.discoverDomain(ctx)
+}
+
+func (e *Executor) waitForDomain(ctx context.Context) (string, error) {
+	deadline := time.Now().Add(e.AgentWaitTimeout)
+	var lastErr error
+	for {
+		names, err := e.Client.ListRunningDomains(ctx)
+		if err != nil {
+			lastErr = fmt.Errorf("list running domains: %w", err)
+		} else {
+			domain, err := selectDomain(names)
+			if err == nil {
+				return domain, nil
+			}
+			if !isNoRunningDomainError(err) {
+				return "", err
+			}
+			lastErr = err
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return "", fmt.Errorf("%w: %v", ErrDomainWaitTimeout, lastErr)
+			}
+			return "", ErrDomainWaitTimeout
+		}
+		if err := e.Sleep(ctx, e.AgentWaitInterval); err != nil {
+			return "", err
+		}
+	}
+}
+
+func selectDomain(names []string) (string, error) {
 	filtered := make([]string, 0, len(names))
 	for _, name := range names {
 		if strings.TrimSpace(name) != "" {
@@ -228,6 +269,10 @@ func (e *Executor) discoverDomain(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("multiple running VMs found")
 	}
 	return filtered[0], nil
+}
+
+func isNoRunningDomainError(err error) bool {
+	return err != nil && err.Error() == "no running VM found"
 }
 
 func (e *Executor) waitForAgent(ctx context.Context, domain string) error {
@@ -556,7 +601,7 @@ func Main(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer
 	exitCode, err := NewExecutor().Stream(ctx, inv, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
-		if errors.Is(err, ErrAgentNotConnected) || errors.Is(err, ErrAgentWaitTimeout) {
+		if errors.Is(err, ErrAgentNotConnected) || errors.Is(err, ErrAgentWaitTimeout) || errors.Is(err, ErrDomainWaitTimeout) {
 			return 127
 		}
 		return 1

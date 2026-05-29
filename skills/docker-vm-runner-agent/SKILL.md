@@ -38,6 +38,11 @@ docker run --rm -dit --name command-vm \
 docker exec command-vm guest-exec --wait "uname -a"
 ```
 
+It is safe to run `guest-exec --wait` immediately after `docker run -dit`;
+`--wait` waits for the VM domain to appear and for the QEMU guest agent to
+connect before executing the command. Use `docker logs -f command-vm` when you
+want to watch startup progress.
+
 If `/dev/kvm` is unavailable, remove `--device /dev/kvm`. If the task requires
 hardware acceleration, set `-e REQUIRE_KVM=1` and fail early when KVM is not
 available.

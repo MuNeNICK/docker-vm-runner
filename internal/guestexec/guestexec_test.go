@@ -230,6 +230,91 @@ func TestRunWaitsForAgentWhenRequested(t *testing.T) {
 	}
 }
 
+func TestRunWaitsForDomainWhenRequested(t *testing.T) {
+	client := &fakeClient{
+		domainResponses: [][]string{
+			nil,
+			{"test-vm"},
+		},
+		responses: []response{
+			{raw: rawJSON(t, `{}`)},
+			{raw: rawJSON(t, `{"pid":1}`)},
+			{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
+		},
+	}
+	sleepCalls := 0
+	executor := NewExecutor(client)
+	executor.Sleep = func(context.Context, time.Duration) error {
+		sleepCalls++
+		return nil
+	}
+
+	if _, err := executor.Run(context.Background(), Invocation{Wait: true, Path: "true"}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if len(client.domainsRequested) != 2 {
+		t.Fatalf("domain requests = %d", len(client.domainsRequested))
+	}
+	if sleepCalls != 1 {
+		t.Fatalf("sleepCalls = %d", sleepCalls)
+	}
+	if client.commands[0].Execute != "guest-ping" {
+		t.Fatalf("commands = %#v", client.commands)
+	}
+}
+
+func TestRunWaitsForDomainListErrorsWhenRequested(t *testing.T) {
+	client := &fakeClient{
+		domainErrors: []error{
+			errors.New("libvirt not ready"),
+			nil,
+		},
+		domainResponses: [][]string{
+			{"test-vm"},
+		},
+		responses: []response{
+			{raw: rawJSON(t, `{}`)},
+			{raw: rawJSON(t, `{"pid":1}`)},
+			{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
+		},
+	}
+	sleepCalls := 0
+	executor := NewExecutor(client)
+	executor.Sleep = func(context.Context, time.Duration) error {
+		sleepCalls++
+		return nil
+	}
+
+	if _, err := executor.Run(context.Background(), Invocation{Wait: true, Path: "true"}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if sleepCalls != 1 {
+		t.Fatalf("sleepCalls = %d", sleepCalls)
+	}
+}
+
+func TestRunDoesNotWaitForDomainWithoutWaitFlag(t *testing.T) {
+	client := &fakeClient{
+		domainResponses: [][]string{
+			nil,
+			{"test-vm"},
+		},
+	}
+	executor := NewExecutor(client)
+	executor.Sleep = func(context.Context, time.Duration) error {
+		t.Fatal("Sleep should not be called without --wait")
+		return nil
+	}
+
+	_, err := executor.Run(context.Background(), Invocation{Path: "true"})
+	if err == nil || !strings.Contains(err.Error(), "no running VM found") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(client.domainsRequested) != 1 {
+		t.Fatalf("domain requests = %d", len(client.domainsRequested))
+	}
+}
+
 func TestRunErrorsWhenNoDomain(t *testing.T) {
 	executor := NewExecutor(&fakeClient{})
 
@@ -332,7 +417,10 @@ type response struct {
 }
 
 type fakeClient struct {
-	domains          []string
+	domains         []string
+	domainResponses [][]string
+	domainErrors    []error
+
 	domainsRequested []struct{}
 	responses        []response
 	commands         []Command
@@ -340,6 +428,18 @@ type fakeClient struct {
 
 func (c *fakeClient) ListRunningDomains(context.Context) ([]string, error) {
 	c.domainsRequested = append(c.domainsRequested, struct{}{})
+	if len(c.domainErrors) > 0 {
+		next := c.domainErrors[0]
+		c.domainErrors = c.domainErrors[1:]
+		if next != nil {
+			return nil, next
+		}
+	}
+	if len(c.domainResponses) > 0 {
+		next := c.domainResponses[0]
+		c.domainResponses = c.domainResponses[1:]
+		return next, nil
+	}
 	return c.domains, nil
 }
 

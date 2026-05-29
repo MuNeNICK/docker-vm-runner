@@ -397,11 +397,19 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 	vmStarted = true
 	output.Success("VM started")
 	output.Section("Access", AccessLines(cfg))
+	var stopGuestReadyLog func()
+	if cfg.CloudInitEnabled && !opts.NoConsole {
+		stopGuestReadyLog = r.startGuestReadyLogger(ctx, cfg, output)
+		defer stopGuestReadyLog()
+	}
 	if opts.NoConsole {
 		output.HeadlessWait()
 		if cfg.CloudInitEnabled {
+			output.Step("Waiting for guest readiness")
 			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
 				output.Warn("Guest readiness check did not complete", "VM will keep running. "+err.Error())
+			} else {
+				output.Success("Guest ready; guest-exec is available")
 			}
 		}
 		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
@@ -427,6 +435,33 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		}
 	}
 	return nil
+}
+
+func (r *Runner) startGuestReadyLogger(ctx context.Context, cfg config.VM, output Output) func() {
+	readyCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	output.Step("Waiting for guest readiness")
+	go func() {
+		defer close(done)
+		if err := r.Lifecycle.WaitForGuestReady(readyCtx, cfg); err != nil {
+			if readyCtx.Err() == nil {
+				output.Warn("Guest readiness check did not complete", "VM will keep running. "+err.Error())
+			}
+			return
+		}
+		if readyCtx.Err() == nil {
+			output.Success("Guest ready; guest-exec is available")
+		}
+	}()
+	return func() {
+		select {
+		case <-done:
+			return
+		default:
+			cancel()
+			<-done
+		}
+	}
 }
 
 func shouldMarkInstalled(cfg config.VM, vmStarted bool, vmStopped bool) bool {

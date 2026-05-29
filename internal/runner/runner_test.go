@@ -242,8 +242,10 @@ func TestOutputRendersLogDownloadProgress(t *testing.T) {
 
 func TestRunLifecycleNoConsole(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
+	var stderr bytes.Buffer
 	r := New()
 	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &stderr
 	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
 	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "PERSIST": "1"}
 	r.Lifecycle = lifecycle
@@ -254,6 +256,11 @@ func TestRunLifecycleNoConsole(t *testing.T) {
 	want := "start-services,connect,prepare,start-vm,wait-guest-ready,wait-stopped,cleanup,close,stop-services"
 	if got := strings.Join(lifecycle.calls, ","); got != want {
 		t.Fatalf("calls = %s want %s", got, want)
+	}
+	for _, needle := range []string{"Waiting for guest readiness", "Guest ready; guest-exec is available"} {
+		if !strings.Contains(stderr.String(), needle) {
+			t.Fatalf("stderr missing %q:\n%s", needle, stderr.String())
+		}
 	}
 }
 
@@ -275,6 +282,29 @@ func TestRunLifecycleTreatsGuestReadyFailureAsWarningInNoConsole(t *testing.T) {
 		t.Fatalf("calls = %s want %s", got, want)
 	}
 	if !strings.Contains(stderr.String(), "Guest readiness check did not complete") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunLifecycleStartsGuestReadyLoggerForConsoleMode(t *testing.T) {
+	lifecycle := &fakeLifecycle{}
+	var stderr bytes.Buffer
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &stderr
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{"DISTRO": "ubuntu-24.04-server", "PERSIST": "1"}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	for _, want := range []string{"wait-guest-ready", "attach-console"} {
+		if !containsCall(lifecycle.calls, want) {
+			t.Fatalf("calls missing %q: %s", want, strings.Join(lifecycle.calls, ","))
+		}
+	}
+	if !strings.Contains(stderr.String(), "Waiting for guest readiness") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
