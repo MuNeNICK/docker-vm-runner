@@ -5,18 +5,19 @@ disk sizes, and host paths for the task.
 
 ## Agent command VM
 
-Best default for AI agents that need a real VM:
+Best default for AI agents that need a real VM for one-off work:
 
 ```bash
-docker run -dit --name command-vm \
+docker run --rm -dit --name command-vm \
   --device /dev/kvm \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
-  -e GUEST_NAME=command-vm \
-  -v command-vm-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 
 docker exec command-vm guest-exec --wait "uname -a"
 ```
+
+Add `-e GUEST_NAME=command-vm` and `-v command-vm-data:/data` only when the
+user asks for persistence across runs.
 
 ## Temporary VM
 

@@ -89,17 +89,17 @@ For a project-local install, copy the same directory into the project skill path
 
 ## Basic agent workflow
 
-The default agent workflow is a background persistent VM plus `guest-exec`:
+The default agent workflow is a background ephemeral VM plus `guest-exec`:
 
 ```bash
-docker run -dit --name command-vm \
+docker run --rm -dit --name command-vm \
   --device /dev/kvm \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
-  -e GUEST_NAME=command-vm \
-  -v command-vm-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 
 docker exec command-vm guest-exec --wait "uname -a"
 ```
+
+Add `GUEST_NAME` and a `/data` volume when the VM state should survive across runs.
 
 Use [Access](access.md) for SSH, VNC, noVNC, Redfish, and `guest-exec` details. Use [Use Cases](use-cases.md) for VM startup examples beyond the agent workflow.

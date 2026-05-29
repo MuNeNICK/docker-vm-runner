@@ -7,13 +7,14 @@ login.
 ## Start a VM for command execution
 
 ```bash
-docker run -dit --name command-vm \
+docker run --rm -dit --name command-vm \
   --device /dev/kvm \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
-  -e GUEST_NAME=command-vm \
-  -v command-vm-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
+
+This is ephemeral. Add `-e GUEST_NAME=command-vm` and
+`-v command-vm-data:/data` only when the user asks to keep VM state.
 
 Follow startup logs when needed:
 

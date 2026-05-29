@@ -25,14 +25,14 @@ access, capabilities, host networking, bind mounts, or published ports.
 
 ## Default approach
 
-For AI agent command execution, prefer a background persistent VM and
-`guest-exec`:
+For AI agent command execution, prefer a background ephemeral VM and
+`guest-exec`. Add `/data`, `GUEST_NAME`, or other persistence settings only
+when the user asks to keep VM state across runs:
 
 ```bash
-docker run -dit --name command-vm \
+docker run --rm -dit --name command-vm \
   --device /dev/kvm \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
-  -v command-vm-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 
 docker exec command-vm guest-exec --wait "uname -a"
@@ -55,7 +55,9 @@ docker run --rm \
 ## Workflow selection
 
 - Need to run shell commands in a real OS without SSH: use `guest-exec`.
-- Need repeatable agent work: use `-dit`, `--name`, `GUEST_NAME`, and `/data`.
+- Need one-off agent work: use an ephemeral background VM with `--rm -dit`.
+- Need repeatable agent work or state retention: use `-dit`, `--name`,
+  `GUEST_NAME`, and `/data` when the user asks for persistence.
 - Need a GUI installer or desktop: use `GRAPHICS=novnc` and publish `6080`.
 - Need network service testing: use `PORT_FWD` plus matching Docker `-p`.
 - Need direct login: publish `SSH_PORT` and use the default `user` account,
@@ -88,7 +90,7 @@ Load only the needed reference file:
   docker-vm-runner options.
 - Publish Docker ports with `-p` whenever the workflow expects host access to
   SSH, VNC, noVNC, Redfish, or forwarded guest services.
-- Use `GUEST_NAME` with persistent `/data` volumes when the VM identity must be
-  stable across runs.
+- Use `GUEST_NAME` with persistent `/data` volumes only when the VM identity
+  must be stable across runs.
 - For bridge, direct, host block devices, GPU, USB, TPM, and filesystem sharing,
   include the matching Docker device, mount, capability, or network option.
