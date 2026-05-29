@@ -21,15 +21,13 @@ Use `docker-vm-runner` when a normal container is not enough:
 - Persistent VM state when `/data` is mounted.
 - Support for cloud images, installer ISOs, disk images, local boot media, remote URLs, and OCI references.
 
-## Default image
+## Image
 
-The documentation uses the public image:
+Use the public image:
 
 ```text
 ghcr.io/munenick/docker-vm-runner:latest
 ```
-
-Local image names are used only when documenting local development or local image builds.
 
 ## Next step
 

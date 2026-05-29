@@ -11,32 +11,32 @@ https://munenick.github.io/os-iso-catalog/v1/all.json
 ## List images
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros
 ```
 
 Filter by architecture:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros --arch amd64
 ```
 
 Filter by image type:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros --type cloud-image
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros --type iso
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros --type disk-image
 ```
 
 Search by text:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros --search debian
 ```
 
@@ -45,7 +45,7 @@ docker run --rm --privileged \
 Use `DISTRO` with a catalog image ID:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -70,7 +70,7 @@ Use `BOOT_FROM` for a URL, local path, OCI reference, or ISO.
 Remote image:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -e BOOT_FROM=https://example.com/image.qcow2 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -79,7 +79,7 @@ docker run --rm -it --privileged \
 Installer ISO:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -e BOOT_FROM=https://example.com/installer.iso \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -88,7 +88,7 @@ docker run --rm -it --privileged \
 Local file:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -v "$PWD/images:/boot-media:ro" \
   -v docker-vm-runner-data:/data \
   -e BOOT_FROM=/boot-media/image.qcow2 \
@@ -100,7 +100,7 @@ docker run --rm -it --privileged \
 The catalog can be cached under `/config`:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   -v docker-vm-runner-config:/config \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros
 ```

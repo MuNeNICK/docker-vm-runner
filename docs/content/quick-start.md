@@ -4,18 +4,23 @@
 
 Run the container on a Linux host with Docker or a compatible container runtime.
 
-The simplest mode requires:
+For the default interactive flow, use:
 
-- `--privileged`
 - an interactive terminal with `-it`
-- a persistent `/data` mount if you want to reuse the VM after the container exits
+- a `/data` mount if you want to reuse the VM after the container exits
 
-KVM is used when available. If KVM is not available, startup may be slower.
+For hardware acceleration, pass `/dev/kvm` when it is available on the host:
+
+```bash
+--device /dev/kvm
+```
+
+Start without `--privileged` for the default NAT and console flow. Add host devices or additional permissions only for features that need them.
 
 ## Start a VM
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -47,7 +52,7 @@ Detaching from the console does not necessarily mean the VM has shut down. Use t
 ## Run without attaching to the console
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   -e NO_CONSOLE=1 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -58,21 +63,21 @@ docker run --rm --privileged \
 List available images:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros
 ```
 
 Search for an image:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --list-distros --search ubuntu
 ```
 
 Run a specific image:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -83,13 +88,13 @@ docker run --rm -it --privileged \
 Show the resolved configuration without starting the VM:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --show-config
 ```
 
 Validate without starting:
 
 ```bash
-docker run --rm --privileged \
+docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --dry-run
 ```

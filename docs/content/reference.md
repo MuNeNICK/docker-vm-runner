@@ -53,9 +53,9 @@
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GUEST_PASSWORD` | `password` | Password for the generated guest user. |
+| `GUEST_PASSWORD` | `password` | Password for the default guest user. |
 | `SSH_PUBKEY` | empty | SSH public key to inject into the guest. |
-| `SHELL` | catalog value or `/bin/bash` | Login shell for the generated user. |
+| `SHELL` | catalog value or `/bin/bash` | Login shell for the default guest user. |
 | `CLOUD_INIT` | automatic | Enable or disable cloud-init. ISO boot disables it unless explicitly enabled. |
 | `CLOUD_INIT_USER_DATA` | empty | Path to custom cloud-init user-data. |
 
@@ -67,7 +67,7 @@
 | `VNC_PORT` | `5900` | VNC port inside the container. |
 | `NOVNC_PORT` | `6080` | noVNC HTTPS port inside the container. |
 | `VNC_KEYMAP` | empty | Optional VNC keymap. |
-| `SSH_PORT` | `2222` | Host-side SSH forwarding port inside the container. |
+| `SSH_PORT` | `2222` | SSH forwarding port inside the container. |
 | `PORT_FWD` | empty | Additional forwards as `host_port:guest_port`, comma-separated. |
 | `NO_CONSOLE` | automatic | Skip console attachment. Automatically enabled when stdin/stdout is not a terminal. |
 
@@ -116,7 +116,7 @@ The first NIC uses unnumbered variables. Additional NICs use `NETWORK2_...`, `NE
 | `BALLOON` | `1` | Enable memory balloon device. |
 | `RNG` | `1` | Enable random number generator device. |
 | `IO_THREAD` | `1` | Enable disk I/O thread. |
-| `EXTRA_ARGS` | empty | Extra arguments passed to the guest command line where supported. |
+| `EXTRA_ARGS` | empty | Extra guest command-line arguments. |
 
 ## Extra disks and devices
 
@@ -155,3 +155,14 @@ Publish container ports with Docker `-p` when you want to access them from the h
 | `/data` | Persistent VM disks, image cache, and state. |
 | `/config` | Catalog cache. |
 | Custom path | Mount local boot media for `BOOT_FROM`. |
+
+## Common Docker permissions
+
+The basic startup path does not require `--privileged`.
+
+| Need | Typical Docker option |
+| --- | --- |
+| KVM acceleration | `--device /dev/kvm` |
+| Host block device passthrough | `--device /dev/<device>` |
+| Local boot media or cloud-init files | `-v /host/path:/container/path:ro` |
+| Broad host access for advanced setups | `--privileged` |

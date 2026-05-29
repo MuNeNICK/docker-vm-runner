@@ -7,7 +7,7 @@
 The default mode attaches to the VM console:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -25,7 +25,7 @@ With the default NAT network, host port `2222` is forwarded to guest port `22`.
 Publish the port from the container:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 2222:2222 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -37,12 +37,12 @@ Then connect from the host:
 ssh user@localhost -p 2222
 ```
 
-The default generated user is `user`, and the default password is `password`.
+The default login is `user` with password `password`.
 
 Set a different password:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 2222:2222 \
   -e GUEST_PASSWORD='change-me' \
   -v docker-vm-runner-data:/data \
@@ -52,7 +52,7 @@ docker run --rm -it --privileged \
 Inject an SSH public key:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 2222:2222 \
   -e SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)" \
   -v docker-vm-runner-data:/data \
@@ -64,7 +64,7 @@ docker run --rm -it --privileged \
 Use `PORT_FWD` to forward additional ports through the default NAT network:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 8080:8080 \
   -e PORT_FWD=8080:80 \
   -v docker-vm-runner-data:/data \
@@ -82,7 +82,7 @@ Use comma-separated values for multiple forwards:
 Enable browser access with noVNC:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 6080:6080 \
   -e GRAPHICS=novnc \
   -v docker-vm-runner-data:/data \
@@ -102,7 +102,7 @@ The noVNC endpoint uses a self-signed certificate.
 Use VNC without noVNC:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 5900:5900 \
   -e GRAPHICS=vnc \
   -v docker-vm-runner-data:/data \
@@ -116,7 +116,7 @@ Connect your VNC client to `localhost:5900`.
 Enable Redfish with a non-default password:
 
 ```bash
-docker run --rm -it --privileged \
+docker run --rm -it \
   -p 8443:8443 \
   -e REDFISH_ENABLE=1 \
   -e REDFISH_PASSWORD='change-me' \
