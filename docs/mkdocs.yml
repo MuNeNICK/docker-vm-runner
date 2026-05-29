@@ -1,0 +1,55 @@
+site_name: docker-vm-runner
+site_description: Run real virtual machines with a Docker-first workflow.
+site_url: https://munenick.github.io/docker-vm-runner/
+repo_url: https://github.com/MuNeNICK/docker-vm-runner
+repo_name: MuNeNICK/docker-vm-runner
+docs_dir: .
+site_dir: ../site
+exclude_docs: |
+  mkdocs.yml
+  requirements.txt
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Overview: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Image Catalog: image-catalog.md
+  - Networking and Access: networking.md
+  - Operations: operations.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
