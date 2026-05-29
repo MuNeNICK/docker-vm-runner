@@ -18,17 +18,12 @@ The VM uses an empty disk and no cloud-init so the first boot path is the networ
 Create an isolated host bridge for the PXE network:
 
 ```bash
-cp .env.example .env
-set -a
-. ./.env
-set +a
-
-sudo ip link add "$PXE_BRIDGE_NAME" type bridge
-sudo ip addr add "$NETBOOT_ROUTER/${NETBOOT_SUBNET#*/}" dev "$PXE_BRIDGE_NAME"
-sudo ip link set "$PXE_BRIDGE_NAME" up
+sudo ip link add ipxe-lab-br type bridge
+sudo ip addr add 192.0.2.1/24 dev ipxe-lab-br
+sudo ip link set ipxe-lab-br up
 ```
 
-The default subnet is `192.0.2.0/24`. Change `.env` first if that subnet already exists on your host.
+The example uses `192.0.2.0/24`. If that subnet already exists on your host, change the bridge name and matching netboot.xyz addresses in `docker-compose.yaml`.
 
 ## Start
 
@@ -94,12 +89,8 @@ docker compose down -v
 Remove the bridge:
 
 ```bash
-set -a
-. ./.env
-set +a
-
-sudo ip link set "$PXE_BRIDGE_NAME" down
-sudo ip link delete "$PXE_BRIDGE_NAME" type bridge
+sudo ip link set ipxe-lab-br down
+sudo ip link delete ipxe-lab-br type bridge
 ```
 
 ## Notes

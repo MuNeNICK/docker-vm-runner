@@ -9,19 +9,19 @@ services:
     cap_add:
       - NET_ADMIN
     environment:
-      NGINX_PORT: ${NETBOOT_HTTP_PORT:-8080}
-      WEB_APP_PORT: ${NETBOOT_WEB_PORT:-3000}
+      NGINX_PORT: "8080"
+      WEB_APP_PORT: "3000"
       TFTPD_OPTS: >-
-        --interface=${PXE_BRIDGE_NAME:-ipxe-lab-br}
-        --listen-address=${NETBOOT_IP:-192.0.2.1}
+        --interface=ipxe-lab-br
+        --listen-address=192.0.2.1
         --bind-interfaces
-        --dhcp-range=${NETBOOT_DHCP_RANGE_START:-192.0.2.50},${NETBOOT_DHCP_RANGE_END:-192.0.2.100},12h
-        --dhcp-option=3,${NETBOOT_ROUTER:-192.0.2.1}
-        --dhcp-option=6,${NETBOOT_DNS:-1.1.1.1}
-        --dhcp-boot=netboot.xyz.kpxe,,${NETBOOT_IP:-192.0.2.1}
+        --dhcp-range=192.0.2.50,192.0.2.100,12h
+        --dhcp-option=3,192.0.2.1
+        --dhcp-option=6,1.1.1.1
+        --dhcp-boot=netboot.xyz.kpxe,,192.0.2.1
 
   ipxe-client:
-    image: ${DOCKER_VM_RUNNER_IMAGE:-ghcr.io/munenick/docker-vm-runner:latest}
+    image: ghcr.io/munenick/docker-vm-runner:latest
     container_name: ipxe-client
     hostname: ipxe-client
     restart: unless-stopped
@@ -41,10 +41,10 @@ services:
       BLANK_DISK: "1"
       CLOUD_INIT: "0"
       GRAPHICS: novnc
-      NOVNC_PORT: ${NOVNC_PORT:-6081}
-      VNC_PORT: ${VNC_PORT:-5901}
+      NOVNC_PORT: "6081"
+      VNC_PORT: "5901"
       NETWORK_MODE: bridge
-      NETWORK_BRIDGE: ${PXE_BRIDGE_NAME:-ipxe-lab-br}
+      NETWORK_BRIDGE: ipxe-lab-br
       NETWORK_MODEL: virtio
       NETWORK_BOOT: "1"
       IPXE_ENABLE: "1"

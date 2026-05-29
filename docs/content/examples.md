@@ -200,7 +200,6 @@ examples/ipxe-netbootxyz/
 Files:
 
 - `docker-compose.yaml` - runs netboot.xyz and one iPXE-booting VM.
-- `.env.example` - contains bridge, DHCP range, and console port defaults.
 - `README.md` - shows host bridge preparation, startup, monitoring, and cleanup commands.
 
 ### Use Case
@@ -222,19 +221,14 @@ Run it from the example directory:
 
 ```bash
 cd examples/ipxe-netbootxyz
-cp .env.example .env
 ```
 
 Create the bridge:
 
 ```bash
-set -a
-. ./.env
-set +a
-
-sudo ip link add "$PXE_BRIDGE_NAME" type bridge
-sudo ip addr add "$NETBOOT_ROUTER/${NETBOOT_SUBNET#*/}" dev "$PXE_BRIDGE_NAME"
-sudo ip link set "$PXE_BRIDGE_NAME" up
+sudo ip link add ipxe-lab-br type bridge
+sudo ip addr add 192.0.2.1/24 dev ipxe-lab-br
+sudo ip link set ipxe-lab-br up
 ```
 
 Start the stack:
@@ -264,12 +258,8 @@ docker compose down -v
 Remove the bridge:
 
 ```bash
-set -a
-. ./.env
-set +a
-
-sudo ip link set "$PXE_BRIDGE_NAME" down
-sudo ip link delete "$PXE_BRIDGE_NAME" type bridge
+sudo ip link set ipxe-lab-br down
+sudo ip link delete ipxe-lab-br type bridge
 ```
 
 See `examples/ipxe-netbootxyz/README.md` for the full walkthrough.
@@ -296,4 +286,4 @@ The current examples map `/dev/kvm` into VM containers for hardware acceleration
 
 Use distinct published ports for each VM service. Docker cannot publish the same host port from multiple containers in one Compose project.
 
-The iPXE example also needs permission to create and delete a host bridge, unless you override `PXE_BRIDGE_NAME` and the addressing variables to use an existing bridge.
+The iPXE example also needs permission to create and delete a host bridge. If the default bridge name or subnet conflicts with the host, change the matching values in `examples/ipxe-netbootxyz/docker-compose.yaml`.
