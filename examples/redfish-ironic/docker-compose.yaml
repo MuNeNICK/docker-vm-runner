@@ -1,0 +1,73 @@
+name: docker-qemu-redfish-ironic
+
+services:
+  ironic:
+    image: quay.io/metal3-io/ironic:latest
+    container_name: redfish-ironic
+    restart: unless-stopped
+    environment:
+      PROVISIONING_INTERFACE: eth0
+      IRONIC_AUTOMATED_CLEAN: "false"
+      IRONIC_FAST_TRACK: "true"
+    command: ["/bin/sh", "-lc", "exec /bin/runironic"]
+    ports:
+      - "6385:6385"
+    networks:
+      - redfish-net
+
+  ironic-client:
+    image: quay.io/metal3-io/ironic-client:latest
+    container_name: redfish-ironic-client
+    restart: unless-stopped
+    depends_on:
+      - ironic
+      - redfish-vm
+    environment:
+      OS_AUTH_TYPE: none
+      OS_ENDPOINT: http://ironic:6385
+      OS_BAREMETAL_API_VERSION: latest
+    entrypoint: ["/bin/sh", "-lc"]
+    command: ["sleep infinity"]
+    networks:
+      - redfish-net
+
+  redfish-vm:
+    image: ghcr.io/munenick/docker-vm-runner:latest
+    container_name: redfish-vm
+    hostname: redfish-vm
+    restart: unless-stopped
+    devices:
+      # Remove this device on hosts without KVM; the VM will use slower emulation.
+      - /dev/kvm:/dev/kvm
+    environment:
+      GUEST_NAME: redfish-vm
+      BOOT_FROM: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/alpine-standard-3.22.2-x86_64.iso
+      BLANK_DISK: "1"
+      FORCE_ISO: "1"
+      CLOUD_INIT: "0"
+      DISK_SIZE: 8G
+      GRAPHICS: novnc
+      REDFISH_ENABLE: "1"
+      REDFISH_USERNAME: admin
+      REDFISH_PASSWORD: redfish-lab-password
+      # GUEST_NAME fixes the libvirt domain name. Leaving REDFISH_SYSTEM_ID
+      # empty lets Ironic use the canonical Redfish System URI discovered from
+      # /redfish/v1/Systems.
+      REDFISH_SYSTEM_ID: ""
+      REQUIRE_KVM: "0"
+    ports:
+      - "6080:6080"
+      - "8443:8443"
+    volumes:
+      - redfish-vm-data:/data
+    networks:
+      redfish-net:
+        aliases:
+          - redfish-vm
+
+networks:
+  redfish-net:
+    driver: bridge
+
+volumes:
+  redfish-vm-data:

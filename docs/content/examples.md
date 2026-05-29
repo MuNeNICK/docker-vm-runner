@@ -84,8 +84,113 @@ curl -k -I https://localhost:6080/
 docker compose down -v
 ```
 
+## Redfish Control With Ironic
+
+Directory:
+
+```text
+examples/redfish-ironic/
+```
+
+Files:
+
+- `docker-compose.yaml` - runs Ironic, an Ironic CLI container, and one Redfish-enabled VM.
+- `README.md` - shows Redfish discovery, Ironic node registration, validation, and boot-device management.
+
+### Use Case
+
+Use this example when you want to check that external bare-metal tooling can operate `docker-vm-runner` through Redfish instead of SSH or `guest-exec`.
+
+### What It Reproduces
+
+The example reproduces a minimal bare-metal control plane:
+
+- `ironic`: Metal3 Ironic API service.
+- `ironic-client`: CLI container used to register and operate the node.
+- `redfish-vm`: a `docker-vm-runner` VM with Redfish and noVNC enabled.
+
+The VM has a fixed libvirt domain name through `GUEST_NAME=redfish-vm`, an Alpine installer ISO attached as virtual CD media, and an empty working disk. Ironic discovers the canonical Redfish System URI from `/redfish/v1/Systems` and uses that URI as `redfish_system_id`.
+
+This is not a full OpenStack deployment flow. It does not run Keystone, Neutron, Inspector, or automated image deployment.
+
+### Run
+
+Run it from the example directory:
+
+```bash
+cd examples/redfish-ironic
+docker compose up -d
+```
+
+Discover the Redfish System URI:
+
+```bash
+SYSTEM_PATH="$(curl -sk -u admin:redfish-lab-password \
+  https://localhost:8443/redfish/v1/Systems \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["Members"][0]["@odata.id"])')"
+```
+
+Register the VM in Ironic:
+
+```bash
+docker compose exec ironic-client baremetal node create \
+  --name redfish-vm \
+  --driver redfish \
+  --management-interface redfish \
+  --power-interface redfish \
+  --boot-interface redfish-virtual-media \
+  --deploy-interface ramdisk \
+  --vendor-interface redfish \
+  --driver-info redfish_address=https://redfish-vm:8443 \
+  --driver-info redfish_system_id="$SYSTEM_PATH" \
+  --driver-info redfish_username=admin \
+  --driver-info redfish_password=redfish-lab-password \
+  --driver-info redfish_verify_ca=false \
+  --driver-info redfish_auth_type=basic \
+  --property cpu_arch=x86_64 \
+  --property cpus=2 \
+  --property memory_mb=4096 \
+  --property local_gb=8
+```
+
+Use Ironic to validate the node and manage the boot device:
+
+```bash
+docker compose exec ironic-client baremetal node validate redfish-vm
+docker compose exec ironic-client baremetal node boot device show redfish-vm
+docker compose exec ironic-client baremetal node boot device set redfish-vm disk
+docker compose exec ironic-client baremetal node boot device set redfish-vm cdrom
+```
+
+Remove containers and persistent VM state:
+
+```bash
+docker compose down -v
+```
+
+See `examples/redfish-ironic/README.md` for the full walkthrough and caveats.
+
+### Verification
+
+This example was checked with:
+
+```bash
+docker compose config
+docker compose run --rm --no-deps redfish-vm --dry-run
+docker compose up -d
+curl http://localhost:6385/
+curl -k -u admin:redfish-lab-password https://localhost:8443/redfish/v1/
+docker compose exec ironic-client baremetal node create ...
+docker compose exec ironic-client baremetal node validate redfish-vm
+docker compose exec ironic-client baremetal node boot device show redfish-vm
+docker compose exec ironic-client baremetal node boot device set redfish-vm disk
+docker compose exec ironic-client baremetal node boot device set redfish-vm cdrom
+curl -k -I https://localhost:6080/
+docker compose down -v
+```
+
 ## Host Requirements
 
-The current example maps `/dev/kvm` into each VM container for hardware acceleration. On hosts without KVM, remove the `devices` block from the Compose file; the VMs will run more slowly through software emulation.
+The current examples map `/dev/kvm` into VM containers for hardware acceleration. On hosts without KVM, remove the `devices` block from the Compose file; the VMs will run more slowly through software emulation.
 
 Use distinct published ports for each VM service. Docker cannot publish the same host port from multiple containers in one Compose project.
