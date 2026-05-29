@@ -5,6 +5,7 @@
 - [Overview](content/index.md) - What `docker-vm-runner` is and what it provides.
 - [Quick Start](content/quick-start.md) - Minimal commands for starting, detaching from, and reattaching to a VM.
 - [Use Cases](content/use-cases.md) - Task-oriented examples for common VM workflows.
+- [Agent Skills](content/agent-skills.md) - Install the Agent Skill for Codex, Claude Code, or OpenCode.
 - [Images](content/images.md) - Catalog images, image types, image filtering, and catalog cache usage.
 - [Boot](content/boot.md) - Boot sources, ISO installs, boot order, boot mode, and iPXE.
 - [Networking](content/networking.md) - NAT, port forwarding, multiple NICs, Bridge, and Direct networking.

@@ -35,3 +35,5 @@ ghcr.io/munenick/docker-vm-runner:latest
 ## Next step
 
 Start with [Quick Start](quick-start.md) to boot your first VM, or jump to [Use Cases](use-cases.md) for task-oriented examples.
+
+Use [Agent Skills](agent-skills.md) when you want Codex, Claude Code, or OpenCode to operate `docker-vm-runner` as a VM sandbox.
