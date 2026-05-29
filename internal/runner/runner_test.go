@@ -1318,6 +1318,78 @@ func TestConcreteLifecyclePostProcessCleansManagedIntermediates(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePostProcessRejectsInvalidManagedImage(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(layout.BaseImagesDir, "downloads", "image.qcow2")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatalf("mkdir downloads: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("html-error"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ]; then echo invalid >&2; exit 1; fi\n" +
+			"exit 0\n"
+	})
+	lifecycle := NewConcreteLifecycle(layout)
+	destination := filepath.Join(layout.BaseImagesDir, cacheName("custom")+".qcow2")
+
+	_, err := lifecycle.postProcessImage(context.Background(), source, destination, imagePostProcessOptions{DesiredFormat: "qcow2", SourceFormat: "qcow2"})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "validate image") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(destination); !os.IsNotExist(statErr) {
+		t.Fatalf("failed destination remains, stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(source); !os.IsNotExist(statErr) {
+		t.Fatalf("managed source should be cleaned, stat err = %v", statErr)
+	}
+}
+
+func TestConcreteLifecyclePrepareRejectsBackingImageInfoFailure(t *testing.T) {
+	layout := testLayout(t)
+	baseImage := filepath.Join(t.TempDir(), "custom.qcow2")
+	if err := os.WriteFile(baseImage, []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base: %v", err)
+	}
+	stateDir := t.TempDir()
+	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		countPath := filepath.Join(stateDir, "info-count")
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ]; then\n" +
+			"  count=0\n" +
+			"  [ -f " + shellQuote(countPath) + " ] && count=$(cat " + shellQuote(countPath) + ")\n" +
+			"  count=$((count + 1))\n" +
+			"  printf '%s' \"$count\" > " + shellQuote(countPath) + "\n" +
+			"  if [ \"$count\" -eq 1 ]; then printf '{\"format\":\"qcow2\",\"virtual-size\":10737418240}\\n'; exit 0; fi\n" +
+			"  echo invalid >&2; exit 1\n" +
+			"fi\n" +
+			"exit 0\n"
+	})
+	lifecycle := NewConcreteLifecycle(layout)
+	workImage := filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")
+
+	err := lifecycle.prepareDisk(context.Background(), config.VM{
+		VMName:      "vm1",
+		BootFrom:    baseImage,
+		ImageFormat: "qcow2",
+		DiskSize:    "10G",
+	}, workImage)
+	if err == nil {
+		t.Fatal("expected backing validation error")
+	}
+	if !strings.Contains(err.Error(), "validate backing image") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(workImage); !os.IsNotExist(statErr) {
+		t.Fatalf("work image should not be created, stat err = %v", statErr)
+	}
+}
+
 func TestConcreteLifecycleResolveBootSourceVerifiesCatalogChecksum(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("boot-iso"))

@@ -73,6 +73,19 @@ func TestVirshDefineDomain(t *testing.T) {
 	}
 }
 
+func TestVirshDefineStoragePoolUnescapesXMLName(t *testing.T) {
+	runner := &fakeVirshRunner{}
+	conn := NewVirshConnection(context.Background(), "", runner)
+
+	pool, err := conn.DefineStoragePool(`<pool><name>red&amp;fish</name></pool>`)
+	if err != nil {
+		t.Fatalf("DefineStoragePool returned error: %v", err)
+	}
+	if pool.Name() != "red&fish" {
+		t.Fatalf("pool name = %q", pool.Name())
+	}
+}
+
 func TestVirshDomainIsActive(t *testing.T) {
 	runner := &fakeVirshRunner{results: []process.Result{{Stdout: "running\n"}}}
 	conn := NewVirshConnection(context.Background(), "", runner)

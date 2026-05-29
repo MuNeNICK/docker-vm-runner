@@ -777,13 +777,13 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 		return fmt.Errorf("create work image directory: %w", err)
 	}
 	if l.shouldCreateBackingOverlay(cfg, baseImage, workImage) {
-		baseInfo, infoErr := diskManager.ImageInfo(ctx, baseImage)
-		backingFormat := normalizedImageFormat(cfg.SourceImageFormat)
-		if infoErr == nil && baseInfo.Format != "" {
-			backingFormat = baseInfo.Format
+		baseInfo, err := diskManager.ImageInfo(ctx, baseImage)
+		if err != nil {
+			return fmt.Errorf("validate backing image %s: %w", baseImage, err)
 		}
+		backingFormat := baseInfo.Format
 		if backingFormat == "" {
-			backingFormat = defaultString(cfg.ImageFormat, "qcow2")
+			return fmt.Errorf("backing image format is empty: %s", baseImage)
 		}
 		l.infof("Creating working disk overlay %s backed by %s", workImage, baseImage)
 		if err := diskManager.CreateOverlay(ctx, images.CreateOverlayRequest{
@@ -1017,12 +1017,23 @@ type imagePostProcessOptions struct {
 	ReturnSourceWhenUsable bool
 }
 
-func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, opts imagePostProcessOptions) (string, error) {
+func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string, destination string, opts imagePostProcessOptions) (resultPath string, err error) {
 	current := source
 	intermediates := []string{source}
 	var cleanupDirs []string
 	defer func() {
 		l.cleanupExtractionDirs(cleanupDirs)
+	}()
+	defer func() {
+		if err == nil {
+			return
+		}
+		if destination != "" {
+			if removeErr := os.Remove(destination); removeErr != nil && !os.IsNotExist(removeErr) {
+				l.warnf("Could not remove failed image destination %s: %v", destination, removeErr)
+			}
+		}
+		l.cleanupIntermediateImages(intermediates, destination)
 	}()
 	extractor := archive.NewExtractor()
 	extractor.MaxBytes = opts.MaxExtractBytes
@@ -1071,9 +1082,12 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 	desiredFormat := defaultString(opts.DesiredFormat, "qcow2")
 	diskManager := l.diskManager()
 	info, err := diskManager.ImageInfo(ctx, current)
-	currentFormat := normalizedImageFormat(opts.SourceFormat)
-	if err == nil && info.Format != "" {
-		currentFormat = info.Format
+	if err != nil {
+		return "", fmt.Errorf("validate image %s: %w", current, err)
+	}
+	currentFormat := info.Format
+	if currentFormat == "" {
+		return "", fmt.Errorf("image format is empty: %s", current)
 	}
 	if current == source && currentFormat == desiredFormat && (!l.shouldCleanupIntermediate(current, destination) || opts.ReturnSourceWhenUsable) {
 		return current, nil

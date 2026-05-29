@@ -2,6 +2,7 @@ package libvirtmgr
 
 import (
 	"context"
+	stdxml "encoding/xml"
 	"errors"
 	"fmt"
 	"os"
@@ -210,12 +211,13 @@ func writeTempXML(xml string) (string, error) {
 }
 
 func domainNameFromXML(xml string) string {
-	start := strings.Index(xml, "<name>")
-	end := strings.Index(xml, "</name>")
-	if start == -1 || end == -1 || end <= start+len("<name>") {
+	var definition struct {
+		Name string `xml:"name"`
+	}
+	if err := stdxml.Unmarshal([]byte(xml), &definition); err != nil {
 		return ""
 	}
-	return strings.TrimSpace(xml[start+len("<name>") : end])
+	return strings.TrimSpace(definition.Name)
 }
 
 func isVirshNotFound(err error) bool {

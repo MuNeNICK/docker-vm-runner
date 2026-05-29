@@ -99,6 +99,9 @@ func TestExtractRejectsStreamOverLimit(t *testing.T) {
 	if !strings.Contains(err.Error(), "exceeds maximum size") {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if _, statErr := os.Stat(strings.TrimSuffix(path, ".xz")); !os.IsNotExist(statErr) {
+		t.Fatalf("partial stream output remains, stat err = %v", statErr)
+	}
 }
 
 func TestExtractZipAndTarDiskCandidates(t *testing.T) {

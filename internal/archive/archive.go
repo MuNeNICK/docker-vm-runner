@@ -123,15 +123,7 @@ func (e *Extractor) extractStream(source string, destDir string, suffix string, 
 	if err != nil {
 		return ExtractResult{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return ExtractResult{}, fmt.Errorf("create output directory: %w", err)
-	}
-	output, err := os.Create(outputPath)
-	if err != nil {
-		return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
-	}
-	defer output.Close()
-	if _, err := copyWithLimit(output, reader, e.MaxBytes, "extract "+source); err != nil {
+	if err := extractToFile(outputPath, reader, e.MaxBytes, "extract "+source); err != nil {
 		return ExtractResult{}, err
 	}
 	return ExtractResult{Path: outputPath, MemberName: memberName, SelectionReason: "single compressed stream"}, nil
@@ -194,12 +186,7 @@ func (e *Extractor) extractZip(source string, destDir string) (ExtractResult, er
 		return ExtractResult{}, fmt.Errorf("open zip member %s: %w", member.Name, err)
 	}
 	defer input.Close()
-	output, err := os.Create(outputPath)
-	if err != nil {
-		return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
-	}
-	defer output.Close()
-	if _, err := copyWithLimit(output, input, e.MaxBytes, "extract zip member "+member.Name); err != nil {
+	if err := extractToFile(outputPath, input, e.MaxBytes, "extract zip member "+member.Name); err != nil {
 		return ExtractResult{}, err
 	}
 	return selected.result(outputPath), nil
@@ -238,12 +225,7 @@ func (e *Extractor) extractTar(source string, destDir string) (ExtractResult, er
 		if header.Name != member.Name || header.Typeflag != tar.TypeReg {
 			continue
 		}
-		output, err := os.Create(outputPath)
-		if err != nil {
-			return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
-		}
-		defer output.Close()
-		if _, err := copyWithLimit(output, reader, e.MaxBytes, "extract tar member "+header.Name); err != nil {
+		if err := extractToFile(outputPath, reader, e.MaxBytes, "extract tar member "+header.Name); err != nil {
 			return ExtractResult{}, err
 		}
 		return member.result(outputPath), nil
@@ -340,12 +322,7 @@ func (e *Extractor) extractSevenZip(source string, destDir string) (ExtractResul
 		return ExtractResult{}, fmt.Errorf("open 7z member %s: %w", member.Name, err)
 	}
 	defer input.Close()
-	output, err := os.Create(outputPath)
-	if err != nil {
-		return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
-	}
-	defer output.Close()
-	if _, err := copyWithLimit(output, input, e.MaxBytes, "extract 7z member "+member.Name); err != nil {
+	if err := extractToFile(outputPath, input, e.MaxBytes, "extract 7z member "+member.Name); err != nil {
 		return ExtractResult{}, err
 	}
 	return selected.result(outputPath), nil
@@ -398,17 +375,39 @@ func (e *Extractor) extractRAR(source string, destDir string) (ExtractResult, er
 		if header.Name != member.Name || header.IsDir {
 			continue
 		}
-		output, err := os.Create(outputPath)
-		if err != nil {
-			return ExtractResult{}, fmt.Errorf("create %s: %w", outputPath, err)
-		}
-		defer output.Close()
-		if _, err := copyWithLimit(output, reader, e.MaxBytes, "extract rar member "+header.Name); err != nil {
+		if err := extractToFile(outputPath, reader, e.MaxBytes, "extract rar member "+header.Name); err != nil {
 			return ExtractResult{}, err
 		}
 		return selected.result(outputPath), nil
 	}
 	return ExtractResult{}, fmt.Errorf("rar member disappeared: %s", member.Name)
+}
+
+func extractToFile(outputPath string, input io.Reader, maxBytes int64, label string) (err error) {
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(outputPath), "."+filepath.Base(outputPath)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp output for %s: %w", outputPath, err)
+	}
+	tempPath := temp.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := copyWithLimit(temp, input, maxBytes, label); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close temp output for %s: %w", outputPath, err)
+	}
+	if err := os.Rename(tempPath, outputPath); err != nil {
+		return fmt.Errorf("move extracted output to %s: %w", outputPath, err)
+	}
+	return nil
 }
 
 func selectArchiveMember(members []archiveMember, preferred []string) (archiveMember, error) {
