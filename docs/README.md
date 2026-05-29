@@ -4,6 +4,7 @@
 
 - [Overview](content/index.md)
 - [Quick Start](content/quick-start.md)
+- [Use Cases](content/use-cases.md)
 - [Images](content/images.md)
 - [Networking](content/networking.md)
 - [Storage](content/storage.md)

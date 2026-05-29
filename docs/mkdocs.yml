@@ -35,6 +35,7 @@ theme:
 nav:
   - Overview: index.md
   - Quick Start: quick-start.md
+  - Use Cases: use-cases.md
   - Images: images.md
   - Networking: networking.md
   - Storage: storage.md
