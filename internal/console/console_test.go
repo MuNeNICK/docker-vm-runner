@@ -19,6 +19,14 @@ func TestCommand(t *testing.T) {
 	}
 }
 
+func TestCommandUsesDefaultLibvirtURI(t *testing.T) {
+	cmd := Command("", "vm1")
+	want := []string{"-c", "qemu:///system", "console", "vm1"}
+	if cmd.Name != "virsh" || strings.Join(cmd.Args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("command = %#v", cmd)
+	}
+}
+
 func TestRunWaitsForConsoleExit(t *testing.T) {
 	proc := &fakeProcess{waitCode: 3, waitReady: make(chan struct{})}
 	close(proc.waitReady)

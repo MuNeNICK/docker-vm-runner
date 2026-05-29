@@ -114,6 +114,31 @@ func TestRunForwardsCleanupFlag(t *testing.T) {
 	}
 }
 
+func TestRunKeepsConsoleAttachedWhenTTYAvailable(t *testing.T) {
+	originalRunner := newRunner
+	originalTTY := stdinIsTerminal
+	originalStdoutTTY := stdoutIsTerminal
+	defer func() {
+		newRunner = originalRunner
+		stdinIsTerminal = originalTTY
+		stdoutIsTerminal = originalStdoutTTY
+	}()
+	fake := &fakeRunner{}
+	newRunner = func() appRunner { return fake }
+	stdinIsTerminal = func() bool { return true }
+	stdoutIsTerminal = func() bool { return true }
+
+	var stdout, stderr bytes.Buffer
+	code := runWithEnv(context.Background(), nil, &stdout, &stderr, func(string) (string, bool) { return "", false })
+
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%q", code, stderr.String())
+	}
+	if fake.options.NoConsole {
+		t.Fatalf("options = %#v", fake.options)
+	}
+}
+
 func TestRunReadsNoConsoleFromEnv(t *testing.T) {
 	original := newRunner
 	defer func() { newRunner = original }()

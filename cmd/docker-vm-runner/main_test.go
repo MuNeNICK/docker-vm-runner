@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -78,5 +79,21 @@ func TestRootContextCancelsOnSIGTERM(t *testing.T) {
 	case <-ctx.Done():
 	case <-time.After(time.Second):
 		t.Fatal("context was not canceled on SIGTERM")
+	}
+}
+
+func TestImageKeepsVirshConsoleExecContract(t *testing.T) {
+	dockerfile, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	content := string(dockerfile)
+	for _, want := range []string{
+		"LIBVIRT_DEFAULT_URI=qemu:///system",
+		"libvirt-clients",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("Dockerfile missing %q", want)
+		}
 	}
 }
