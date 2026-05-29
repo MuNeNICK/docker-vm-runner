@@ -90,6 +90,8 @@ func TestRunOnDomainExecutesKnownDomain(t *testing.T) {
 func TestRunStreamingWritesOutputBeforeCommandExit(t *testing.T) {
 	client := &fakeClient{domains: []string{"test-vm"}}
 	client.responses = []response{
+		{raw: rawJSON(t, `{"pid":10}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
 		{raw: rawJSON(t, `101`)},
 		{raw: rawJSON(t, `{}`)},
 		{raw: rawJSON(t, `102`)},
@@ -107,7 +109,8 @@ func TestRunStreamingWritesOutputBeforeCommandExit(t *testing.T) {
 		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
 		{raw: rawJSON(t, `{}`)},
 		{raw: rawJSON(t, `{}`)},
-		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `{"pid":43}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
 	}
 	var stdout, stderr bytes.Buffer
 	executor := NewExecutor(client)
@@ -117,14 +120,7 @@ func TestRunStreamingWritesOutputBeforeCommandExit(t *testing.T) {
 		}
 		return nil
 	}
-	tempPathCount := 0
-	executor.TempPath = func(int, string) string {
-		tempPathCount++
-		if tempPathCount == 1 {
-			return "/tmp/docker-vm-runner-guest-exec-test.out"
-		}
-		return "/tmp/docker-vm-runner-guest-exec-test.err"
-	}
+	executor.TempDir = func(int) string { return "/tmp/docker-vm-runner-guest-exec-test" }
 
 	result, err := executor.RunStreaming(context.Background(), Invocation{Path: "echo", Args: []string{"hello"}}, &stdout, &stderr)
 	if err != nil {
@@ -139,15 +135,71 @@ func TestRunStreamingWritesOutputBeforeCommandExit(t *testing.T) {
 	if stderr.String() != "warn\n" || string(result.Stderr) != stderr.String() {
 		t.Fatalf("stderr = %q result = %q", stderr.String(), string(result.Stderr))
 	}
-	execArgs := client.commands[6].Arguments.(map[string]any)
+	mkdirArgs := client.commands[0].Arguments.(map[string]any)
+	if client.commands[0].Execute != "guest-exec" || mkdirArgs["path"] != "mkdir" {
+		t.Fatalf("mkdir command = %#v", client.commands[0])
+	}
+	if got := strings.Join(mkdirArgs["arg"].([]string), " "); got != "-m 700 /tmp/docker-vm-runner-guest-exec-test" {
+		t.Fatalf("mkdir args = %q", got)
+	}
+	execArgs := client.commands[8].Arguments.(map[string]any)
 	if execArgs["path"] != "/bin/sh" || execArgs["capture-output"] != false {
 		t.Fatalf("streaming guest-exec args = %#v", execArgs)
 	}
 	if got := strings.Join(execArgs["arg"].([]string), "\x00"); !strings.Contains(got, "\x00echo\x00hello") {
 		t.Fatalf("streaming wrapper args = %q", got)
 	}
-	if client.commands[len(client.commands)-1].Execute != "guest-exec" {
+	if got := execArgs["arg"].([]string)[1]; !strings.HasPrefix(got, "out=$1\nerr=$2\nshift 2\nexec ") {
+		t.Fatalf("streaming wrapper script = %q", got)
+	}
+	cleanup := client.commands[len(client.commands)-2]
+	cleanupArgs := cleanup.Arguments.(map[string]any)
+	if cleanup.Execute != "guest-exec" || cleanupArgs["path"] != "rm" {
 		t.Fatalf("cleanup command = %#v", client.commands[len(client.commands)-1])
+	}
+	if got := strings.Join(cleanupArgs["arg"].([]string), " "); got != "-rf /tmp/docker-vm-runner-guest-exec-test" {
+		t.Fatalf("cleanup args = %q", got)
+	}
+	if client.commands[len(client.commands)-1].Execute != "guest-exec-status" {
+		t.Fatalf("cleanup status command = %#v", client.commands[len(client.commands)-1])
+	}
+}
+
+func TestStreamWritesOutputWithoutReturningCapturedOutput(t *testing.T) {
+	client := &fakeClient{domains: []string{"test-vm"}}
+	client.responses = []response{
+		{raw: rawJSON(t, `{"pid":10}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
+		{raw: rawJSON(t, `101`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `102`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `201`)},
+		{raw: rawJSON(t, `202`)},
+		{raw: rawJSON(t, `{"pid":42}`)},
+		{raw: rawJSON(t, `{"count":6,"buf-b64":"`+b64("stdout")+`","eof":true}`)},
+		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":9}`)},
+		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
+		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `{"pid":43}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":0}`)},
+	}
+	var stdout, stderr bytes.Buffer
+	executor := NewExecutor(client)
+	executor.TempDir = func(int) string { return "/tmp/docker-vm-runner-guest-exec-test" }
+
+	exitCode, err := executor.Stream(context.Background(), Invocation{Path: "echo", Args: []string{"hello"}}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("Stream returned error: %v", err)
+	}
+	if exitCode != 9 {
+		t.Fatalf("exitCode = %d", exitCode)
+	}
+	if stdout.String() != "stdout" || stderr.String() != "" {
+		t.Fatalf("stdout = %q stderr = %q", stdout.String(), stderr.String())
 	}
 }
 

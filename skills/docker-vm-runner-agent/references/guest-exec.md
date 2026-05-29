@@ -46,6 +46,9 @@ Behavior:
 - `guest-exec` exits with the guest command's exit code.
 - A single command string containing spaces runs through `/bin/sh -c`.
 - Multiple arguments are sent as argv form.
+- Streaming is QEMU guest agent polling, not a PTY. Command buffering can delay
+  output, stdout/stderr ordering is not strict, and temporary guest output files
+  are cleaned up best-effort if the VM or guest agent disconnects.
 
 ## Agent practice
 

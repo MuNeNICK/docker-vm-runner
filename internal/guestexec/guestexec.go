@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ type Executor struct {
 	PollTimeout       time.Duration
 	AgentWaitTimeout  time.Duration
 	AgentWaitInterval time.Duration
-	TempPath          func(int, string) string
+	TempDir           func(int) string
 }
 
 func NewExecutor(client ...Client) *Executor {
@@ -115,6 +116,15 @@ func (e *Executor) RunStreaming(ctx context.Context, inv Invocation, stdout io.W
 	return e.RunOnDomainStreaming(ctx, domain, inv, stdout, stderr)
 }
 
+func (e *Executor) Stream(ctx context.Context, inv Invocation, stdout io.Writer, stderr io.Writer) (int, error) {
+	e.applyDefaults()
+	domain, err := e.discoverDomain(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return e.StreamOnDomain(ctx, domain, inv, stdout, stderr)
+}
+
 func (e *Executor) RunOnDomain(ctx context.Context, domain string, inv Invocation) (Result, error) {
 	e.applyDefaults()
 	if inv.Wait {
@@ -130,31 +140,44 @@ func (e *Executor) RunOnDomain(ctx context.Context, domain string, inv Invocatio
 }
 
 func (e *Executor) RunOnDomainStreaming(ctx context.Context, domain string, inv Invocation, stdout io.Writer, stderr io.Writer) (Result, error) {
+	return e.runOnDomainStreaming(ctx, domain, inv, stdout, stderr, true)
+}
+
+func (e *Executor) StreamOnDomain(ctx context.Context, domain string, inv Invocation, stdout io.Writer, stderr io.Writer) (int, error) {
+	result, err := e.runOnDomainStreaming(ctx, domain, inv, stdout, stderr, false)
+	if err != nil {
+		return 0, err
+	}
+	return result.ExitCode, nil
+}
+
+func (e *Executor) runOnDomainStreaming(ctx context.Context, domain string, inv Invocation, stdout io.Writer, stderr io.Writer, capture bool) (Result, error) {
 	e.applyDefaults()
 	if inv.Wait {
 		if err := e.waitForAgent(ctx, domain); err != nil {
 			return Result{}, err
 		}
 	}
-	stdoutPath := e.TempPath(os.Getpid(), "stdout")
-	stderrPath := e.TempPath(os.Getpid(), "stderr")
+	tempDir := e.TempDir(os.Getpid())
+	stdoutPath := path.Join(tempDir, "stdout")
+	stderrPath := path.Join(tempDir, "stderr")
+	if err := e.createGuestDir(ctx, domain, tempDir); err != nil {
+		return Result{}, err
+	}
+	defer func() { _ = e.removeGuestDir(context.WithoutCancel(ctx), domain, tempDir) }()
 	if err := e.createGuestFile(ctx, domain, stdoutPath); err != nil {
 		return Result{}, err
 	}
 	if err := e.createGuestFile(ctx, domain, stderrPath); err != nil {
-		_ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath)
 		return Result{}, err
 	}
-	defer func() { _ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath, stderrPath) }()
 	stdoutHandle, err := e.openGuestFile(ctx, domain, stdoutPath, "r")
 	if err != nil {
-		_ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath, stderrPath)
 		return Result{}, err
 	}
 	defer func() { _ = e.closeGuestFile(context.WithoutCancel(ctx), domain, stdoutHandle) }()
 	stderrHandle, err := e.openGuestFile(ctx, domain, stderrPath, "r")
 	if err != nil {
-		_ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath, stderrPath)
 		return Result{}, err
 	}
 	defer func() { _ = e.closeGuestFile(context.WithoutCancel(ctx), domain, stderrHandle) }()
@@ -163,7 +186,7 @@ func (e *Executor) RunOnDomainStreaming(ctx context.Context, domain string, inv 
 	if err != nil {
 		return Result{}, err
 	}
-	return e.waitForStreamingCommand(ctx, domain, pid, stdoutHandle, stderrHandle, stdout, stderr)
+	return e.waitForStreamingCommand(ctx, domain, pid, stdoutHandle, stderrHandle, stdout, stderr, capture)
 }
 
 func (e *Executor) applyDefaults() {
@@ -182,8 +205,8 @@ func (e *Executor) applyDefaults() {
 	if e.AgentWaitInterval == 0 {
 		e.AgentWaitInterval = defaultAgentWaitInterval
 	}
-	if e.TempPath == nil {
-		e.TempPath = defaultTempPath
+	if e.TempDir == nil {
+		e.TempDir = defaultTempDir
 	}
 }
 
@@ -227,12 +250,16 @@ func (e *Executor) waitForAgent(ctx context.Context, domain string) error {
 }
 
 func (e *Executor) startCommand(ctx context.Context, domain string, inv Invocation) (int, error) {
+	return e.startCommandWithCapture(ctx, domain, inv, true)
+}
+
+func (e *Executor) startCommandWithCapture(ctx context.Context, domain string, inv Invocation, capture bool) (int, error) {
 	raw, err := e.Client.Execute(ctx, domain, Command{
 		Execute: "guest-exec",
 		Arguments: map[string]any{
 			"path":           inv.Path,
 			"arg":            inv.Args,
-			"capture-output": true,
+			"capture-output": capture,
 		},
 	})
 	if err != nil {
@@ -303,14 +330,20 @@ func (e *Executor) waitForCommand(ctx context.Context, domain string, pid int) (
 	}
 }
 
-func (e *Executor) waitForStreamingCommand(ctx context.Context, domain string, pid int, stdoutHandle int, stderrHandle int, stdout io.Writer, stderr io.Writer) (Result, error) {
+func (e *Executor) waitForStreamingCommand(ctx context.Context, domain string, pid int, stdoutHandle int, stderrHandle int, stdout io.Writer, stderr io.Writer, capture bool) (Result, error) {
 	deadline := time.Now().Add(e.PollTimeout)
 	var result Result
+	var capturedStdout *[]byte
+	var capturedStderr *[]byte
+	if capture {
+		capturedStdout = &result.Stdout
+		capturedStderr = &result.Stderr
+	}
 	for {
-		if err := e.readAvailable(ctx, domain, stdoutHandle, &result.Stdout, stdout); err != nil {
+		if err := e.readAvailable(ctx, domain, stdoutHandle, capturedStdout, stdout); err != nil {
 			return Result{}, err
 		}
-		if err := e.readAvailable(ctx, domain, stderrHandle, &result.Stderr, stderr); err != nil {
+		if err := e.readAvailable(ctx, domain, stderrHandle, capturedStderr, stderr); err != nil {
 			return Result{}, err
 		}
 		status, err := e.commandStatus(ctx, domain, pid)
@@ -318,10 +351,10 @@ func (e *Executor) waitForStreamingCommand(ctx context.Context, domain string, p
 			return Result{}, err
 		}
 		if status.Exited {
-			if err := e.readAvailable(ctx, domain, stdoutHandle, &result.Stdout, stdout); err != nil {
+			if err := e.readAvailable(ctx, domain, stdoutHandle, capturedStdout, stdout); err != nil {
 				return Result{}, err
 			}
-			if err := e.readAvailable(ctx, domain, stderrHandle, &result.Stderr, stderr); err != nil {
+			if err := e.readAvailable(ctx, domain, stderrHandle, capturedStderr, stderr); err != nil {
 				return Result{}, err
 			}
 			result.ExitCode = status.ExitCode
@@ -359,6 +392,17 @@ type guestExecStatus struct {
 	ExitCode int    `json:"exitcode"`
 	OutData  string `json:"out-data"`
 	ErrData  string `json:"err-data"`
+}
+
+func (e *Executor) createGuestDir(ctx context.Context, domain string, dir string) error {
+	result, err := e.runGuestUtility(ctx, domain, "mkdir", []string{"-m", "700", dir})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("create guest output directory %s exited with status %d", dir, result.ExitCode)
+	}
+	return nil
 }
 
 func (e *Executor) createGuestFile(ctx context.Context, domain string, path string) error {
@@ -408,7 +452,9 @@ func (e *Executor) readAvailable(ctx context.Context, domain string, handle int,
 			return err
 		}
 		if len(chunk) > 0 {
-			*captured = append(*captured, chunk...)
+			if captured != nil {
+				*captured = append(*captured, chunk...)
+			}
 			if writer != nil {
 				if _, err := writer.Write(chunk); err != nil {
 					return err
@@ -447,20 +493,23 @@ func (e *Executor) readGuestFile(ctx context.Context, domain string, handle int)
 	return chunk, resp.EOF, nil
 }
 
-func (e *Executor) removeGuestFiles(ctx context.Context, domain string, paths ...string) error {
-	args := append([]string{"-f"}, paths...)
-	_, err := e.Client.Execute(ctx, domain, Command{
-		Execute: "guest-exec",
-		Arguments: map[string]any{
-			"path":           "rm",
-			"arg":            args,
-			"capture-output": false,
-		},
-	})
+func (e *Executor) removeGuestDir(ctx context.Context, domain string, dir string) error {
+	result, err := e.runGuestUtility(ctx, domain, "rm", []string{"-rf", dir})
 	if err != nil {
-		return fmt.Errorf("remove guest output files: %w", err)
+		return fmt.Errorf("remove guest output directory: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("remove guest output directory %s exited with status %d", dir, result.ExitCode)
 	}
 	return nil
+}
+
+func (e *Executor) runGuestUtility(ctx context.Context, domain string, command string, args []string) (Result, error) {
+	pid, err := e.startCommandWithCapture(ctx, domain, Invocation{Path: command, Args: args}, false)
+	if err != nil {
+		return Result{}, err
+	}
+	return e.waitForCommand(ctx, domain, pid)
 }
 
 func decodeBase64Field(name string, value string) ([]byte, error) {
@@ -485,18 +534,18 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-func defaultTempPath(pid int, stream string) string {
+func defaultTempDir(pid int) string {
 	var token [8]byte
 	if _, err := rand.Read(token[:]); err == nil {
-		return fmt.Sprintf("/tmp/docker-vm-runner-guest-exec-%d-%s-%s", pid, hex.EncodeToString(token[:]), stream)
+		return fmt.Sprintf("/tmp/docker-vm-runner-guest-exec-%d-%s", pid, hex.EncodeToString(token[:]))
 	}
-	return fmt.Sprintf("/tmp/docker-vm-runner-guest-exec-%d-%d-%s", pid, time.Now().UnixNano(), stream)
+	return fmt.Sprintf("/tmp/docker-vm-runner-guest-exec-%d-%d", pid, time.Now().UnixNano())
 }
 
 const streamingScript = `out=$1
 err=$2
 shift 2
-"$@" >"$out" 2>"$err"`
+exec "$@" >"$out" 2>"$err"`
 
 func Main(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int {
 	inv, err := ParseArgs(args)
@@ -504,7 +553,7 @@ func Main(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer
 		fmt.Fprint(stderr, usage())
 		return 1
 	}
-	result, err := NewExecutor().RunStreaming(ctx, inv, stdout, stderr)
+	exitCode, err := NewExecutor().Stream(ctx, inv, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		if errors.Is(err, ErrAgentNotConnected) || errors.Is(err, ErrAgentWaitTimeout) {
@@ -512,7 +561,7 @@ func Main(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer
 		}
 		return 1
 	}
-	return result.ExitCode
+	return exitCode
 }
 
 func usage() string {

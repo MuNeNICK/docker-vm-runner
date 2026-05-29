@@ -130,6 +130,8 @@ docker exec ubuntu-vm guest-exec --wait id user
 
 The command's stdout and stderr stream to your terminal while the command runs, and the `guest-exec` process exits with the guest command's exit code.
 
+Output streaming uses QEMU guest agent polling rather than a PTY. Commands that buffer stdout when writing to a file may still delay output, and exact ordering between stdout and stderr is not guaranteed. `guest-exec` creates a temporary 0700 directory in the guest for streamed output and removes it on completion; cleanup is best-effort if the VM or guest agent disconnects.
+
 ## noVNC
 
 Enable browser access with noVNC:
