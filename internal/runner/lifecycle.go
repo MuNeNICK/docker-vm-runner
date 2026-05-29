@@ -1100,6 +1100,9 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 		if err := diskManager.ConvertDisk(ctx, current, destination, desiredFormat); err != nil {
 			return "", err
 		}
+		if err := l.validateCachedImage(ctx, destination, desiredFormat); err != nil {
+			return "", fmt.Errorf("validate converted image %s: %w", destination, err)
+		}
 		l.cleanupIntermediateImages(intermediates, destination)
 		return destination, nil
 	}
@@ -1110,6 +1113,9 @@ func (l *ConcreteLifecycle) postProcessImage(ctx context.Context, source string,
 		}
 		if err := copyFile(current, destination); err != nil {
 			return "", fmt.Errorf("place base image: %w", err)
+		}
+		if err := l.validateCachedImage(ctx, destination, desiredFormat); err != nil {
+			return "", fmt.Errorf("validate placed image %s: %w", destination, err)
 		}
 	}
 	l.cleanupIntermediateImages(intermediates, destination)

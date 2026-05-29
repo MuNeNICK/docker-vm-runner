@@ -1290,7 +1290,9 @@ func TestConcreteLifecyclePostProcessCleansManagedIntermediates(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		destination := filepath.Join(layout.BaseImagesDir, cacheName("custom")+".qcow2")
 		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ] && [ \"$3\" = " + shellQuote(destination) + " ]; then printf '{\"format\":\"qcow2\",\"virtual-size\":10737418240}\\n'; exit 0; fi\n" +
 			"if [ \"$1\" = info ]; then printf '{\"format\":\"raw\",\"virtual-size\":10737418240}\\n'; fi\n" +
 			"if [ \"$1\" = convert ]; then printf converted > \"$6\"; fi\n" +
 			"exit 0\n"
@@ -1315,6 +1317,40 @@ func TestConcreteLifecyclePostProcessCleansManagedIntermediates(t *testing.T) {
 	}
 	if !strings.Contains(status.String(), "Converting image") {
 		t.Fatalf("status missing conversion log: %q", status.String())
+	}
+}
+
+func TestConcreteLifecyclePostProcessRejectsInvalidConvertedImage(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(layout.BaseImagesDir, "downloads", "image.raw")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatalf("mkdir downloads: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("raw"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ] && [ \"$3\" = " + shellQuote(source) + " ]; then printf '{\"format\":\"raw\",\"virtual-size\":10737418240}\\n'; exit 0; fi\n" +
+			"if [ \"$1\" = info ]; then echo invalid >&2; exit 1; fi\n" +
+			"if [ \"$1\" = convert ]; then printf broken > \"$6\"; fi\n" +
+			"exit 0\n"
+	})
+	lifecycle := NewConcreteLifecycle(layout)
+	destination := filepath.Join(layout.BaseImagesDir, cacheName("custom")+".qcow2")
+
+	_, err := lifecycle.postProcessImage(context.Background(), source, destination, imagePostProcessOptions{DesiredFormat: "qcow2", SourceFormat: "raw"})
+	if err == nil {
+		t.Fatal("expected converted image validation error")
+	}
+	if !strings.Contains(err.Error(), "validate converted image") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(destination); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid converted destination remains, stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(source); !os.IsNotExist(statErr) {
+		t.Fatalf("managed source should be cleaned, stat err = %v", statErr)
 	}
 }
 
