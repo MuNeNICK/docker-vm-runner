@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -143,6 +144,29 @@ func TestPullFallsBackToLargestRegularFile(t *testing.T) {
 	}
 	if !result.Fallback {
 		t.Fatalf("Fallback = false")
+	}
+}
+
+func TestPullRejectsOversizedLayerMember(t *testing.T) {
+	cacheDir := t.TempDir()
+	fetcher := &fakeFetcher{image: fakeImage{
+		digest: "sha256:oversized12345678",
+		layers: []Layer{
+			fakeLayer(tarBytes(t, map[string][]byte{
+				"disk/disk.qcow2": bytes.Repeat([]byte("x"), 11),
+			})),
+		},
+	}}
+
+	_, err := (&Puller{Fetcher: fetcher, MaxBytes: 10}).Pull(context.Background(), "docker.io/test/image:latest", cacheDir)
+	if err == nil {
+		t.Fatal("expected max size error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if entries, err := os.ReadDir(cacheDir); err == nil && len(entries) != 0 {
+		t.Fatalf("unexpected cache entries after failed pull: %v", entries)
 	}
 }
 

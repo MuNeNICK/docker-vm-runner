@@ -17,7 +17,8 @@ import (
 )
 
 type Puller struct {
-	Fetcher Fetcher
+	Fetcher  Fetcher
+	MaxBytes int64
 }
 
 func NewPuller() *Puller {
@@ -81,6 +82,14 @@ func (p *Puller) Pull(ctx context.Context, reference string, cacheDir string) (R
 	if err := os.MkdirAll(diskDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create OCI disk cache directory: %w", err)
 	}
+	cacheComplete := false
+	defer func() {
+		if cacheComplete {
+			return
+		}
+		_ = os.RemoveAll(diskDir)
+		_ = os.Remove(sentinel)
+	}()
 
 	layers, err := image.Layers()
 	if err != nil {
@@ -91,12 +100,16 @@ func (p *Puller) Pull(ctx context.Context, reference string, cacheDir string) (R
 		return Result{}, fmt.Errorf("no disk image found in OCI image %s: %w", reference, err)
 	}
 	outputPath := filepath.Join(diskDir, filepath.Base(selected.Name))
-	if err := extractLayerMember(selected.Layer, selected.Name, outputPath); err != nil {
+	if err := checkMaxBytes(selected.Size, p.MaxBytes, "OCI disk member "+selected.Name); err != nil {
+		return Result{}, err
+	}
+	if err := extractLayerMember(selected.Layer, selected.Name, outputPath, p.MaxBytes); err != nil {
 		return Result{}, err
 	}
 	if err := os.WriteFile(sentinel, []byte(digest), 0o644); err != nil {
 		return Result{}, fmt.Errorf("write OCI cache sentinel: %w", err)
 	}
+	cacheComplete = true
 	return Result{
 		Path:            outputPath,
 		MemberName:      selected.Name,
@@ -224,7 +237,7 @@ func selectLayerMember(layers []Layer) (layerMember, error) {
 	return layerMember{}, fmt.Errorf("no regular file members found")
 }
 
-func extractLayerMember(layer Layer, memberName string, outputPath string) error {
+func extractLayerMember(layer Layer, memberName string, outputPath string, maxBytes int64) error {
 	reader, err := layer.Open()
 	if err != nil {
 		return fmt.Errorf("open OCI layer: %w", err)
@@ -247,12 +260,41 @@ func extractLayerMember(layer Layer, memberName string, outputPath string) error
 			return fmt.Errorf("create OCI disk %s: %w", outputPath, err)
 		}
 		defer output.Close()
-		if _, err := io.Copy(output, tarReader); err != nil {
+		if _, err := copyWithLimit(output, tarReader, maxBytes, "extract OCI disk member "+memberName); err != nil {
 			return fmt.Errorf("extract OCI disk member %s: %w", memberName, err)
 		}
 		return nil
 	}
 	return fmt.Errorf("OCI layer member disappeared: %s", memberName)
+}
+
+func checkMaxBytes(size int64, maxBytes int64, label string) error {
+	if maxBytes <= 0 {
+		return nil
+	}
+	if size > maxBytes {
+		return fmt.Errorf("%s exceeds maximum size: %d > %d bytes", label, size, maxBytes)
+	}
+	return nil
+}
+
+func copyWithLimit(dst io.Writer, src io.Reader, maxBytes int64, label string) (int64, error) {
+	if maxBytes <= 0 {
+		n, err := io.Copy(dst, src)
+		if err != nil {
+			return n, fmt.Errorf("%s: %w", label, err)
+		}
+		return n, nil
+	}
+	limited := &io.LimitedReader{R: src, N: maxBytes + 1}
+	n, err := io.Copy(dst, limited)
+	if err != nil {
+		return n, fmt.Errorf("%s: %w", label, err)
+	}
+	if n > maxBytes {
+		return n, fmt.Errorf("%s exceeds maximum size: %d > %d bytes", label, n, maxBytes)
+	}
+	return n, nil
 }
 
 func largestLayerMember(members []layerMember) layerMember {

@@ -17,7 +17,7 @@ func TestStartDisabledNoop(t *testing.T) {
 	called := false
 	manager.StartProcess = func(context.Context, process.Command) (Process, error) {
 		called = true
-		return fakeProcess{}, nil
+		return &fakeProcess{}, nil
 	}
 
 	result, err := manager.Start(context.Background(), Request{Enabled: false})
@@ -39,7 +39,7 @@ func TestStartWritesAuthConfigAndCommand(t *testing.T) {
 	manager.Sleep = func(context.Context, time.Duration) error { return nil }
 	manager.StartProcess = func(ctx context.Context, cmd process.Command) (Process, error) {
 		got = cmd
-		return fakeProcess{running: true}, nil
+		return &fakeProcess{running: true}, nil
 	}
 
 	result, err := manager.Start(context.Background(), Request{
@@ -102,7 +102,7 @@ func TestStartReusesExistingCertificatePair(t *testing.T) {
 	manager := NewManager(Options{StateDir: stateDir})
 	manager.Sleep = func(context.Context, time.Duration) error { return nil }
 	manager.StartProcess = func(context.Context, process.Command) (Process, error) {
-		return fakeProcess{running: true}, nil
+		return &fakeProcess{running: true}, nil
 	}
 
 	if _, err := manager.Start(context.Background(), Request{Enabled: true, Password: "secret"}); err != nil {
@@ -151,7 +151,7 @@ func TestStartFailsWhenProcessExits(t *testing.T) {
 	manager := NewManager(Options{StateDir: t.TempDir()})
 	manager.Sleep = func(context.Context, time.Duration) error { return nil }
 	manager.StartProcess = func(context.Context, process.Command) (Process, error) {
-		return fakeProcess{running: false, stderr: "bind failed"}, nil
+		return &fakeProcess{running: false, stderr: "bind failed"}, nil
 	}
 
 	_, err := manager.Start(context.Background(), Request{Enabled: true, Password: "secret"})
@@ -163,20 +163,41 @@ func TestStartFailsWhenProcessExits(t *testing.T) {
 	}
 }
 
-type fakeProcess struct {
-	running bool
-	stderr  string
+func TestStartStopsProcessWhenSleepFails(t *testing.T) {
+	proc := &fakeProcess{running: true}
+	manager := NewManager(Options{StateDir: t.TempDir()})
+	manager.StartProcess = func(context.Context, process.Command) (Process, error) {
+		return proc, nil
+	}
+	manager.Sleep = func(context.Context, time.Duration) error {
+		return context.Canceled
+	}
+
+	_, err := manager.Start(context.Background(), Request{Enabled: true, Password: "secret"})
+	if err == nil {
+		t.Fatal("expected sleep error")
+	}
+	if proc.stopCalls != 1 {
+		t.Fatalf("stopCalls = %d", proc.stopCalls)
+	}
 }
 
-func (p fakeProcess) Running() bool {
+type fakeProcess struct {
+	running   bool
+	stderr    string
+	stopCalls int
+}
+
+func (p *fakeProcess) Running() bool {
 	return p.running
 }
 
-func (p fakeProcess) Stderr() string {
+func (p *fakeProcess) Stderr() string {
 	return p.stderr
 }
 
-func (p fakeProcess) Stop() error {
+func (p *fakeProcess) Stop() error {
+	p.stopCalls++
 	return nil
 }
 

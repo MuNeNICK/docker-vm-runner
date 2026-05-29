@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -115,6 +116,7 @@ func (m *Manager) Start(ctx context.Context, req Request) (Result, error) {
 		return Result{}, fmt.Errorf("start sushy-emulator: %w", err)
 	}
 	if err := m.Sleep(ctx, 500*time.Millisecond); err != nil {
+		_ = proc.Stop()
 		return Result{}, err
 	}
 	if !proc.Running() {
@@ -179,12 +181,15 @@ func writeConfig(configDir string, req Request, certPath string, keyPath string,
 }
 
 type osProcess struct {
-	cmd    *exec.Cmd
-	stderr *bytes.Buffer
+	cmd      *exec.Cmd
+	stderr   *bytes.Buffer
+	waitDone chan struct{}
+	waitErr  error
+	mu       sync.Mutex
 }
 
 func startProcess(ctx context.Context, command process.Command) (Process, error) {
-	cmd := exec.CommandContext(ctx, command.Name, command.Args...)
+	cmd := exec.Command(command.Name, command.Args...)
 	if command.Dir != "" {
 		cmd.Dir = command.Dir
 	}
@@ -196,18 +201,27 @@ func startProcess(ctx context.Context, command process.Command) (Process, error)
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &osProcess{cmd: cmd, stderr: &stderr}, nil
+	proc := &osProcess{cmd: cmd, stderr: &stderr, waitDone: make(chan struct{})}
+	go func() {
+		err := cmd.Wait()
+		proc.mu.Lock()
+		proc.waitErr = err
+		proc.mu.Unlock()
+		close(proc.waitDone)
+	}()
+	return proc, nil
 }
 
 func (p *osProcess) Running() bool {
-	if p.cmd.ProcessState != nil {
-		return false
-	}
 	if p.cmd.Process == nil {
 		return false
 	}
+	select {
+	case <-p.waitDone:
+		return false
+	default:
+	}
 	if err := p.cmd.Process.Signal(syscall.Signal(0)); err != nil {
-		_ = p.cmd.Wait()
 		return false
 	}
 	return true
@@ -224,7 +238,7 @@ func (p *osProcess) Stop() error {
 	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
-	_ = p.cmd.Wait()
+	<-p.waitDone
 	return nil
 }
 

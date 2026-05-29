@@ -74,7 +74,6 @@ type ConcreteLifecycle struct {
 	currentConfig  config.VM
 	disablePasst   bool
 	firmware       firmware.Result
-	tpmProcess     tpm.Process
 	redfishProcess redfish.Process
 }
 
@@ -296,11 +295,9 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 		}
 	}
 	if l.TPM != nil {
-		result, err := l.TPM.Start(ctx, tpm.Request{Enabled: cfg.TPMEnabled, VMName: cfg.VMName})
-		if err != nil {
+		if _, err := l.TPM.Start(ctx, tpm.Request{Enabled: cfg.TPMEnabled, VMName: cfg.VMName}); err != nil {
 			return err
 		}
-		l.tpmProcess = result.Process
 	}
 	l.vmDir = vmDir
 	l.currentConfig = cfg
@@ -536,9 +533,6 @@ func (l *ConcreteLifecycle) MarkInstalled(_ context.Context, cfg config.VM) erro
 }
 
 func (l *ConcreteLifecycle) Cleanup(ctx context.Context, cfg config.VM) error {
-	if l.tpmProcess != nil {
-		_ = l.tpmProcess.Stop()
-	}
 	if l.NoVNC != nil {
 		_ = l.NoVNC.Stop(ctx)
 	}
@@ -932,7 +926,9 @@ func (l *ConcreteLifecycle) resolveBootSource(ctx context.Context, cfg config.VM
 		return destination, nil
 	}
 	if oci.IsReference(ref) {
-		result, err := oci.NewPuller().Pull(ctx, ref, filepath.Join(l.Layout.BaseImagesDir, "oci"))
+		puller := oci.NewPuller()
+		puller.MaxBytes = cfg.ExtractMaxBytes
+		result, err := puller.Pull(ctx, ref, filepath.Join(l.Layout.BaseImagesDir, "oci"))
 		if err != nil {
 			return "", err
 		}
