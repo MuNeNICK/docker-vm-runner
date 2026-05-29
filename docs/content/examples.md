@@ -109,7 +109,7 @@ The example reproduces a minimal bare-metal control plane:
 - `ironic-client`: CLI container used to register and operate the node.
 - `redfish-vm`: a `docker-vm-runner` VM with Redfish and noVNC enabled.
 
-The VM has a fixed libvirt domain name through `GUEST_NAME=redfish-vm`, an Alpine installer ISO attached as virtual CD media, and an empty working disk. Ironic discovers the canonical Redfish System URI from `/redfish/v1/Systems` and uses that URI as `redfish_system_id`.
+The VM has an Alpine installer ISO attached as virtual CD media and an empty working disk. Ironic uses Redfish to validate the node and manage the boot device.
 
 This is not a full OpenStack deployment flow. It does not run Keystone, Neutron, Inspector, or automated image deployment.
 

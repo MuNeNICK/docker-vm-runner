@@ -37,7 +37,7 @@ https://localhost:6080/
 
 ## Register The VM In Ironic
 
-`GUEST_NAME=redfish-vm` fixes the libvirt domain name. Ironic still needs the canonical Redfish System URI, so discover it from the Redfish collection:
+Discover the Redfish System URI:
 
 ```bash
 SYSTEM_PATH="$(curl -sk -u admin:redfish-lab-password \

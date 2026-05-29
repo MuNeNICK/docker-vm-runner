@@ -50,9 +50,6 @@ services:
       REDFISH_ENABLE: "1"
       REDFISH_USERNAME: admin
       REDFISH_PASSWORD: redfish-lab-password
-      # GUEST_NAME fixes the libvirt domain name. Leaving REDFISH_SYSTEM_ID
-      # empty lets Ironic use the canonical Redfish System URI discovered from
-      # /redfish/v1/Systems.
       REDFISH_SYSTEM_ID: ""
       REQUIRE_KVM: "0"
     ports:
