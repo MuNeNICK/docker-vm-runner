@@ -669,6 +669,7 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 		RedfishUser:     "admin",
 		RedfishPassword: "secret",
 		RedfishPort:     8443,
+		RedfishSystemID: "vm1",
 		NoVNCEnabled:    true,
 		NoVNCPort:       6080,
 		VNCPort:         5900,
@@ -678,6 +679,9 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 	}
 	if service.startCalls != 1 || manager.storagePoolCalls != 1 || !redfishManager.started || !novnc.started {
 		t.Fatalf("service=%d storage=%d redfish=%v novnc=%v", service.startCalls, manager.storagePoolCalls, redfishManager.started, novnc.started)
+	}
+	if redfishManager.request.SystemID != "vm1" {
+		t.Fatalf("redfish system id = %q", redfishManager.request.SystemID)
 	}
 
 	if err := lifecycle.StopServices(context.Background(), config.VM{}); err != nil {
@@ -1149,6 +1153,101 @@ func TestConcreteLifecyclePrepareUsesOverlayForRemoteBootDiskCache(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(layout.VMImagesDir, "vm1", "boot.qcow2")); !os.IsNotExist(err) {
 		t.Fatalf("remote boot source should not be duplicated into VM boot image: %v", err)
+	}
+}
+
+func TestConcreteLifecyclePrepareRejectsNonPersistentBootFromInsideVMDir(t *testing.T) {
+	layout := testLayout(t)
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	source := filepath.Join(vmDir, "source.qcow2")
+	if err := os.WriteFile(source, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "20G",
+		BootOrder:      []string{"hd"},
+		BootFrom:       source,
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		Persist:        false,
+	})
+	if err == nil {
+		t.Fatal("expected BOOT_FROM inside VM directory error")
+	}
+	if !strings.Contains(err.Error(), "inside VM directory") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content := readFileString(t, source); content != "keep" {
+		t.Fatalf("BOOT_FROM source was modified: %q", content)
+	}
+}
+
+func TestConcreteLifecyclePrepareUsesOverlayForBootDiskUnderBaseDir(t *testing.T) {
+	layout := testLayout(t)
+	source := filepath.Join(layout.BaseImagesDir, "custom", "source.qcow2")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatalf("mkdir source dir: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("custom-base"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "20G",
+		BootOrder:      []string{"hd"},
+		BootFrom:       source,
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	workImage := filepath.Join(layout.VMImagesDir, "vm1", "disk.qcow2")
+	log := readFileString(t, commandLog)
+	want := "create -f qcow2 -F qcow2 -b " + source + " " + workImage
+	if !strings.Contains(log, want) {
+		t.Fatalf("qemu-img commands missing %q:\n%s", want, log)
+	}
+	if got := readOptionalFile(t, workImage); got == "custom-base" {
+		t.Fatalf("base-dir BOOT_FROM source was fully copied to %s", workImage)
 	}
 }
 
@@ -2299,10 +2398,12 @@ func (s *fakeServiceSupervisor) Stop(context.Context) error {
 type fakeRedfishManager struct {
 	started bool
 	process redfish.Process
+	request redfish.Request
 }
 
-func (m *fakeRedfishManager) Start(context.Context, redfish.Request) (redfish.Result, error) {
+func (m *fakeRedfishManager) Start(_ context.Context, req redfish.Request) (redfish.Result, error) {
 	m.started = true
+	m.request = req
 	return redfish.Result{Started: true, Process: m.process}, nil
 }
 

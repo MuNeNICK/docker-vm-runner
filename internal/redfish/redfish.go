@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -32,6 +33,7 @@ type Request struct {
 	User       string
 	Password   string
 	Port       int
+	SystemID   string
 	LibvirtURI string
 }
 
@@ -142,6 +144,7 @@ func applyRequestDefaults(req *Request) {
 	if req.Port == 0 {
 		req.Port = 8443
 	}
+	req.SystemID = strings.TrimSpace(req.SystemID)
 	if req.LibvirtURI == "" {
 		req.LibvirtURI = defaultLibvirtURI
 	}
@@ -161,18 +164,24 @@ func writeAuthFile(configDir string, user string, password string) (string, erro
 
 func writeConfig(configDir string, req Request, certPath string, keyPath string, authPath string) (string, error) {
 	configPath := filepath.Join(configDir, "sushy.conf")
+	var allowedInstances string
+	if req.SystemID != "" {
+		allowedInstances = fmt.Sprintf("SUSHY_EMULATOR_ALLOWED_INSTANCES = [%s]\n", strconv.Quote(req.SystemID))
+	}
 	content := fmt.Sprintf(
 		"SUSHY_EMULATOR_LIBVIRT_URI = %s\n"+
 			"SUSHY_EMULATOR_LISTEN_IP = \"0.0.0.0\"\n"+
 			"SUSHY_EMULATOR_LISTEN_PORT = %d\n"+
 			"SUSHY_EMULATOR_SSL_CERT = %s\n"+
 			"SUSHY_EMULATOR_SSL_KEY = %s\n"+
-			"SUSHY_EMULATOR_AUTH_FILE = %s\n",
+			"SUSHY_EMULATOR_AUTH_FILE = %s\n"+
+			"%s",
 		strconv.Quote(req.LibvirtURI),
 		req.Port,
 		strconv.Quote(certPath),
 		strconv.Quote(keyPath),
 		strconv.Quote(authPath),
+		allowedInstances,
 	)
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		return "", fmt.Errorf("write sushy config: %w", err)

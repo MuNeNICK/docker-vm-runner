@@ -167,6 +167,7 @@ func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (e
 				User:       cfg.RedfishUser,
 				Password:   cfg.RedfishPassword,
 				Port:       cfg.RedfishPort,
+				SystemID:   cfg.RedfishSystemID,
 				LibvirtURI: l.libvirtURI(),
 			})
 			if err != nil {
@@ -249,6 +250,9 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 		return err
 	}
 	if !cfg.Persist {
+		if err := l.rejectLocalBootSourceInVMDir(cfg, vmDir); err != nil {
+			return err
+		}
 		if err := os.RemoveAll(vmDir); err != nil {
 			return fmt.Errorf("remove stale non-persistent VM directory: %w", err)
 		}
@@ -634,9 +638,12 @@ func (l *ConcreteLifecycle) vmDirFor(name string) (string, error) {
 	return filepath.Join(l.Layout.VMImagesDir, name), nil
 }
 
-func (l *ConcreteLifecycle) shouldCreateBackingOverlay(baseImage string, workImage string) bool {
+func (l *ConcreteLifecycle) shouldCreateBackingOverlay(cfg config.VM, baseImage string, workImage string) bool {
 	if filepath.Clean(baseImage) == filepath.Clean(workImage) {
 		return false
+	}
+	if cfg.BootFrom != "" {
+		return true
 	}
 	if pathWithin(l.Layout.VMImagesDir, baseImage) {
 		return false
@@ -648,6 +655,31 @@ func (l *ConcreteLifecycle) shouldCreateBackingOverlay(baseImage string, workIma
 	return true
 }
 
+func (l *ConcreteLifecycle) rejectLocalBootSourceInVMDir(cfg config.VM, vmDir string) error {
+	bootFrom := strings.TrimSpace(cfg.BootFrom)
+	if bootFrom == "" || isRemoteReference(bootFrom) || oci.IsReference(bootFrom) {
+		return nil
+	}
+	sourcePath, err := filepath.Abs(bootFrom)
+	if err != nil {
+		return fmt.Errorf("resolve BOOT_FROM path: %w", err)
+	}
+	if evaluated, err := filepath.EvalSymlinks(sourcePath); err == nil {
+		sourcePath = evaluated
+	}
+	vmPath, err := filepath.Abs(vmDir)
+	if err != nil {
+		return fmt.Errorf("resolve VM directory: %w", err)
+	}
+	if evaluated, err := filepath.EvalSymlinks(vmPath); err == nil {
+		vmPath = evaluated
+	}
+	if pathWithinOrEqual(vmPath, sourcePath) {
+		return fmt.Errorf("BOOT_FROM path %s is inside VM directory %s and would be removed during non-persistent startup", bootFrom, vmDir)
+	}
+	return nil
+}
+
 func pathWithin(root string, path string) bool {
 	if root == "" || path == "" {
 		return false
@@ -657,6 +689,15 @@ func pathWithin(root string, path string) bool {
 		return false
 	}
 	return true
+}
+
+func pathWithinOrEqual(root string, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	if path == root {
+		return true
+	}
+	return pathWithin(root, path)
 }
 
 func firstPathElement(root string, path string) string {
@@ -720,7 +761,7 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	if err := os.MkdirAll(filepath.Dir(workImage), 0o755); err != nil {
 		return fmt.Errorf("create work image directory: %w", err)
 	}
-	if l.shouldCreateBackingOverlay(baseImage, workImage) {
+	if l.shouldCreateBackingOverlay(cfg, baseImage, workImage) {
 		baseInfo, infoErr := diskManager.ImageInfo(ctx, baseImage)
 		backingFormat := normalizedImageFormat(cfg.SourceImageFormat)
 		if infoErr == nil && baseInfo.Format != "" {

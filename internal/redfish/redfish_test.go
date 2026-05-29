@@ -47,6 +47,7 @@ func TestStartWritesAuthConfigAndCommand(t *testing.T) {
 		User:       "operator",
 		Password:   "secret",
 		Port:       9443,
+		SystemID:   "vm1",
 		LibvirtURI: "qemu:///system",
 	})
 	if err != nil {
@@ -80,6 +81,7 @@ func TestStartWritesAuthConfigAndCommand(t *testing.T) {
 		`SUSHY_EMULATOR_SSL_CERT = "` + filepath.Join(stateDir, "certs", "sushy.crt") + `"`,
 		`SUSHY_EMULATOR_SSL_KEY = "` + filepath.Join(stateDir, "certs", "sushy.key") + `"`,
 		`SUSHY_EMULATOR_AUTH_FILE = "` + filepath.Join(stateDir, "sushy", "htpasswd") + `"`,
+		`SUSHY_EMULATOR_ALLOWED_INSTANCES = ["vm1"]`,
 	} {
 		if !strings.Contains(configText, needle) {
 			t.Fatalf("config missing %q:\n%s", needle, configText)
