@@ -130,19 +130,32 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func copyFile(source string, destination string) error {
+func copyFile(source string, destination string) (err error) {
 	in, err := os.Open(source)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.Create(destination)
+	dir := filepath.Dir(destination)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	out, err := os.CreateTemp(dir, "."+filepath.Base(destination)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	tempPath := out.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tempPath)
+		}
+	}()
 	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, destination)
 }

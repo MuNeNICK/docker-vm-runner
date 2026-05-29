@@ -111,6 +111,30 @@ func TestPrepareDoesNotOverwriteExistingNVRAM(t *testing.T) {
 	}
 }
 
+func TestCopyFileKeepsExistingDestinationOnCopyError(t *testing.T) {
+	if _, err := os.Stat("/proc/self/mem"); err != nil {
+		t.Skip("/proc/self/mem is not available")
+	}
+	dir := t.TempDir()
+	destination := filepath.Join(dir, "vars.fd")
+	writeFile(t, destination, []byte("existing"))
+
+	err := copyFile("/proc/self/mem", destination)
+	if err == nil {
+		t.Fatal("expected copy error")
+	}
+	if string(readFile(t, destination)) != "existing" {
+		t.Fatalf("destination was modified after copy failure")
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".vars.fd.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob temp files: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary files were not cleaned up: %v", matches)
+	}
+}
+
 func TestPrepareAarch64ExtractsAAVMFWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	loader := filepath.Join(dir, "AAVMF_CODE.fd")
