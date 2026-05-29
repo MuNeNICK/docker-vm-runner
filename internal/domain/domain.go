@@ -163,13 +163,14 @@ func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) er
 	if vm.IOThread && ctrl.bus == "virtio" {
 		driverAttrs = append(driverAttrs, attr{"iothread", "1"})
 	}
+	targets := newTargetAllocator(ctrl)
 
 	renderDisk(b, diskSpec{
 		Type:        "file",
 		Device:      "disk",
 		DriverAttrs: driverAttrs,
 		SourceAttr:  attr{"file", req.WorkImagePath},
-		TargetDev:   ctrl.dev(0),
+		TargetDev:   targets.nextDisk(),
 		TargetBus:   ctrl.bus,
 		BootOrder:   bootOrder["hd"],
 	})
@@ -184,7 +185,7 @@ func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) er
 			Device:      "disk",
 			DriverAttrs: driverAttrs,
 			SourceAttr:  attr{"file", filepath.Join(vmDir, fmt.Sprintf("disk%d.%s", disk.Index, defaultString(vm.ImageFormat, "qcow2")))},
-			TargetDev:   ctrl.dev(disk.Index - 1),
+			TargetDev:   targets.nextDisk(),
 			TargetBus:   ctrl.bus,
 		})
 	}
@@ -192,8 +193,7 @@ func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) er
 		start(b, "disk", attr{"type", "block"}, attr{"device", "disk"})
 		empty(b, "driver", attr{"name", "qemu"}, attr{"type", "raw"}, attr{"cache", "none"})
 		empty(b, "source", attr{"dev", block.Path})
-		offset := len(vm.ExtraDisks) + block.Index
-		empty(b, "target", attr{"dev", ctrl.dev(offset)}, attr{"bus", ctrl.bus})
+		empty(b, "target", attr{"dev", targets.nextDisk()}, attr{"bus", ctrl.bus})
 		if req.BlockSectorSize != nil {
 			if sector, ok := req.BlockSectorSize(block.Path); ok && sector != 512 {
 				value := strconv.Itoa(sector)
@@ -203,10 +203,10 @@ func renderDevices(b *strings.Builder, req Request, bootOrder map[string]int) er
 		end(b, "disk")
 	}
 	if req.SeedISOPath != "" {
-		renderCDROM(b, req.SeedISOPath, "sda", 0)
+		renderCDROM(b, req.SeedISOPath, targets.nextSATA(), 0)
 	}
 	if req.BootISOPath != "" {
-		renderCDROM(b, req.BootISOPath, "sdb", bootOrder["cdrom"])
+		renderCDROM(b, req.BootISOPath, targets.nextSATA(), bootOrder["cdrom"])
 	}
 	if err := renderNetworks(b, req, bootOrder["network"]); err != nil {
 		return err
@@ -396,6 +396,39 @@ func (c controller) dev(index int) string {
 		return fmt.Sprintf("nvme0n%d", index+1)
 	}
 	return c.prefix + string(rune('a'+index))
+}
+
+type targetAllocator struct {
+	ctrl      controller
+	diskNext  int
+	sataNext  int
+	allocated map[string]bool
+}
+
+func newTargetAllocator(ctrl controller) *targetAllocator {
+	return &targetAllocator{ctrl: ctrl, allocated: map[string]bool{}}
+}
+
+func (a *targetAllocator) nextDisk() string {
+	for {
+		dev := a.ctrl.dev(a.diskNext)
+		a.diskNext++
+		if !a.allocated[dev] {
+			a.allocated[dev] = true
+			return dev
+		}
+	}
+}
+
+func (a *targetAllocator) nextSATA() string {
+	for {
+		dev := "sd" + string(rune('a'+a.sataNext))
+		a.sataNext++
+		if !a.allocated[dev] {
+			a.allocated[dev] = true
+			return dev
+		}
+	}
 }
 
 func bootOrderPriority(order []string) map[string]int {

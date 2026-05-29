@@ -291,6 +291,17 @@ func TestEnsureStoragePoolDefinesAndStartsMissingPool(t *testing.T) {
 	}
 }
 
+func TestEnsureStoragePoolEscapesXML(t *testing.T) {
+	conn := &fakeConnection{domains: map[string]*fakeDomain{}, pools: map[string]*fakeStoragePool{}}
+	_, err := New(conn).EnsureStoragePool(StoragePoolRequest{Name: `red&fish`, TargetPath: `/var/lib/redfish/a&b`})
+	if err != nil {
+		t.Fatalf("EnsureStoragePool returned error: %v", err)
+	}
+	if !strings.Contains(conn.definedPoolXML, "<name>red&amp;fish</name>") || !strings.Contains(conn.definedPoolXML, "<path>/var/lib/redfish/a&amp;b</path>") {
+		t.Fatalf("definedPoolXML = %s", conn.definedPoolXML)
+	}
+}
+
 type fakeConnection struct {
 	domains         map[string]*fakeDomain
 	pools           map[string]*fakeStoragePool

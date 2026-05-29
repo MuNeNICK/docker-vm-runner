@@ -716,17 +716,22 @@ func (l *ConcreteLifecycle) prepareDisk(ctx context.Context, cfg config.VM, work
 	diskManager := l.diskManager()
 	l.warnDiskPreparationIssues(filepath.Dir(workImage), workImage, cfg.DiskSize)
 	if fileExists(workImage) && cfg.Persist {
-		l.infof("Reusing persistent disk %s", workImage)
-		if cfg.BootFrom != "" {
-			source, err := l.resolveBootSource(ctx, cfg)
-			if err != nil {
-				return err
+		if _, err := diskManager.ImageInfo(ctx, workImage); err != nil {
+			_ = os.Remove(workImage)
+			l.warnf("Persistent disk %s is not a valid image and will be recreated: %v", workImage, err)
+		} else {
+			l.infof("Reusing persistent disk %s", workImage)
+			if cfg.BootFrom != "" {
+				source, err := l.resolveBootSource(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				if isISO(source) {
+					l.bootISOPath = source
+				}
 			}
-			if isISO(source) {
-				l.bootISOPath = source
-			}
+			return l.resizeDiskIfNeeded(ctx, diskManager, workImage, cfg.DiskSize)
 		}
-		return l.resizeDiskIfNeeded(ctx, diskManager, workImage, cfg.DiskSize)
 	}
 	if cfg.BlankWorkDisk {
 		if cfg.BootFrom != "" {
@@ -917,7 +922,7 @@ func (l *ConcreteLifecycle) resolveBaseImage(ctx context.Context, cfg config.VM)
 		})
 	}
 	desiredFormat := defaultString(cfg.ImageFormat, "qcow2")
-	baseImage := filepath.Join(l.Layout.BaseImagesDir, cfg.Distro+"."+desiredFormat)
+	baseImage := filepath.Join(l.Layout.BaseImagesDir, cacheName(cfg.Distro)+"."+desiredFormat)
 	if fileExists(baseImage) {
 		if err := l.validateCachedImage(ctx, baseImage, desiredFormat); err == nil {
 			return baseImage, nil
@@ -1388,7 +1393,7 @@ func safeFilename(value string) string {
 	return b.String()
 }
 
-func copyFile(source string, destination string) error {
+func copyFile(source string, destination string) (err error) {
 	input, err := os.Open(source)
 	if err != nil {
 		return err
@@ -1397,15 +1402,27 @@ func copyFile(source string, destination string) error {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
-	output, err := os.Create(destination)
+	temp, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	defer output.Close()
-	if _, err := io.Copy(output, input); err != nil {
+	tempPath := temp.Name()
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := io.Copy(temp, input); err != nil {
+		_ = temp.Close()
 		return err
 	}
-	return output.Close()
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, destination); err != nil {
+		return err
+	}
+	return nil
 }
 
 func defaultString(value string, fallback string) string {

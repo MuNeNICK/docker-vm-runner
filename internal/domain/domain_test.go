@@ -461,6 +461,26 @@ func TestRenderDomainOptionalDevices(t *testing.T) {
 	}
 }
 
+func TestRenderDomainAvoidsSCSIDiskAndSeedISOTargetCollision(t *testing.T) {
+	vm := testVM()
+	vm.DiskController = "scsi"
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		WorkImagePath:     "/vm/disk.qcow2",
+		SeedISOPath:       "/vm/seed.iso",
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<target dev="sda" bus="scsi"/>`,
+		`<target dev="sdb" bus="sata"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
 func TestRenderDomainWithExtraDisksBlockDeviceAndQEMUArgs(t *testing.T) {
 	vm := testVM()
 	vm.ExtraArgs = "-device virtio-rng-pci"
@@ -491,6 +511,31 @@ func TestRenderDomainWithExtraDisksBlockDeviceAndQEMUArgs(t *testing.T) {
 		`<qemu:commandline>`,
 		`<qemu:arg value="-device"/>`,
 		`<qemu:arg value="virtio-rng-pci"/>`,
+	} {
+		if !strings.Contains(xmlText, want) {
+			t.Fatalf("XML missing %q:\n%s", want, xmlText)
+		}
+	}
+}
+
+func TestRenderDomainAvoidsSparseExtraDiskAndBlockDeviceTargetCollision(t *testing.T) {
+	vm := testVM()
+	vm.ExtraDisks = []config.Disk{{Size: "5G", Index: 3}}
+	vm.BlockDevices = []config.BlockDevice{{Path: "/dev/testblk", Index: 1}}
+	vmDir := t.TempDir()
+
+	xmlText := renderForTest(t, Request{
+		VM:                vm,
+		VMDir:             vmDir,
+		WorkImagePath:     filepath.Join(vmDir, "disk.qcow2"),
+		EffectiveCPUModel: "qemu64",
+	})
+
+	for _, want := range []string{
+		`<source file="` + filepath.Join(vmDir, "disk3.qcow2") + `"/>`,
+		`<target dev="vdb" bus="virtio"/>`,
+		`<source dev="/dev/testblk"/>`,
+		`<target dev="vdc" bus="virtio"/>`,
 	} {
 		if !strings.Contains(xmlText, want) {
 			t.Fatalf("XML missing %q:\n%s", want, xmlText)

@@ -58,6 +58,9 @@ func TestRunListDistrosRejectsPositionalArch(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d", code)
 	}
+	if !strings.Contains(stderr.String(), "unexpected arguments: arm64") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
 }
 
 func TestRunListDistrosWithTypeAndSearch(t *testing.T) {

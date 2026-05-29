@@ -730,7 +730,7 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	commandLog := installFakeQEMUImgWithInfo(t, 1*1024*1024*1024)
@@ -812,7 +812,7 @@ func TestConcreteLifecyclePreparePassesIPXEROMPath(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
@@ -854,7 +854,7 @@ func TestConcreteLifecyclePreparePassesBlockSectorSize(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
@@ -898,7 +898,7 @@ func TestConcreteLifecyclePreparePassesIPv6Availability(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
@@ -963,7 +963,7 @@ func TestConcreteLifecycleResolveBaseImageRejectsInvalidCachedImage(t *testing.T
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("not-an-image"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("not-an-image"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	installFakeCommand(t, "qemu-img", func(logPath string) string {
@@ -982,6 +982,35 @@ func TestConcreteLifecycleResolveBaseImageRejectsInvalidCachedImage(t *testing.T
 	}
 	if !strings.Contains(err.Error(), "parse qemu-img info") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestConcreteLifecycleResolveBaseImageUsesSafeDistroCacheName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("base-image"))
+	}))
+	defer server.Close()
+	layout := testLayout(t)
+	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
+	lifecycle := NewConcreteLifecycle(layout)
+
+	got, err := lifecycle.resolveBaseImage(context.Background(), config.VM{
+		Distro:          "../escape",
+		ImageURL:        server.URL,
+		ImageFormat:     "qcow2",
+		DownloadRetries: 1,
+	})
+	if err != nil {
+		t.Fatalf("resolveBaseImage returned error: %v", err)
+	}
+	if !pathWithin(layout.BaseImagesDir, got) {
+		t.Fatalf("base image escaped base dir: %s", got)
+	}
+	if strings.Contains(got, "..") {
+		t.Fatalf("base image path contains unsafe segment: %s", got)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(layout.BaseImagesDir), "escape.qcow2")); !os.IsNotExist(err) {
+		t.Fatalf("unsafe escaped cache path exists or unexpected stat error: %v", err)
 	}
 }
 
@@ -1030,7 +1059,7 @@ func TestConcreteLifecycleResolveBaseImageDoesNotOverwriteDistroCacheForBootFrom
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	baseImage := filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2")
+	baseImage := filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2")
 	if err := os.WriteFile(baseImage, []byte("catalog-base"), 0o644); err != nil {
 		t.Fatalf("write base: %v", err)
 	}
@@ -1269,7 +1298,7 @@ func TestConcreteLifecyclePostProcessCleansManagedIntermediates(t *testing.T) {
 	var status bytes.Buffer
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Status = &status
-	destination := filepath.Join(layout.BaseImagesDir, "custom.qcow2")
+	destination := filepath.Join(layout.BaseImagesDir, cacheName("custom")+".qcow2")
 
 	got, err := lifecycle.postProcessImage(context.Background(), source, destination, imagePostProcessOptions{DesiredFormat: "qcow2", SourceFormat: "raw"})
 	if err != nil {
@@ -1576,12 +1605,71 @@ func TestConcreteLifecyclePrepareDoesNotShrinkPersistentWorkImage(t *testing.T) 
 	}
 }
 
+func TestConcreteLifecyclePrepareRecreatesInvalidPersistentWorkImage(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	vmDir := filepath.Join(layout.VMImagesDir, "vm1")
+	if err := os.MkdirAll(vmDir, 0o755); err != nil {
+		t.Fatalf("mkdir vm: %v", err)
+	}
+	workImage := filepath.Join(vmDir, "disk.qcow2")
+	if err := os.WriteFile(workImage, []byte("partial"), 0o644); err != nil {
+		t.Fatalf("write work image: %v", err)
+	}
+	installFakeCommand(t, "qemu-img", func(logPath string) string {
+		return "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + shellQuote(logPath) + "\n" +
+			"if [ \"$1\" = info ] && [ \"$3\" = " + shellQuote(workImage) + " ]; then printf 'not-json\\n'; exit 0; fi\n" +
+			"if [ \"$1\" = info ]; then printf '{\"format\":\"qcow2\",\"virtual-size\":21474836480}\\n'; fi\n" +
+			"exit 0\n"
+	})
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	var status bytes.Buffer
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.Status = &status
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs:           []network.Config{{Mode: "user", Model: "virtio"}},
+		Persist:        true,
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if got := readFileString(t, workImage); got != "base" {
+		t.Fatalf("work image = %q", got)
+	}
+	if !strings.Contains(status.String(), "not a valid image") {
+		t.Fatalf("status missing invalid persistent warning: %q", status.String())
+	}
+}
+
 func TestConcreteLifecyclePrepareDoesNotShrinkCopiedBaseImage(t *testing.T) {
 	layout := testLayout(t)
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	commandLog := installFakeQEMUImgWithInfo(t, 20*1024*1024*1024)
@@ -1706,7 +1794,7 @@ func TestConcreteLifecyclePrepareExtractsAAVMFForAarch64(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "custom.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("custom")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	firmwareDir := t.TempDir()
@@ -1837,7 +1925,7 @@ func TestConcreteLifecyclePrepareForceISOBootsInstalledDiskFromISO(t *testing.T)
 	if err := os.WriteFile(bootISO, []byte("iso"), 0o644); err != nil {
 		t.Fatalf("write boot iso: %v", err)
 	}
-	installFakeQEMUImg(t)
+	installFakeQEMUImgWithInfo(t, 8*1024*1024*1024)
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	lifecycle := NewConcreteLifecycle(layout)
 	lifecycle.Manager = manager
@@ -1881,7 +1969,7 @@ func TestConcreteLifecyclePrepareCreatesExtraDisks(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	commandLog := installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
@@ -2083,7 +2171,7 @@ func TestConcreteLifecyclePrepareRemovesLeftoverNonPersistentVMDir(t *testing.T)
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)
@@ -2127,7 +2215,7 @@ func TestConcreteLifecycleStartVMFallsBackFromPasstBackend(t *testing.T) {
 	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
 		t.Fatalf("mkdir base: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, "ubuntu.qcow2"), []byte("base"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
 		t.Fatalf("write base image: %v", err)
 	}
 	installFakeQEMUImgWithInfo(t, 10*1024*1024*1024)

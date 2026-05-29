@@ -61,6 +61,7 @@ func runWithEnv(ctx context.Context, args []string, stdout io.Writer, stderr io.
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
 	if opts.version {

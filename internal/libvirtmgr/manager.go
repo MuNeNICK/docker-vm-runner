@@ -318,5 +318,11 @@ func (m *Manager) EnsureStoragePool(req StoragePoolRequest) (StoragePool, error)
 }
 
 func storagePoolXML(req StoragePoolRequest) string {
-	return fmt.Sprintf(`<pool type="dir"><name>%s</name><target><path>%s</path></target></pool>`, req.Name, req.TargetPath)
+	var b strings.Builder
+	b.WriteString(`<pool type="dir"><name>`)
+	_ = xml.EscapeText(&b, []byte(req.Name))
+	b.WriteString(`</name><target><path>`)
+	_ = xml.EscapeText(&b, []byte(req.TargetPath))
+	b.WriteString(`</path></target></pool>`)
+	return b.String()
 }
