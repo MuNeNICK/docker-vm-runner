@@ -1,23 +1,39 @@
 # Access
 
-`docker-vm-runner` can expose the VM through console, SSH, VNC, noVNC, and Redfish.
+`docker-vm-runner` can expose the VM through the serial console, SSH, VNC, noVNC, and Redfish.
 
 ## Serial console
 
-The default mode attaches to the VM console:
+This command opens the VM console in your terminal:
 
 ```bash
 docker run --rm -it \
+  --name docker-vm-runner \
   --device /dev/kvm \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
-Detach with:
+Close the VM console session with `Ctrl+]`.
 
-```text
-Ctrl+]
+Use `Ctrl+P` then `Ctrl+Q` instead when you want to leave the VM running.
+
+For a background container that you can reattach to later, start it with `-dit`:
+
+```bash
+docker run -dit --name docker-vm-runner \
+  --device /dev/kvm \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
 ```
+
+Reconnect with:
+
+```bash
+docker attach docker-vm-runner
+```
+
+Use `Ctrl+P` then `Ctrl+Q` to leave the VM running.
 
 ## SSH
 
@@ -102,6 +118,8 @@ https://localhost:6080/
 ```
 
 The noVNC endpoint uses a self-signed certificate.
+
+When `GRAPHICS=novnc` is set, the serial console is skipped by default. Set `NO_CONSOLE=0` if you want the container terminal to attach to the serial console as well.
 
 ## VNC
 

@@ -165,7 +165,7 @@ func (s *Supervisor) WaitForLibvirt(ctx context.Context) error {
 		filepath.Join(s.Options.RunDir, "libvirt-sock"),
 		filepath.Join(s.Options.VarRunDir, "libvirt-sock"),
 	}, 15*time.Second) {
-		msg := "libvirt socket did not appear; run the container with --privileged, --cgroupns=host, and /dev/kvm when hardware acceleration is required"
+		msg := "libvirt socket did not appear; check libvirt startup logs and container runtime settings; add --cgroupns=host only if the logs mention cgroup access"
 		if s.Options.Runtime.Rootless {
 			s.warnf("%s", msg)
 			return nil
@@ -176,7 +176,7 @@ func (s *Supervisor) WaitForLibvirt(ctx context.Context) error {
 		filepath.Join(s.Options.RunDir, "virtlogd-sock"),
 		filepath.Join(s.Options.VarRunDir, "virtlogd-sock"),
 	}, 15*time.Second) {
-		msg := "virtlogd socket did not appear; check container privileges and libvirt startup logs"
+		msg := "virtlogd socket did not appear; check libvirt startup logs and container runtime settings"
 		if s.Options.Runtime.Rootless {
 			s.warnf("%s", msg)
 			return nil

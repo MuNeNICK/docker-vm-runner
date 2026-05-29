@@ -29,7 +29,7 @@ docker run --rm -it \
 | `/data` | Persistent VM disks, state, and image cache. |
 | `/config` | Optional catalog cache. |
 
-Mount both when you want predictable repeated runs:
+Mount both when you want to keep VM disks and the catalog cache across runs:
 
 ```bash
 docker run --rm -it \
@@ -41,7 +41,7 @@ docker run --rm -it \
 
 ## Cleanup
 
-Use cleanup mode to remove stale VM resources for the configured VM:
+Use cleanup mode when a previous container exited and left VM resources behind:
 
 ```bash
 docker run --rm \
@@ -49,7 +49,9 @@ docker run --rm \
   ghcr.io/munenick/docker-vm-runner:latest --cleanup
 ```
 
-Use the same `VM_NAME` or `DISTRO` values you used for the VM you want to clean.
+Use the same `GUEST_NAME` or `DISTRO` values you used for the VM you want to clean.
+
+When `/data` is mounted, cleanup keeps persistent VM disks and cached images. It removes stale runtime resources only.
 
 ## Stop behavior
 
@@ -86,14 +88,10 @@ If you require KVM and do not want fallback behavior, set:
 -e REQUIRE_KVM=1
 ```
 
-## Host permissions
-
-For the default NAT and console flow, start without `--privileged`. The examples include `/dev/kvm` for acceleration; remove it on hosts without KVM. Add only the host access required by the features you use:
+## Docker options
 
 | Feature | Typical Docker option |
 | --- | --- |
 | KVM acceleration | `--device /dev/kvm` |
 | Host block device passthrough | `--device /dev/<device>` |
 | Access to local boot media | `-v /host/path:/container/path:ro` |
-
-Some advanced networking or hardware passthrough setups may need additional Docker permissions. Use `--privileged` only when you intentionally want a broad container privilege model.

@@ -4,27 +4,32 @@
 
 Run the container on a Linux host with Docker or a compatible container runtime.
 
-For the default interactive flow, use:
+The examples below use `/dev/kvm` for better VM performance. If your host does not have `/dev/kvm`, remove `--device /dev/kvm`.
 
-- an interactive terminal with `-it`
-- a `/data` mount if you want to reuse the VM after the container exits
-
-The VM examples below expose `/dev/kvm` for hardware acceleration. Remove `--device /dev/kvm` if your host does not provide KVM.
-
-Start without `--privileged` for the default NAT and console flow. Add broader permissions only for features that need them.
-
-## Start a VM
+## Start an ephemeral VM
 
 ```bash
 docker run --rm -it \
+  --name docker-vm-runner \
+  --device /dev/kvm \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+This starts a temporary VM and opens the VM console in your terminal. When the container exits, the VM disk and downloaded image cache are removed.
+
+## Start a persistent VM
+
+```bash
+docker run --rm -it \
+  --name docker-vm-runner \
   --device /dev/kvm \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
-The runner resolves the default image, prepares storage, starts the VM, and attaches to the console.
+Use this form when you want the next run to reuse the VM disk and image cache.
 
-## What to expect
+## First startup
 
 On first run, the container may need to:
 
@@ -34,27 +39,27 @@ On first run, the container may need to:
 - start the VM
 - attach to the serial console
 
-Later runs can reuse cached images and persisted VM state when `/data` is mounted.
+Persistent runs can reuse cached images and VM state when `/data` is mounted.
 
-## Detach from the console
+## Leave the VM running
 
-Press:
+If you started the container with an attached terminal, press `Ctrl+P` then `Ctrl+Q` to leave the VM running.
 
-```text
-Ctrl+]
-```
-
-Detaching from the console does not necessarily mean the VM has shut down. Use the guest OS shutdown command when you want the VM to stop cleanly.
-
-## Run without attaching to the console
-
-Start the container in the background when you want the VM to keep running while you use another terminal:
+Reconnect later:
 
 ```bash
-docker run -d --name docker-vm-runner \
+docker attach docker-vm-runner
+```
+
+`Ctrl+]` exits the VM console session. Do not use it when you want the VM to keep running in the background.
+
+## Run in the background
+
+Use `-dit` when you want the VM to keep running in the background and still reconnect with `docker attach`:
+
+```bash
+docker run -dit --name docker-vm-runner \
   --device /dev/kvm \
-  -e NO_CONSOLE=1 \
-  -e VM_NAME=quickstart \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -65,15 +70,13 @@ Follow the startup logs:
 docker logs -f docker-vm-runner
 ```
 
-Attach to the VM console from inside the running container:
+Reconnect to the VM console:
 
 ```bash
-docker exec -it docker-vm-runner virsh -c qemu:///system console quickstart
+docker attach docker-vm-runner
 ```
 
-Replace `quickstart` with your `VM_NAME` when you use a different VM name. Press `Ctrl+]` to detach from the VM console.
-
-`docker attach docker-vm-runner` reconnects to the container process, not directly to a VM console that was skipped with `NO_CONSOLE=1`. Use `docker exec ... virsh console` for a headless container.
+When you are attached through Docker, press `Ctrl+P` then `Ctrl+Q` to leave the VM running.
 
 ## Pick an image
 

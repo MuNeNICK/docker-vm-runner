@@ -12,7 +12,7 @@
 | `--show-config` | Print the resolved configuration and exit. |
 | `--show-xml` | Print the generated VM XML and exit. |
 | `--dry-run` | Validate configuration without starting a VM. |
-| `--cleanup` | Cleanup stale VM resources and exit. |
+| `--cleanup` | Remove leftover VM resources and exit. |
 | `--version` | Print version and exit. |
 
 ## Core environment variables
@@ -20,8 +20,8 @@
 | Variable | Default | Description |
 | --- | --- | --- |
 | `DISTRO` | `ubuntu-24.04-cloud-amd64` | Catalog image ID. |
-| `ARCH` | catalog value | Override architecture. Common aliases such as `amd64` and `arm64` are accepted. |
-| `VM_NAME` | derived | VM name used for persistent state and resource naming. |
+| `ARCH` | catalog value | Select the architecture when the catalog image does not define one. If the catalog image already has an architecture, `ARCH` must match it. Common aliases such as `amd64` and `arm64` are accepted. |
+| `GUEST_NAME` | derived | VM name used for persistent state and resource naming. |
 | `PERSIST` | automatic | Persist VM state. Defaults to enabled when `/data` is mounted. |
 | `MEMORY` | `4096` | VM memory. |
 | `CPUS` | `2` | Number of vCPUs. |
@@ -36,7 +36,7 @@
 | `BLANK_DISK` | automatic | Create a blank working disk. Automatically enabled for ISO boot. |
 | `BOOT_ORDER` | `hd` | Comma-separated boot order using `hd`, `cdrom`, and `network`. |
 | `BOOT_MODE` | `uefi` | Boot mode: `legacy`, `uefi`, or `secure`. |
-| `FORCE_ISO` | `0` | Keep ISO media attached when applicable. |
+| `FORCE_ISO` | `0` | Keep ISO media attached on the next boot. |
 | `DOWNLOAD_RETRIES` | `3` | Download retry count. |
 | `DOWNLOAD_MAX_SIZE` | `64G` | Maximum download size. |
 | `EXTRACT_MAX_SIZE` | `512G` | Maximum extracted image size. |
@@ -69,7 +69,7 @@
 | `VNC_KEYMAP` | empty | Optional VNC keymap. |
 | `SSH_PORT` | `2222` | SSH forwarding port inside the container. |
 | `PORT_FWD` | empty | Additional forwards as `host_port:guest_port`, comma-separated. |
-| `NO_CONSOLE` | automatic | Skip console attachment. Automatically enabled when stdin/stdout is not a terminal. |
+| `NO_CONSOLE` | automatic | Skip serial console attachment. Automatically enabled when stdin/stdout is not a terminal or when `GRAPHICS=novnc`, unless explicitly set. |
 
 ## Redfish variables
 
@@ -131,10 +131,10 @@ The first share uses unnumbered variables. Additional shares use `FILESYSTEM2_..
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `FILESYSTEM_SOURCE` | empty | Host directory to share. |
+| `FILESYSTEM_SOURCE` | empty | Container-visible directory to share. Bind-mount a host directory into the container first when sharing host files. |
 | `FILESYSTEM_TARGET` | basename of source | Guest mount tag. |
 | `FILESYSTEM_DRIVER` | `virtiofs` | `virtiofs` or `9p`. |
-| `FILESYSTEM_ACCESSMODE` | `passthrough` | `passthrough`, `mapped`, or `squash`. |
+| `FILESYSTEM_ACCESSMODE` | `passthrough` | `passthrough`, `mapped`, or `squash`. `virtiofs` supports only `passthrough`; use `FILESYSTEM_DRIVER=9p` for `mapped` or `squash`. |
 | `FILESYSTEM_READONLY` | `0` | Mark the share read-only. |
 
 ## Common ports
@@ -156,13 +156,12 @@ Publish container ports with Docker `-p` when you want to access them from the h
 | `/config` | Catalog cache. |
 | Custom path | Mount local boot media for `BOOT_FROM`. |
 
-## Common Docker permissions
+## Common Docker Options
 
-The VM startup examples use `--device /dev/kvm` by default for hardware acceleration. Remove it on hosts without KVM. The basic startup path does not require `--privileged`.
+The VM startup examples use `--device /dev/kvm` for better performance. Remove it on hosts without KVM.
 
 | Need | Typical Docker option |
 | --- | --- |
 | KVM acceleration | `--device /dev/kvm` |
 | Host block device passthrough | `--device /dev/<device>` |
 | Local boot media or cloud-init files | `-v /host/path:/container/path:ro` |
-| Broad host access for advanced setups | `--privileged` |

@@ -57,7 +57,7 @@ docker run --rm -it \
 | Type | Use case |
 | --- | --- |
 | `cloud-image` | Fast startup with cloud-init and a ready-to-boot disk image. |
-| `iso` | Installer media. The runner creates a blank disk and boots the ISO. |
+| `iso` | Installer media. The VM starts from the ISO with a blank disk. |
 | `disk-image` | A ready disk image that is not categorized as a cloud image. |
 
 Cloud images are usually the best starting point for day-to-day use.
