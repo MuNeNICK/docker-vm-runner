@@ -97,6 +97,42 @@ ssh user@localhost -p 2222
 
 Use `docker attach ubuntu-ssh` when you need the serial console. Press `Ctrl+P` then `Ctrl+Q` to detach without stopping the VM.
 
+## Run Commands In The VM Without Login
+
+Use `guest-exec` when you want to run a command inside the VM without opening the console or enabling SSH.
+
+Start a persistent VM in the background:
+
+```bash
+docker run -dit --name command-vm \
+  --device /dev/kvm \
+  -e DISTRO=ubuntu-24.04-cloud-amd64 \
+  -v command-vm-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Run a command inside the VM from the host:
+
+```bash
+docker exec command-vm guest-exec --wait "uname -a"
+```
+
+Run a package or system command inside the VM without running it on the host:
+
+```bash
+docker exec command-vm guest-exec --wait "apt-get update"
+```
+
+Use argv form when you do not need shell features:
+
+```bash
+docker exec command-vm guest-exec --wait systemctl is-system-running
+```
+
+This is useful for OS-level checks, package-manager operations, service probes, and test commands that should affect the VM rather than the host.
+
+For command syntax and guest-agent requirements, see [Access](access.md#guest-exec).
+
 ## Browser Console For GUI Installers
 
 Use noVNC when the installer or desktop workflow needs a graphical console.

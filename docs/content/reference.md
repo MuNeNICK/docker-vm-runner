@@ -15,6 +15,29 @@
 | `--cleanup` | Remove leftover VM resources and exit. |
 | `--version` | Print version and exit. |
 
+## guest-exec command
+
+`guest-exec` runs a command inside the running VM through the QEMU guest agent.
+
+```bash
+docker exec <container> guest-exec [--wait] <command> [args...]
+```
+
+| Option | Description |
+| --- | --- |
+| `--wait` | Wait for the QEMU guest agent to become available before running the command. |
+
+Examples:
+
+```bash
+docker exec ubuntu-vm guest-exec --wait "uname -a"
+docker exec ubuntu-vm guest-exec --wait id user
+```
+
+A single command string containing spaces is run through `/bin/sh -c`. Multiple arguments are sent as argv form.
+
+`guest-exec` returns stdout and stderr from the guest command and exits with the guest command's exit code.
+
 ## Core environment variables
 
 | Variable | Default | Description |

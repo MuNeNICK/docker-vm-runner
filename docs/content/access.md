@@ -1,6 +1,6 @@
 # Access
 
-`docker-vm-runner` can expose the VM through the serial console, SSH, VNC, noVNC, and Redfish.
+`docker-vm-runner` can expose the VM through the serial console, SSH, VNC, noVNC, Redfish, and guest-exec.
 
 ## Serial console
 
@@ -99,6 +99,36 @@ Use comma-separated values for multiple forwards:
 ```
 
 For network configuration beyond access ports, see [Networking](networking.md).
+
+## guest-exec
+
+Use `guest-exec` when you want to run a command inside the VM without opening the console or SSH.
+
+Start the VM in the background:
+
+```bash
+docker run -dit --name ubuntu-vm \
+  --device /dev/kvm \
+  -e DISTRO=ubuntu-24.04-cloud-amd64 \
+  -v ubuntu-vm-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Run a command inside the guest:
+
+```bash
+docker exec ubuntu-vm guest-exec --wait "uname -a"
+```
+
+Run a command with arguments:
+
+```bash
+docker exec ubuntu-vm guest-exec --wait id user
+```
+
+`guest-exec` uses the QEMU guest agent. `--wait` waits for the agent to become available before sending the command.
+
+The command's stdout and stderr are returned to your terminal, and the `guest-exec` process exits with the guest command's exit code.
 
 ## noVNC
 
