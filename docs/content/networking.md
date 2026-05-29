@@ -77,6 +77,8 @@ This pattern keeps `SSH_PORT` and `PORT_FWD` available on the NAT NIC while the 
 
 Bridge mode connects the VM NIC to an existing Linux bridge such as `br0`. Use it when the VM should appear on the bridged network instead of only behind NAT.
 
+Example: use Bridge when your host already has `br0` on the LAN and you want the VM to receive an address from that LAN.
+
 Required variables:
 
 ```bash
@@ -118,12 +120,16 @@ When bridge mode is the only NIC, connect to the VM through the bridged network 
 
 Direct mode attaches the VM NIC to a host interface without creating a Linux bridge first. Use it when you need the VM to use a specific host NIC path and you understand the host network exposure.
 
+Example: use Direct when the VM needs a real address on the physical network through `eth0`, but you do not want to create a host bridge.
+
 Required variables:
 
 ```bash
 -e NETWORK_MODE=direct
--e NETWORK_DIRECT_DEV=enp88s0
+-e NETWORK_DIRECT_DEV=eth0
 ```
+
+Use the real host interface name from `ip -br link`.
 
 Preview the configuration:
 
@@ -131,11 +137,30 @@ Preview the configuration:
 docker run --rm \
   -e DISTRO=alpine-3.22-cloud-amd64 \
   -e NETWORK_MODE=direct \
-  -e NETWORK_DIRECT_DEV=enp88s0 \
+  -e NETWORK_DIRECT_DEV=eth0 \
   ghcr.io/munenick/docker-vm-runner:latest --show-config
 ```
 
-Direct mode is more sensitive to Docker isolation than bridge mode. Libvirt creates a dynamic macvtap device such as `/dev/tap381`; the container runtime must allow the container to see and open that device. If startup fails with `cannot open macvtap tap device`, use bridge mode or adjust the container runtime's network device policy for macvtap.
+To boot with Direct mode from Docker, allow Docker to expose the dynamic macvtap devices created for the VM:
+
+```bash
+MACVTAP_MAJOR="$(awk '$2 == "macvtap" { print $1 }' /proc/devices)"
+
+docker run -d --name docker-vm-runner-direct \
+  --network host \
+  --cap-add NET_ADMIN \
+  --device /dev/kvm \
+  --device /dev/vhost-net \
+  --device-cgroup-rule "c ${MACVTAP_MAJOR}:* rwm" \
+  -v /dev:/dev:ro \
+  -e NETWORK_MODE=direct \
+  -e NETWORK_DIRECT_DEV=eth0 \
+  -e NO_CONSOLE=1 \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+`/dev/vhost-net` is used by the default `virtio` NIC. If you set `NETWORK_MODEL=e1000`, Direct mode can run without `/dev/vhost-net`, but the guest NIC model changes.
 
 For day-to-day access, a practical pattern is NAT plus direct:
 
@@ -144,7 +169,7 @@ docker run --rm \
   -e DISTRO=alpine-3.22-cloud-amd64 \
   -e NETWORK_MODE=nat \
   -e NETWORK2_MODE=direct \
-  -e NETWORK2_DIRECT_DEV=enp88s0 \
+  -e NETWORK2_DIRECT_DEV=eth0 \
   ghcr.io/munenick/docker-vm-runner:latest --show-config
 ```
 
