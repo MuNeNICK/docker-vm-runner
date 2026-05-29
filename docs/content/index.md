@@ -1,0 +1,36 @@
+# Overview
+
+`docker-vm-runner` starts a real virtual machine from a Docker container.
+
+The goal is a simple user experience: run a command that feels close to `docker run ubuntu`, but get an actual VM with its own kernel, firmware, disks, and console.
+
+## Why use it
+
+Use `docker-vm-runner` when a normal container is not enough:
+
+- You need to test a full operating system image.
+- You need systemd, kernel behavior, firmware, boot media, or disk layout behavior.
+- You want to run cloud images or installer ISOs without writing libvirt or QEMU commands by hand.
+- You want a repeatable Docker-based workflow for VM startup.
+
+## What you get
+
+- A VM started from a public catalog image by default.
+- Console access by default.
+- Optional SSH, VNC, noVNC, and Redfish access.
+- Persistent VM state when `/data` is mounted.
+- Support for cloud images, installer ISOs, disk images, local boot media, remote URLs, and OCI references.
+
+## Default image
+
+The documentation uses the public image:
+
+```text
+ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Local image names are used only when documenting local development or local image builds.
+
+## Next step
+
+Start with [Quick Start](quick-start.md) to boot your first VM.

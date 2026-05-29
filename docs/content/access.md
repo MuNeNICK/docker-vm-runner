@@ -1,0 +1,127 @@
+# Access
+
+`docker-vm-runner` can expose the VM through console, SSH, VNC, noVNC, and Redfish.
+
+## Serial console
+
+The default mode attaches to the VM console:
+
+```bash
+docker run --rm -it --privileged \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Detach with:
+
+```text
+Ctrl+]
+```
+
+## SSH
+
+With the default NAT network, host port `2222` is forwarded to guest port `22`.
+
+Publish the port from the container:
+
+```bash
+docker run --rm -it --privileged \
+  -p 2222:2222 \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Then connect from the host:
+
+```bash
+ssh user@localhost -p 2222
+```
+
+The default generated user is `user`, and the default password is `password`.
+
+Set a different password:
+
+```bash
+docker run --rm -it --privileged \
+  -p 2222:2222 \
+  -e GUEST_PASSWORD='change-me' \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Inject an SSH public key:
+
+```bash
+docker run --rm -it --privileged \
+  -p 2222:2222 \
+  -e SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)" \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+## Extra port forwarding
+
+Use `PORT_FWD` to forward additional ports through the default NAT network:
+
+```bash
+docker run --rm -it --privileged \
+  -p 8080:8080 \
+  -e PORT_FWD=8080:80 \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Use comma-separated values for multiple forwards:
+
+```bash
+-e PORT_FWD=8080:80,8443:443
+```
+
+## noVNC
+
+Enable browser access with noVNC:
+
+```bash
+docker run --rm -it --privileged \
+  -p 6080:6080 \
+  -e GRAPHICS=novnc \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Open:
+
+```text
+https://localhost:6080/
+```
+
+The noVNC endpoint uses a self-signed certificate.
+
+## VNC
+
+Use VNC without noVNC:
+
+```bash
+docker run --rm -it --privileged \
+  -p 5900:5900 \
+  -e GRAPHICS=vnc \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Connect your VNC client to `localhost:5900`.
+
+## Redfish
+
+Enable Redfish with a non-default password:
+
+```bash
+docker run --rm -it --privileged \
+  -p 8443:8443 \
+  -e REDFISH_ENABLE=1 \
+  -e REDFISH_PASSWORD='change-me' \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+The Redfish endpoint listens on port `8443` by default.

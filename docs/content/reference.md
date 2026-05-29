@@ -1,0 +1,157 @@
+# Reference
+
+## CLI flags
+
+| Flag | Description |
+| --- | --- |
+| `--no-console` | Do not attach to the VM console. |
+| `--list-distros` | List available catalog images and exit. |
+| `--arch ARCH` | Filter `--list-distros` by architecture. |
+| `--type TYPE` | Filter `--list-distros` by image type: `cloud-image`, `iso`, or `disk-image`. |
+| `--search TEXT` | Filter `--list-distros` by search text. |
+| `--show-config` | Print the resolved configuration and exit. |
+| `--show-xml` | Print the generated VM XML and exit. |
+| `--dry-run` | Validate configuration without starting a VM. |
+| `--cleanup` | Cleanup stale VM resources and exit. |
+| `--version` | Print version and exit. |
+
+## Core environment variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DISTRO` | `ubuntu-24.04-cloud-amd64` | Catalog image ID. |
+| `ARCH` | catalog value | Override architecture. Common aliases such as `amd64` and `arm64` are accepted. |
+| `VM_NAME` | derived | VM name used for persistent state and resource naming. |
+| `PERSIST` | automatic | Persist VM state. Defaults to enabled when `/data` is mounted. |
+| `MEMORY` | `4096` | VM memory. |
+| `CPUS` | `2` | Number of vCPUs. |
+| `DISK_SIZE` | `20G` | Working disk size. |
+| `REQUIRE_KVM` | `0` | Fail when KVM is unavailable. |
+
+## Boot and image variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BOOT_FROM` | empty | Boot from a URL, local path, OCI reference, ISO, or `blank`. |
+| `BLANK_DISK` | automatic | Create a blank working disk. Automatically enabled for ISO boot. |
+| `BOOT_ORDER` | `hd` | Comma-separated boot order using `hd`, `cdrom`, and `network`. |
+| `BOOT_MODE` | `uefi` | Boot mode: `legacy`, `uefi`, or `secure`. |
+| `FORCE_ISO` | `0` | Keep ISO media attached when applicable. |
+| `DOWNLOAD_RETRIES` | `3` | Download retry count. |
+| `DOWNLOAD_MAX_SIZE` | `64G` | Maximum download size. |
+| `EXTRACT_MAX_SIZE` | `512G` | Maximum extracted image size. |
+
+## Catalog variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CATALOG_URL` | public catalog | Override the catalog URL or use a local file path. |
+| `CATALOG_CACHE` | `/config/os-iso-catalog/v1/all.json` | Catalog cache path. |
+| `CATALOG_OFFLINE` | `0` | Load only from `CATALOG_CACHE`. |
+
+## Guest customization
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GUEST_PASSWORD` | `password` | Password for the generated guest user. |
+| `SSH_PUBKEY` | empty | SSH public key to inject into the guest. |
+| `SHELL` | catalog value or `/bin/bash` | Login shell for the generated user. |
+| `CLOUD_INIT` | automatic | Enable or disable cloud-init. ISO boot disables it unless explicitly enabled. |
+| `CLOUD_INIT_USER_DATA` | empty | Path to custom cloud-init user-data. |
+
+## Access variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GRAPHICS` | `none` | Display mode: `none`, `vnc`, or `novnc`. |
+| `VNC_PORT` | `5900` | VNC port inside the container. |
+| `NOVNC_PORT` | `6080` | noVNC HTTPS port inside the container. |
+| `VNC_KEYMAP` | empty | Optional VNC keymap. |
+| `SSH_PORT` | `2222` | Host-side SSH forwarding port inside the container. |
+| `PORT_FWD` | empty | Additional forwards as `host_port:guest_port`, comma-separated. |
+| `NO_CONSOLE` | automatic | Skip console attachment. Automatically enabled when stdin/stdout is not a terminal. |
+
+## Redfish variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `REDFISH_ENABLE` | `0` | Enable Redfish. |
+| `REDFISH_USERNAME` | `admin` | Redfish username. |
+| `REDFISH_PASSWORD` | `password` | Redfish password. Must be changed when Redfish is enabled. |
+| `REDFISH_PORT` | `8443` | Redfish HTTPS port inside the container. |
+| `REDFISH_SYSTEM_ID` | VM name | Redfish system identifier. |
+
+## Network variables
+
+The first NIC uses unnumbered variables. Additional NICs use `NETWORK2_...`, `NETWORK3_...`, and so on.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NETWORK_MODE` | `nat` | Network mode: `nat`, `bridge`, or `direct`. |
+| `NETWORK_BRIDGE` | empty | Bridge name when `NETWORK_MODE=bridge`. |
+| `NETWORK_DIRECT_DEV` | empty | Host device when `NETWORK_MODE=direct`. |
+| `NETWORK_MAC` | derived | MAC address. |
+| `NETWORK_MODEL` | `virtio` | NIC model. |
+| `NETWORK_MTU` | detected | MTU. |
+| `NETWORK_GUEST_IP` | empty | Guest IPv4 address list. |
+| `NETWORK_GUEST_IP6` | empty | Guest IPv6 address list. |
+| `NETWORK_BOOT` | `0` | Mark this NIC as bootable. |
+| `IPXE_ENABLE` | `0` | Enable iPXE boot on the primary NIC. |
+| `IPXE_ROM_PATH` | automatic | Override iPXE ROM path. |
+
+## Hardware variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CPU_MODEL` | `host` | CPU model. |
+| `MACHINE` | architecture default | Machine type. Supported override values are `q35` and `pc`. |
+| `DISK_TYPE` | `virtio` | Disk controller: `virtio`, `scsi`, `nvme`, `ide`, or `usb`. |
+| `DISK_IO` | `native` | Disk I/O mode: `native`, `threads`, or `io_uring`. |
+| `DISK_CACHE` | `none` | Disk cache mode. |
+| `ALLOCATE` | `0` | Preallocate disk space. |
+| `TPM` | secure boot default | Enable TPM. |
+| `GPU` | `off` | GPU setting. Supported values: `off`, `intel`. |
+| `USB` | `1` | Enable USB controller. |
+| `HYPERV` | `0` | Enable Hyper-V enlightenments. |
+| `BALLOON` | `1` | Enable memory balloon device. |
+| `RNG` | `1` | Enable random number generator device. |
+| `IO_THREAD` | `1` | Enable disk I/O thread. |
+| `EXTRA_ARGS` | empty | Extra arguments passed to the guest command line where supported. |
+
+## Extra disks and devices
+
+| Variable | Description |
+| --- | --- |
+| `DISK2_SIZE` through `DISK6_SIZE` | Add extra VM disks. |
+| `DEVICE` through `DEVICE6` | Attach host block devices. |
+
+## Filesystem sharing
+
+The first share uses unnumbered variables. Additional shares use `FILESYSTEM2_...`, `FILESYSTEM3_...`, and so on.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `FILESYSTEM_SOURCE` | empty | Host directory to share. |
+| `FILESYSTEM_TARGET` | basename of source | Guest mount tag. |
+| `FILESYSTEM_DRIVER` | `virtiofs` | `virtiofs` or `9p`. |
+| `FILESYSTEM_ACCESSMODE` | `passthrough` | `passthrough`, `mapped`, or `squash`. |
+| `FILESYSTEM_READONLY` | `0` | Mark the share read-only. |
+
+## Common ports
+
+| Port | Used by |
+| --- | --- |
+| `2222` | SSH forwarding default. |
+| `5900` | VNC default. |
+| `6080` | noVNC default. |
+| `8443` | Redfish default. |
+
+Publish container ports with Docker `-p` when you want to access them from the host.
+
+## Common mounts
+
+| Container path | Purpose |
+| --- | --- |
+| `/data` | Persistent VM disks, image cache, and state. |
+| `/config` | Catalog cache. |
+| Custom path | Mount local boot media for `BOOT_FROM`. |
