@@ -42,7 +42,7 @@ docker exec command-vm guest-exec --wait systemctl is-system-running
 Behavior:
 
 - `--wait` waits for the QEMU guest agent before sending the command.
-- stdout and stderr from the guest command are returned to the host terminal.
+- stdout and stderr from the guest command stream to the host terminal.
 - `guest-exec` exits with the guest command's exit code.
 - A single command string containing spaces runs through `/bin/sh -c`.
 - Multiple arguments are sent as argv form.

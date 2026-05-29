@@ -128,7 +128,7 @@ docker exec ubuntu-vm guest-exec --wait id user
 
 `guest-exec` uses the QEMU guest agent. `--wait` waits for the agent to become available before sending the command.
 
-The command's stdout and stderr are returned to your terminal, and the `guest-exec` process exits with the guest command's exit code.
+The command's stdout and stderr stream to your terminal while the command runs, and the `guest-exec` process exits with the guest command's exit code.
 
 ## noVNC
 

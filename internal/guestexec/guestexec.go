@@ -2,7 +2,9 @@ package guestexec
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +58,7 @@ type Executor struct {
 	PollTimeout       time.Duration
 	AgentWaitTimeout  time.Duration
 	AgentWaitInterval time.Duration
+	TempPath          func(int, string) string
 }
 
 func NewExecutor(client ...Client) *Executor {
@@ -103,6 +106,15 @@ func (e *Executor) Run(ctx context.Context, inv Invocation) (Result, error) {
 	return e.RunOnDomain(ctx, domain, inv)
 }
 
+func (e *Executor) RunStreaming(ctx context.Context, inv Invocation, stdout io.Writer, stderr io.Writer) (Result, error) {
+	e.applyDefaults()
+	domain, err := e.discoverDomain(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	return e.RunOnDomainStreaming(ctx, domain, inv, stdout, stderr)
+}
+
 func (e *Executor) RunOnDomain(ctx context.Context, domain string, inv Invocation) (Result, error) {
 	e.applyDefaults()
 	if inv.Wait {
@@ -115,6 +127,43 @@ func (e *Executor) RunOnDomain(ctx context.Context, domain string, inv Invocatio
 		return Result{}, err
 	}
 	return e.waitForCommand(ctx, domain, pid)
+}
+
+func (e *Executor) RunOnDomainStreaming(ctx context.Context, domain string, inv Invocation, stdout io.Writer, stderr io.Writer) (Result, error) {
+	e.applyDefaults()
+	if inv.Wait {
+		if err := e.waitForAgent(ctx, domain); err != nil {
+			return Result{}, err
+		}
+	}
+	stdoutPath := e.TempPath(os.Getpid(), "stdout")
+	stderrPath := e.TempPath(os.Getpid(), "stderr")
+	if err := e.createGuestFile(ctx, domain, stdoutPath); err != nil {
+		return Result{}, err
+	}
+	if err := e.createGuestFile(ctx, domain, stderrPath); err != nil {
+		_ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath)
+		return Result{}, err
+	}
+	defer func() { _ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath, stderrPath) }()
+	stdoutHandle, err := e.openGuestFile(ctx, domain, stdoutPath, "r")
+	if err != nil {
+		_ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath, stderrPath)
+		return Result{}, err
+	}
+	defer func() { _ = e.closeGuestFile(context.WithoutCancel(ctx), domain, stdoutHandle) }()
+	stderrHandle, err := e.openGuestFile(ctx, domain, stderrPath, "r")
+	if err != nil {
+		_ = e.removeGuestFiles(context.WithoutCancel(ctx), domain, stdoutPath, stderrPath)
+		return Result{}, err
+	}
+	defer func() { _ = e.closeGuestFile(context.WithoutCancel(ctx), domain, stderrHandle) }()
+
+	pid, err := e.startStreamingCommand(ctx, domain, inv, stdoutPath, stderrPath)
+	if err != nil {
+		return Result{}, err
+	}
+	return e.waitForStreamingCommand(ctx, domain, pid, stdoutHandle, stderrHandle, stdout, stderr)
 }
 
 func (e *Executor) applyDefaults() {
@@ -132,6 +181,9 @@ func (e *Executor) applyDefaults() {
 	}
 	if e.AgentWaitInterval == 0 {
 		e.AgentWaitInterval = defaultAgentWaitInterval
+	}
+	if e.TempPath == nil {
+		e.TempPath = defaultTempPath
 	}
 }
 
@@ -198,27 +250,38 @@ func (e *Executor) startCommand(ctx context.Context, domain string, inv Invocati
 	return resp.PID, nil
 }
 
+func (e *Executor) startStreamingCommand(ctx context.Context, domain string, inv Invocation, stdoutPath string, stderrPath string) (int, error) {
+	args := []string{"-c", streamingScript, "docker-vm-runner-guest-exec", stdoutPath, stderrPath, inv.Path}
+	args = append(args, inv.Args...)
+	raw, err := e.Client.Execute(ctx, domain, Command{
+		Execute: "guest-exec",
+		Arguments: map[string]any{
+			"path":           "/bin/sh",
+			"arg":            args,
+			"capture-output": false,
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	var resp struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return 0, fmt.Errorf("decode guest-exec response: %w", err)
+	}
+	if resp.PID == 0 {
+		return 0, fmt.Errorf("guest-exec did not return a PID")
+	}
+	return resp.PID, nil
+}
+
 func (e *Executor) waitForCommand(ctx context.Context, domain string, pid int) (Result, error) {
 	deadline := time.Now().Add(e.PollTimeout)
 	for {
-		raw, err := e.Client.Execute(ctx, domain, Command{
-			Execute:   "guest-exec-status",
-			Arguments: map[string]any{"pid": pid},
-		})
+		status, err := e.commandStatus(ctx, domain, pid)
 		if err != nil {
-			if errors.Is(err, ErrAgentNotConnected) {
-				return Result{}, fmt.Errorf("guest agent disconnected while waiting for command result: %w", err)
-			}
 			return Result{}, err
-		}
-		var status struct {
-			Exited   bool   `json:"exited"`
-			ExitCode int    `json:"exitcode"`
-			OutData  string `json:"out-data"`
-			ErrData  string `json:"err-data"`
-		}
-		if err := json.Unmarshal(raw, &status); err != nil {
-			return Result{}, fmt.Errorf("decode guest-exec-status response: %w", err)
 		}
 		if status.Exited {
 			stdout, err := decodeBase64Field("out-data", status.OutData)
@@ -238,6 +301,166 @@ func (e *Executor) waitForCommand(ctx context.Context, domain string, pid int) (
 			return Result{}, err
 		}
 	}
+}
+
+func (e *Executor) waitForStreamingCommand(ctx context.Context, domain string, pid int, stdoutHandle int, stderrHandle int, stdout io.Writer, stderr io.Writer) (Result, error) {
+	deadline := time.Now().Add(e.PollTimeout)
+	var result Result
+	for {
+		if err := e.readAvailable(ctx, domain, stdoutHandle, &result.Stdout, stdout); err != nil {
+			return Result{}, err
+		}
+		if err := e.readAvailable(ctx, domain, stderrHandle, &result.Stderr, stderr); err != nil {
+			return Result{}, err
+		}
+		status, err := e.commandStatus(ctx, domain, pid)
+		if err != nil {
+			return Result{}, err
+		}
+		if status.Exited {
+			if err := e.readAvailable(ctx, domain, stdoutHandle, &result.Stdout, stdout); err != nil {
+				return Result{}, err
+			}
+			if err := e.readAvailable(ctx, domain, stderrHandle, &result.Stderr, stderr); err != nil {
+				return Result{}, err
+			}
+			result.ExitCode = status.ExitCode
+			return result, nil
+		}
+		if time.Now().After(deadline) {
+			return Result{}, ErrCommandTimeout
+		}
+		if err := e.Sleep(ctx, e.PollInterval); err != nil {
+			return Result{}, err
+		}
+	}
+}
+
+func (e *Executor) commandStatus(ctx context.Context, domain string, pid int) (guestExecStatus, error) {
+	raw, err := e.Client.Execute(ctx, domain, Command{
+		Execute:   "guest-exec-status",
+		Arguments: map[string]any{"pid": pid},
+	})
+	if err != nil {
+		if errors.Is(err, ErrAgentNotConnected) {
+			return guestExecStatus{}, fmt.Errorf("guest agent disconnected while waiting for command result: %w", err)
+		}
+		return guestExecStatus{}, err
+	}
+	var status guestExecStatus
+	if err := json.Unmarshal(raw, &status); err != nil {
+		return guestExecStatus{}, fmt.Errorf("decode guest-exec-status response: %w", err)
+	}
+	return status, nil
+}
+
+type guestExecStatus struct {
+	Exited   bool   `json:"exited"`
+	ExitCode int    `json:"exitcode"`
+	OutData  string `json:"out-data"`
+	ErrData  string `json:"err-data"`
+}
+
+func (e *Executor) createGuestFile(ctx context.Context, domain string, path string) error {
+	handle, err := e.openGuestFile(ctx, domain, path, "w+")
+	if err != nil {
+		return err
+	}
+	return e.closeGuestFile(ctx, domain, handle)
+}
+
+func (e *Executor) openGuestFile(ctx context.Context, domain string, path string, mode string) (int, error) {
+	raw, err := e.Client.Execute(ctx, domain, Command{
+		Execute: "guest-file-open",
+		Arguments: map[string]any{
+			"path": path,
+			"mode": mode,
+		},
+	})
+	if err != nil {
+		return 0, err
+	}
+	var handle int
+	if err := json.Unmarshal(raw, &handle); err != nil {
+		return 0, fmt.Errorf("decode guest-file-open response: %w", err)
+	}
+	if handle == 0 {
+		return 0, fmt.Errorf("guest-file-open did not return a handle")
+	}
+	return handle, nil
+}
+
+func (e *Executor) closeGuestFile(ctx context.Context, domain string, handle int) error {
+	_, err := e.Client.Execute(ctx, domain, Command{
+		Execute:   "guest-file-close",
+		Arguments: map[string]any{"handle": handle},
+	})
+	if err != nil {
+		return fmt.Errorf("close guest file handle %d: %w", handle, err)
+	}
+	return nil
+}
+
+func (e *Executor) readAvailable(ctx context.Context, domain string, handle int, captured *[]byte, writer io.Writer) error {
+	for {
+		chunk, eof, err := e.readGuestFile(ctx, domain, handle)
+		if err != nil {
+			return err
+		}
+		if len(chunk) > 0 {
+			*captured = append(*captured, chunk...)
+			if writer != nil {
+				if _, err := writer.Write(chunk); err != nil {
+					return err
+				}
+			}
+		}
+		if eof || len(chunk) == 0 {
+			return nil
+		}
+	}
+}
+
+func (e *Executor) readGuestFile(ctx context.Context, domain string, handle int) ([]byte, bool, error) {
+	raw, err := e.Client.Execute(ctx, domain, Command{
+		Execute: "guest-file-read",
+		Arguments: map[string]any{
+			"handle": handle,
+			"count":  65536,
+		},
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	var resp struct {
+		Count int    `json:"count"`
+		Buf   string `json:"buf-b64"`
+		EOF   bool   `json:"eof"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, false, fmt.Errorf("decode guest-file-read response: %w", err)
+	}
+	chunk, err := decodeBase64Field("buf-b64", resp.Buf)
+	if err != nil {
+		return nil, false, err
+	}
+	return chunk, resp.EOF, nil
+}
+
+func (e *Executor) removeGuestFiles(ctx context.Context, domain string, paths ...string) error {
+	args := append([]string{"-f"}, paths...)
+	_, err := e.Client.Execute(ctx, domain, Command{
+		Execute: "guest-exec",
+		Arguments: map[string]any{
+			"path":           "rm",
+			"arg":            args,
+			"capture-output": false,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("remove guest output files: %w", err)
+	}
+	return nil
 }
 
 func decodeBase64Field(name string, value string) ([]byte, error) {
@@ -262,13 +485,26 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+func defaultTempPath(pid int, stream string) string {
+	var token [8]byte
+	if _, err := rand.Read(token[:]); err == nil {
+		return fmt.Sprintf("/tmp/docker-vm-runner-guest-exec-%d-%s-%s", pid, hex.EncodeToString(token[:]), stream)
+	}
+	return fmt.Sprintf("/tmp/docker-vm-runner-guest-exec-%d-%d-%s", pid, time.Now().UnixNano(), stream)
+}
+
+const streamingScript = `out=$1
+err=$2
+shift 2
+"$@" >"$out" 2>"$err"`
+
 func Main(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer) int {
 	inv, err := ParseArgs(args)
 	if err != nil {
 		fmt.Fprint(stderr, usage())
 		return 1
 	}
-	result, err := NewExecutor().Run(ctx, inv)
+	result, err := NewExecutor().RunStreaming(ctx, inv, stdout, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		if errors.Is(err, ErrAgentNotConnected) || errors.Is(err, ErrAgentWaitTimeout) {
@@ -276,8 +512,6 @@ func Main(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer
 		}
 		return 1
 	}
-	_, _ = stdout.Write(result.Stdout)
-	_, _ = stderr.Write(result.Stderr)
 	return result.ExitCode
 }
 

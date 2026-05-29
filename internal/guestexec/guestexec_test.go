@@ -1,6 +1,7 @@
 package guestexec
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -83,6 +84,70 @@ func TestRunOnDomainExecutesKnownDomain(t *testing.T) {
 	}
 	if len(client.domainsRequested) != 0 {
 		t.Fatalf("ListRunningDomains was called: %#v", client.domainsRequested)
+	}
+}
+
+func TestRunStreamingWritesOutputBeforeCommandExit(t *testing.T) {
+	client := &fakeClient{domains: []string{"test-vm"}}
+	client.responses = []response{
+		{raw: rawJSON(t, `101`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `102`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `201`)},
+		{raw: rawJSON(t, `202`)},
+		{raw: rawJSON(t, `{"pid":42}`)},
+		{raw: rawJSON(t, `{"count":6,"buf-b64":"`+b64("first\n")+`","eof":true}`)},
+		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
+		{raw: rawJSON(t, `{"exited":false}`)},
+		{raw: rawJSON(t, `{"count":7,"buf-b64":"`+b64("second\n")+`","eof":true}`)},
+		{raw: rawJSON(t, `{"count":5,"buf-b64":"`+b64("warn\n")+`","eof":true}`)},
+		{raw: rawJSON(t, `{"exited":true,"exitcode":3}`)},
+		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
+		{raw: rawJSON(t, `{"count":0,"eof":true}`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `{}`)},
+		{raw: rawJSON(t, `{}`)},
+	}
+	var stdout, stderr bytes.Buffer
+	executor := NewExecutor(client)
+	executor.Sleep = func(context.Context, time.Duration) error {
+		if got := stdout.String(); got != "first\n" {
+			t.Fatalf("stdout before command exit = %q", got)
+		}
+		return nil
+	}
+	tempPathCount := 0
+	executor.TempPath = func(int, string) string {
+		tempPathCount++
+		if tempPathCount == 1 {
+			return "/tmp/docker-vm-runner-guest-exec-test.out"
+		}
+		return "/tmp/docker-vm-runner-guest-exec-test.err"
+	}
+
+	result, err := executor.RunStreaming(context.Background(), Invocation{Path: "echo", Args: []string{"hello"}}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunStreaming returned error: %v", err)
+	}
+	if result.ExitCode != 3 {
+		t.Fatalf("ExitCode = %d", result.ExitCode)
+	}
+	if stdout.String() != "first\nsecond\n" || string(result.Stdout) != stdout.String() {
+		t.Fatalf("stdout = %q result = %q", stdout.String(), string(result.Stdout))
+	}
+	if stderr.String() != "warn\n" || string(result.Stderr) != stderr.String() {
+		t.Fatalf("stderr = %q result = %q", stderr.String(), string(result.Stderr))
+	}
+	execArgs := client.commands[6].Arguments.(map[string]any)
+	if execArgs["path"] != "/bin/sh" || execArgs["capture-output"] != false {
+		t.Fatalf("streaming guest-exec args = %#v", execArgs)
+	}
+	if got := strings.Join(execArgs["arg"].([]string), "\x00"); !strings.Contains(got, "\x00echo\x00hello") {
+		t.Fatalf("streaming wrapper args = %q", got)
+	}
+	if client.commands[len(client.commands)-1].Execute != "guest-exec" {
+		t.Fatalf("cleanup command = %#v", client.commands[len(client.commands)-1])
 	}
 }
 

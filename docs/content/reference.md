@@ -36,7 +36,7 @@ docker exec ubuntu-vm guest-exec --wait id user
 
 A single command string containing spaces is run through `/bin/sh -c`. Multiple arguments are sent as argv form.
 
-`guest-exec` returns stdout and stderr from the guest command and exits with the guest command's exit code.
+`guest-exec` streams stdout and stderr from the guest command and exits with the guest command's exit code.
 
 ## Core environment variables
 
