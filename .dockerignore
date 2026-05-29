@@ -2,6 +2,7 @@ local/
 .git/
 bin/
 tmp/
+site/
 *.qcow2
 *.img
 *.iso
