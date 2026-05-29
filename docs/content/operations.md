@@ -6,6 +6,7 @@ Mount `/data` when you want VM state to survive container removal:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -16,6 +17,7 @@ Use `PERSIST=0` for a disposable VM:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -e PERSIST=0 \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -31,6 +33,7 @@ Mount both when you want predictable repeated runs:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -v docker-vm-runner-data:/data \
   -v docker-vm-runner-config:/config \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -85,7 +88,7 @@ If you require KVM and do not want fallback behavior, set:
 
 ## Host permissions
 
-For the default NAT and console flow, start without `--privileged`. Add only the host access required by the features you use:
+For the default NAT and console flow, start without `--privileged`. The examples include `/dev/kvm` for acceleration; remove it on hosts without KVM. Add only the host access required by the features you use:
 
 | Feature | Typical Docker option |
 | --- | --- |

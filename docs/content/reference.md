@@ -158,7 +158,7 @@ Publish container ports with Docker `-p` when you want to access them from the h
 
 ## Common Docker permissions
 
-The basic startup path does not require `--privileged`.
+The VM startup examples use `--device /dev/kvm` by default for hardware acceleration. Remove it on hosts without KVM. The basic startup path does not require `--privileged`.
 
 | Need | Typical Docker option |
 | --- | --- |

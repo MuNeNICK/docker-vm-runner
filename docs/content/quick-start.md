@@ -9,18 +9,15 @@ For the default interactive flow, use:
 - an interactive terminal with `-it`
 - a `/data` mount if you want to reuse the VM after the container exits
 
-For hardware acceleration, pass `/dev/kvm` when it is available on the host:
+The VM examples below expose `/dev/kvm` for hardware acceleration. Remove `--device /dev/kvm` if your host does not provide KVM.
 
-```bash
---device /dev/kvm
-```
-
-Start without `--privileged` for the default NAT and console flow. Add host devices or additional permissions only for features that need them.
+Start without `--privileged` for the default NAT and console flow. Add broader permissions only for features that need them.
 
 ## Start a VM
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -51,12 +48,32 @@ Detaching from the console does not necessarily mean the VM has shut down. Use t
 
 ## Run without attaching to the console
 
+Start the container in the background when you want the VM to keep running while you use another terminal:
+
 ```bash
-docker run --rm \
+docker run -d --name docker-vm-runner \
+  --device /dev/kvm \
   -e NO_CONSOLE=1 \
+  -e VM_NAME=quickstart \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
+
+Follow the startup logs:
+
+```bash
+docker logs -f docker-vm-runner
+```
+
+Attach to the VM console from inside the running container:
+
+```bash
+docker exec -it docker-vm-runner virsh -c qemu:///system console quickstart
+```
+
+Replace `quickstart` with your `VM_NAME` when you use a different VM name. Press `Ctrl+]` to detach from the VM console.
+
+`docker attach docker-vm-runner` reconnects to the container process, not directly to a VM console that was skipped with `NO_CONSOLE=1`. Use `docker exec ... virsh console` for a headless container.
 
 ## Pick an image
 
@@ -78,6 +95,7 @@ Run a specific image:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest

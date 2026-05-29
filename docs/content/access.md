@@ -8,6 +8,7 @@ The default mode attaches to the VM console:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
@@ -26,6 +27,7 @@ Publish the port from the container:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 2222:2222 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -43,6 +45,7 @@ Set a different password:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 2222:2222 \
   -e GUEST_PASSWORD='change-me' \
   -v docker-vm-runner-data:/data \
@@ -53,6 +56,7 @@ Inject an SSH public key:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 2222:2222 \
   -e SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)" \
   -v docker-vm-runner-data:/data \
@@ -65,6 +69,7 @@ Use `PORT_FWD` to forward additional ports through the default NAT network:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 8080:8080 \
   -e PORT_FWD=8080:80 \
   -v docker-vm-runner-data:/data \
@@ -83,6 +88,7 @@ Enable browser access with noVNC:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 6080:6080 \
   -e GRAPHICS=novnc \
   -v docker-vm-runner-data:/data \
@@ -103,6 +109,7 @@ Use VNC without noVNC:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 5900:5900 \
   -e GRAPHICS=vnc \
   -v docker-vm-runner-data:/data \
@@ -117,6 +124,7 @@ Enable Redfish with a non-default password:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -p 8443:8443 \
   -e REDFISH_ENABLE=1 \
   -e REDFISH_PASSWORD='change-me' \

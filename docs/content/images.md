@@ -46,6 +46,7 @@ Use `DISTRO` with a catalog image ID:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -e DISTRO=ubuntu-24.04-cloud-amd64 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -71,6 +72,7 @@ Remote image:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -e BOOT_FROM=https://example.com/image.qcow2 \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -80,6 +82,7 @@ Installer ISO:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -e BOOT_FROM=https://example.com/installer.iso \
   -v docker-vm-runner-data:/data \
   ghcr.io/munenick/docker-vm-runner:latest
@@ -89,6 +92,7 @@ Local file:
 
 ```bash
 docker run --rm -it \
+  --device /dev/kvm \
   -v "$PWD/images:/boot-media:ro" \
   -v docker-vm-runner-data:/data \
   -e BOOT_FROM=/boot-media/image.qcow2 \
