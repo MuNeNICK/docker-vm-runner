@@ -123,6 +123,20 @@ docker run --rm \
 
 The guest still needs to mount the shared filesystem using the tag from `FILESYSTEM_TARGET`.
 
+Inside the guest, mount the 9p example with:
+
+```bash
+sudo mkdir -p /mnt/shared
+sudo mount -t 9p -o trans=virtio,version=9p2000.L shared /mnt/shared
+```
+
+Mount the virtiofs example with:
+
+```bash
+sudo mkdir -p /mnt/shared
+sudo mount -t virtiofs shared /mnt/shared
+```
+
 ## Host Block Devices
 
 Attach a host block device when the VM must see the real device instead of a qcow2 file.

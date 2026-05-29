@@ -145,6 +145,10 @@ To boot with Direct mode from Docker, allow Docker to expose the dynamic macvtap
 
 ```bash
 MACVTAP_MAJOR="$(awk '$2 == "macvtap" { print $1 }' /proc/devices)"
+if [ -z "$MACVTAP_MAJOR" ]; then
+  echo "macvtap is not available on this host" >&2
+  exit 1
+fi
 
 docker run -d --name docker-vm-runner-direct \
   --network host \

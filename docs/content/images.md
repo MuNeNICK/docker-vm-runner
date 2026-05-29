@@ -64,6 +64,21 @@ Cloud images are usually the best starting point for day-to-day use.
 
 Use ISO images when you want to run an installer.
 
+## ISO installs
+
+When an ISO-backed persistent VM stops after installation, `docker-vm-runner` treats it as installed. The next run reuses the VM disk and boots from disk instead of attaching the ISO again.
+
+Keep the ISO attached on the next run when you need to boot the installer or rescue media again:
+
+```bash
+docker run --rm -it \
+  --device /dev/kvm \
+  -e BOOT_FROM=https://example.com/installer.iso \
+  -e FORCE_ISO=1 \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
 ## Boot from a custom source
 
 Use `BOOT_FROM` for a URL, local path, OCI reference, or ISO.

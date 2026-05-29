@@ -96,4 +96,5 @@ If you require KVM and do not want fallback behavior, set:
 | --- | --- |
 | KVM acceleration | `--device /dev/kvm` |
 | Host block device passthrough | `--device /dev/<device>` |
+| Intel GPU acceleration with `GPU=intel` | `--device /dev/dri/renderD128` |
 | Access to local boot media | `-v /host/path:/container/path:ro` |

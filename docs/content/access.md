@@ -153,3 +153,11 @@ docker run --rm -it \
 ```
 
 The Redfish endpoint listens on port `8443` by default.
+
+Connect with the Redfish username and the password you set:
+
+```bash
+curl -k -u admin:change-me https://localhost:8443/redfish/v1/
+```
+
+The endpoint uses a self-signed certificate. Change `REDFISH_USERNAME` if you do not want to use the default `admin` user.

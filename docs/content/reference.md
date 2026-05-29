@@ -164,4 +164,5 @@ The VM startup examples use `--device /dev/kvm` for better performance. Remove i
 | --- | --- |
 | KVM acceleration | `--device /dev/kvm` |
 | Host block device passthrough | `--device /dev/<device>` |
+| Intel GPU acceleration with `GPU=intel` | `--device /dev/dri/renderD128` |
 | Local boot media or cloud-init files | `-v /host/path:/container/path:ro` |
