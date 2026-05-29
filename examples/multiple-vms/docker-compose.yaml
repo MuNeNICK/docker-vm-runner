@@ -1,0 +1,55 @@
+name: docker-qemu-multiple-vms
+
+x-vm-common: &vm-common
+  image: ghcr.io/munenick/docker-vm-runner:latest
+  restart: unless-stopped
+  devices:
+    # Remove this device on hosts without KVM; the VMs will use slower emulation.
+    - /dev/kvm:/dev/kvm
+
+x-vm-env: &vm-env
+  NO_CONSOLE: "1"
+  REQUIRE_KVM: "0"
+  GUEST_PASSWORD: "password"
+
+services:
+  ubuntu:
+    <<: *vm-common
+    container_name: ubuntu-vm
+    hostname: ubuntu-vm
+    environment:
+      <<: *vm-env
+      GUEST_NAME: ubuntu-vm
+      DISTRO: ubuntu-24.04-cloud-amd64
+      CPUS: "2"
+      MEMORY: "4096"
+      DISK_SIZE: 30G
+      GRAPHICS: novnc
+    ports:
+      - "2222:2222"
+      - "6080:6080"
+    volumes:
+      - ubuntu-vm-data:/data
+      - catalog-cache:/config
+
+  alpine:
+    <<: *vm-common
+    container_name: alpine-vm
+    hostname: alpine-vm
+    environment:
+      <<: *vm-env
+      GUEST_NAME: alpine-vm
+      DISTRO: alpine-3.22-cloud-amd64
+      CPUS: "1"
+      MEMORY: "2048"
+      DISK_SIZE: 12G
+    ports:
+      - "2223:2222"
+    volumes:
+      - alpine-vm-data:/data
+      - catalog-cache:/config
+
+volumes:
+  ubuntu-vm-data:
+  alpine-vm-data:
+  catalog-cache:
