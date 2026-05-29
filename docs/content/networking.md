@@ -84,22 +84,14 @@ Required variables:
 -e NETWORK_BRIDGE=br0
 ```
 
-Preview the generated VM XML:
+Preview the configuration:
 
 ```bash
 docker run --rm \
   -e DISTRO=alpine-3.22-cloud-amd64 \
   -e NETWORK_MODE=bridge \
   -e NETWORK_BRIDGE=docker0 \
-  ghcr.io/munenick/docker-vm-runner:latest --show-xml
-```
-
-The XML contains a libvirt bridge interface:
-
-```xml
-<interface type="bridge">
-  <source bridge="docker0"/>
-</interface>
+  ghcr.io/munenick/docker-vm-runner:latest --show-config
 ```
 
 To boot with bridge mode from Docker, the bridge must be visible to the container and libvirt must be able to create a tap device. One verified headless shape is:
@@ -124,13 +116,7 @@ When bridge mode is the only NIC, connect to the VM through the bridged network 
 
 ## Direct Mode
 
-Direct mode uses libvirt direct networking. The VM NIC is attached to a host interface, and the generated XML uses `mode="bridge"`:
-
-```xml
-<interface type="direct">
-  <source dev="enp88s0" mode="bridge"/>
-</interface>
-```
+Direct mode attaches the VM NIC to a host interface without creating a Linux bridge first. Use it when you need the VM to use a specific host NIC path and you understand the host network exposure.
 
 Required variables:
 
