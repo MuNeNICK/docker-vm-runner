@@ -189,6 +189,97 @@ curl -k -I https://localhost:6080/
 docker compose down -v
 ```
 
+## IPMI Control With Ironic
+
+Directory:
+
+```text
+examples/ipmi-ironic/
+```
+
+Files:
+
+- `docker-compose.yaml` - runs Ironic, an Ironic CLI container, and one IPMI-enabled VM.
+- `README.md` - shows Ironic node registration, validation, and boot-device management through IPMI.
+
+### Use Case
+
+Use this example when you want to check that external bare-metal tooling can operate `docker-vm-runner` through IPMI instead of SSH or `guest-exec`.
+
+### What It Reproduces
+
+The example reproduces a minimal bare-metal control plane:
+
+- `ironic`: Metal3 Ironic API service.
+- `ironic-client`: CLI container used to register and operate the node.
+- `ipmi-vm`: a `docker-vm-runner` VM with IPMI and noVNC enabled.
+
+The VM has an Alpine installer ISO attached as virtual CD media and an empty working disk. Ironic uses IPMI to validate the node and manage the boot device through VirtualBMC.
+
+This is not a full OpenStack deployment flow. It does not run Keystone, Neutron, Inspector, or automated image deployment.
+
+### Run
+
+Run it from the example directory:
+
+```bash
+cd examples/ipmi-ironic
+docker compose up -d
+```
+
+Check that the IPMI endpoint answers:
+
+```bash
+ipmitool -I lanplus -U admin -P ipmi-lab-password -H localhost -p 623 power status
+```
+
+Register the VM in Ironic:
+
+```bash
+docker compose exec ironic-client baremetal node create \
+  --name ipmi-vm \
+  --driver ipmi \
+  --management-interface ipmitool \
+  --power-interface ipmitool \
+  --boot-interface pxe \
+  --deploy-interface ramdisk \
+  --vendor-interface no-vendor \
+  --driver-info ipmi_address=ipmi-vm \
+  --driver-info ipmi_port=623 \
+  --driver-info ipmi_username=admin \
+  --driver-info ipmi_password=ipmi-lab-password \
+  --property cpu_arch=x86_64 \
+  --property cpus=2 \
+  --property memory_mb=4096 \
+  --property local_gb=8
+```
+
+Use Ironic to validate the node and manage the boot device:
+
+```bash
+docker compose exec ironic-client baremetal node validate ipmi-vm
+docker compose exec ironic-client baremetal node boot device show ipmi-vm
+docker compose exec ironic-client baremetal node boot device set ipmi-vm disk
+docker compose exec ironic-client baremetal node boot device set ipmi-vm cdrom
+```
+
+Remove containers and persistent VM state:
+
+```bash
+docker compose down -v
+```
+
+See `examples/ipmi-ironic/README.md` for the full walkthrough and caveats.
+
+### Verification
+
+Basic checks:
+
+```bash
+docker compose config
+docker compose run --rm --no-deps ipmi-vm --dry-run
+```
+
 ## iPXE Boot With netboot.xyz
 
 Directory:

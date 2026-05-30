@@ -1,0 +1,69 @@
+name: docker-qemu-ipmi-ironic
+
+services:
+  ironic:
+    image: quay.io/metal3-io/ironic:latest
+    container_name: ipmi-ironic
+    restart: unless-stopped
+    environment:
+      PROVISIONING_INTERFACE: eth0
+      IRONIC_AUTOMATED_CLEAN: "false"
+      IRONIC_FAST_TRACK: "true"
+    command: ["/bin/sh", "-lc", "exec /bin/runironic"]
+    ports:
+      - "6385:6385"
+    networks:
+      - ipmi-net
+
+  ironic-client:
+    image: quay.io/metal3-io/ironic-client:latest
+    container_name: ipmi-ironic-client
+    restart: unless-stopped
+    depends_on:
+      - ironic
+      - ipmi-vm
+    environment:
+      OS_AUTH_TYPE: none
+      OS_ENDPOINT: http://ironic:6385
+      OS_BAREMETAL_API_VERSION: latest
+    entrypoint: ["/bin/sh", "-lc"]
+    command: ["sleep infinity"]
+    networks:
+      - ipmi-net
+
+  ipmi-vm:
+    image: ghcr.io/munenick/docker-vm-runner:latest
+    container_name: ipmi-vm
+    hostname: ipmi-vm
+    restart: unless-stopped
+    devices:
+      # Remove this device on hosts without KVM; the VM will use slower emulation.
+      - /dev/kvm:/dev/kvm
+    environment:
+      GUEST_NAME: ipmi-vm
+      BOOT_FROM: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/alpine-standard-3.22.2-x86_64.iso
+      BLANK_DISK: "1"
+      FORCE_ISO: "1"
+      CLOUD_INIT: "0"
+      DISK_SIZE: 8G
+      GRAPHICS: novnc
+      IPMI_ENABLE: "1"
+      IPMI_USERNAME: admin
+      IPMI_PASSWORD: ipmi-lab-password
+      REQUIRE_KVM: "0"
+    ports:
+      - "6080:6080"
+      - "623:623/udp"
+    volumes:
+      - ipmi-vm-data:/data
+    networks:
+      ipmi-net:
+        aliases:
+          - ipmi-vm
+
+networks:
+  ipmi-net:
+    driver: bridge
+
+volumes:
+  ipmi-vm-data:
