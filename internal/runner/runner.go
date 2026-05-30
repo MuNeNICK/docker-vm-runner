@@ -615,6 +615,10 @@ func AccessLines(cfg config.VM) []string {
 		lines = append(lines, fmt.Sprintf("Redfish  https://localhost:%d/", cfg.RedfishPort))
 		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d", cfg.RedfishPort, cfg.RedfishPort))
 	}
+	if cfg.IPMIEnabled {
+		lines = append(lines, fmt.Sprintf("IPMI     ipmitool -I lanplus -U %s -P %s -H localhost -p %d power status", cfg.IPMIUser, cfg.IPMIPassword, cfg.IPMIPort))
+		portsToPublish = append(portsToPublish, fmt.Sprintf("-p %d:%d/udp", cfg.IPMIPort, cfg.IPMIPort))
+	}
 	if len(cfg.PortForwards) > 0 && hasUserNIC {
 		forwardLines := make([]string, 0, len(cfg.PortForwards))
 		for _, forward := range cfg.PortForwards {
@@ -758,6 +762,7 @@ func toSnake(name string) string {
 		"v_m":       "vm",
 		"c_p_u":     "cpu",
 		"i_p_x_e":   "ipxe",
+		"i_p_m_i":   "ipmi",
 		"r_o_m":     "rom",
 		"i_d":       "id",
 		"m_b":       "mb",

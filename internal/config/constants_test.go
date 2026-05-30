@@ -66,7 +66,7 @@ func TestIPXEROMsOnlyReferenceSupportedArchitectures(t *testing.T) {
 }
 
 func TestSensitiveFields(t *testing.T) {
-	for _, field := range []string{"password", "redfish_password"} {
+	for _, field := range []string{"password", "redfish_password", "ipmi_password"} {
 		if !SensitiveFields[field] {
 			t.Fatalf("missing sensitive field %q", field)
 		}

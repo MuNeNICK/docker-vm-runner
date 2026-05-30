@@ -26,6 +26,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/guestexec"
 	"github.com/munenick/docker-vm-runner/internal/hostinfo"
 	"github.com/munenick/docker-vm-runner/internal/images"
+	"github.com/munenick/docker-vm-runner/internal/ipmi"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/oci"
 	"github.com/munenick/docker-vm-runner/internal/password"
@@ -50,6 +51,7 @@ type ConcreteLifecycle struct {
 	Domain          libvirtmgr.Domain
 	Service         serviceSupervisor
 	Redfish         redfishManager
+	IPMI            ipmiManager
 	NoVNC           novncProxy
 	TPM             tpmSupervisor
 	Console         consoleRunner
@@ -75,6 +77,7 @@ type ConcreteLifecycle struct {
 	disablePasst   bool
 	firmware       firmware.Result
 	redfishProcess redfish.Process
+	ipmiResult     ipmi.Result
 }
 
 type libvirtManager interface {
@@ -93,6 +96,11 @@ type serviceSupervisor interface {
 
 type redfishManager interface {
 	Start(context.Context, redfish.Request) (redfish.Result, error)
+}
+
+type ipmiManager interface {
+	Start(context.Context, ipmi.Request) (ipmi.Result, error)
+	Stop(context.Context, ipmi.Result) error
 }
 
 type novncProxy interface {
@@ -120,6 +128,7 @@ func NewConcreteLifecycle(layout paths.Layout) *ConcreteLifecycle {
 		CommandRunner: *runner,
 		Service:       services.NewSupervisor(services.Options{}),
 		Redfish:       redfish.NewManager(redfish.Options{StateDir: layout.StateDir}),
+		IPMI:          ipmi.NewManager(ipmi.Options{StateDir: layout.StateDir}),
 		NoVNC:         vncproxy.New(vncproxy.Options{StateDir: layout.StateDir}),
 		TPM:           tpm.NewSupervisor(layout.StateDir),
 		Console:       console.NewRunner(),
@@ -164,6 +173,20 @@ func (l *ConcreteLifecycle) StartServices(ctx context.Context, cfg config.VM) (e
 			}
 			l.redfishProcess = result.Process
 		}
+	}
+	if cfg.IPMIEnabled && l.IPMI != nil {
+		result, err := l.IPMI.Start(ctx, ipmi.Request{
+			Enabled:    true,
+			User:       cfg.IPMIUser,
+			Password:   cfg.IPMIPassword,
+			Port:       cfg.IPMIPort,
+			SystemID:   cfg.IPMISystemID,
+			LibvirtURI: l.libvirtURI(),
+		})
+		if err != nil {
+			return err
+		}
+		l.ipmiResult = result
 	}
 	if cfg.NoVNCEnabled && l.NoVNC != nil {
 		if _, err := l.NoVNC.Start(ctx, vncproxy.Request{Enabled: true, NoVNCPort: cfg.NoVNCPort, VNCPort: cfg.VNCPort}); err != nil {
@@ -615,6 +638,12 @@ func (l *ConcreteLifecycle) StopServices(ctx context.Context, _ config.VM) error
 			return err
 		}
 		l.redfishProcess = nil
+	}
+	if l.ipmiResult.Started && l.IPMI != nil {
+		if err := l.IPMI.Stop(ctx, l.ipmiResult); err != nil {
+			return err
+		}
+		l.ipmiResult = ipmi.Result{}
 	}
 	if l.Service == nil {
 		return nil

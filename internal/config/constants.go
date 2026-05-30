@@ -106,4 +106,5 @@ var IPXEDefaultROMs = map[string]map[string]string{
 var SensitiveFields = map[string]bool{
 	"password":         true,
 	"redfish_password": true,
+	"ipmi_password":    true,
 }

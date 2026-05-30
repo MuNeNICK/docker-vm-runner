@@ -16,12 +16,16 @@ ARG VERSION_PASST=2026_01_20
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        gcc \
+        libvirt-dev \
+        pkg-config \
         python3 \
+        python3-dev \
         python3-venv \
         tar \
         wget \
     && python3 -m venv --system-site-packages /opt/docker-vm-runner/.venv \
-    && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir sushy-tools \
+    && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir sushy-tools virtualbmc \
     && mkdir -p /usr/share/docker-vm-runner/novnc \
     && wget -qO- "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
         | tar -xz --strip-components=1 -C /usr/share/docker-vm-runner/novnc \
@@ -71,6 +75,7 @@ RUN apt-get update \
         genisoimage \
         iproute2 \
         iptables \
+        ipmitool \
         ipxe-qemu \
         libvirt-clients \
         libvirt-daemon \

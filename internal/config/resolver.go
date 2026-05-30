@@ -81,6 +81,11 @@ type VM struct {
 	RedfishPort            int
 	RedfishSystemID        string
 	RedfishEnabled         bool
+	IPMIUser               string
+	IPMIPassword           string
+	IPMIPort               int
+	IPMISystemID           string
+	IPMIEnabled            bool
 	NICs                   []network.Config
 	PortForwards           []network.PortForward
 	Filesystems            []FilesystemShare
@@ -163,6 +168,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if err != nil {
 		return VM{}, err
 	}
+	ipmiPort, err := env.Int("IPMI_PORT", "623", 1, ptr(65535))
+	if err != nil {
+		return VM{}, err
+	}
 
 	bootFrom := strings.TrimSpace(env.Get("BOOT_FROM", ""))
 	catalogISO := strings.EqualFold(strings.TrimSpace(distroInfo.ImageType), "iso")
@@ -235,6 +244,14 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	redfishPassword := env.Get("REDFISH_PASSWORD", "password")
 	if redfishEnabled && redfishPassword == "password" {
 		return VM{}, fmt.Errorf("REDFISH_PASSWORD must be changed when REDFISH_ENABLE=1")
+	}
+	ipmiEnabled, err := env.Bool("IPMI_ENABLE", false)
+	if err != nil {
+		return VM{}, err
+	}
+	ipmiPassword := env.Get("IPMI_PASSWORD", "password")
+	if ipmiEnabled && ipmiPassword == "password" {
+		return VM{}, fmt.Errorf("IPMI_PASSWORD must be changed when IPMI_ENABLE=1")
 	}
 	bootMode, err := resolveBootModeSetting(env.Get("BOOT_MODE", "uefi"))
 	if err != nil {
@@ -402,6 +419,11 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		RedfishPort:            redfishPort,
 		RedfishSystemID:        env.Get("REDFISH_SYSTEM_ID", vmName),
 		RedfishEnabled:         redfishEnabled,
+		IPMIUser:               env.Get("IPMI_USERNAME", "admin"),
+		IPMIPassword:           ipmiPassword,
+		IPMIPort:               ipmiPort,
+		IPMISystemID:           env.Get("IPMI_SYSTEM_ID", vmName),
+		IPMIEnabled:            ipmiEnabled,
 		NICs:                   networkConfig.NICs,
 		PortForwards:           networkConfig.PortForwards,
 		Filesystems:            filesystems,

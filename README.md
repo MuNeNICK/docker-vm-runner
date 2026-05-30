@@ -2,7 +2,7 @@
 
 Run a real virtual machine from Docker.
 
-`docker-vm-runner` is for workflows where a normal container is not enough: full OS images, systemd, kernel behavior, firmware, installer media, disk layout testing, or VM access through SSH, VNC, noVNC, and Redfish.
+`docker-vm-runner` is for workflows where a normal container is not enough: full OS images, systemd, kernel behavior, firmware, installer media, disk layout testing, or VM access through SSH, VNC, noVNC, Redfish, and IPMI.
 
 The default experience is intentionally close to `docker run ubuntu`, but the guest is an actual VM backed by QEMU and libvirt.
 
@@ -54,7 +54,7 @@ For persistent disks, background startup, SSH, noVNC, Redfish, ISO installs, sto
 - Docker-first VM startup with QEMU and libvirt.
 - Public image catalog support for cloud images, installer ISOs, and disk images.
 - Boot from catalog entries, custom URLs, local media, OCI disk images, blank disks, ISO installers, and iPXE.
-- Serial console by default, plus optional SSH, VNC, noVNC, and Redfish access.
+- Serial console by default, plus optional SSH, VNC, noVNC, Redfish, and IPMI access.
 - Cloud-init user data, SSH key injection, and fixed default guest credentials.
 - Persistent VM state and image cache through `/data`.
 - NAT networking by default, with optional port forwarding, Bridge, Direct, and multi-NIC setups.

@@ -106,6 +106,16 @@ Streaming is implemented through QEMU guest agent file polling, not a PTY. Comma
 | `REDFISH_PORT` | `8443` | Redfish HTTPS port inside the container. |
 | `REDFISH_SYSTEM_ID` | VM name | Redfish system identifier. |
 
+## IPMI variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `IPMI_ENABLE` | `0` | Enable IPMI through VirtualBMC. |
+| `IPMI_USERNAME` | `admin` | IPMI username. |
+| `IPMI_PASSWORD` | `password` | IPMI password. Must be changed when IPMI is enabled. |
+| `IPMI_PORT` | `623` | IPMI UDP port inside the container. |
+| `IPMI_SYSTEM_ID` | VM name | VirtualBMC domain identifier. |
+
 ## Network variables
 
 The first NIC uses unnumbered variables. Additional NICs use `NETWORK2_...`, `NETWORK3_...`, and so on.

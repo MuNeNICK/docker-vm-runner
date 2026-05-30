@@ -396,6 +396,39 @@ func TestResolveRedfishRejectsDefaultPassword(t *testing.T) {
 	}
 }
 
+func TestResolveIPMI(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"IPMI_ENABLE":   "1",
+		"IPMI_USERNAME": "operator",
+		"IPMI_PASSWORD": "secret",
+		"IPMI_PORT":     "6623",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !cfg.IPMIEnabled {
+		t.Fatal("IPMIEnabled = false")
+	}
+	if cfg.IPMIUser != "operator" || cfg.IPMIPassword != "secret" || cfg.IPMIPort != 6623 {
+		t.Fatalf("ipmi = %#v", cfg)
+	}
+	if cfg.IPMISystemID != cfg.VMName {
+		t.Fatalf("IPMISystemID = %q, VMName = %q", cfg.IPMISystemID, cfg.VMName)
+	}
+}
+
+func TestResolveIPMIRejectsDefaultPassword(t *testing.T) {
+	resolver, _ := testResolver(t)
+	_, err := resolver.Resolve(MapEnv{"IPMI_ENABLE": "1"})
+	if err == nil {
+		t.Fatal("expected default password error")
+	}
+	if !strings.Contains(err.Error(), "IPMI_PASSWORD must be changed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestResolveRejectsUnsafeVMName(t *testing.T) {
 	resolver, _ := testResolver(t)
 	_, err := resolver.Resolve(MapEnv{"GUEST_NAME": "../outside"})

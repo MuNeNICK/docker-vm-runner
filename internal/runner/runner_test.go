@@ -24,6 +24,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/download"
 	"github.com/munenick/docker-vm-runner/internal/guestexec"
 	"github.com/munenick/docker-vm-runner/internal/hostinfo"
+	"github.com/munenick/docker-vm-runner/internal/ipmi"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
 	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/paths"
@@ -125,6 +126,10 @@ func TestAccessLinesIncludeConsoleRedfishAndPublish(t *testing.T) {
 		NoVNCPort:        6080,
 		RedfishEnabled:   true,
 		RedfishPort:      8443,
+		IPMIEnabled:      true,
+		IPMIUser:         "admin",
+		IPMIPassword:     "secret",
+		IPMIPort:         6623,
 		NICs:             []network.Config{{Mode: "user", Model: "virtio"}},
 		PortForwards:     []network.PortForward{{HostPort: 8080, GuestPort: 80}},
 	})
@@ -133,8 +138,9 @@ func TestAccessLinesIncludeConsoleRedfishAndPublish(t *testing.T) {
 		"SSH      ssh -p 2222 user@localhost",
 		"Console  https://localhost:6080/vnc.html?autoconnect=1&resize=scale",
 		"Redfish  https://localhost:8443/",
+		"IPMI     ipmitool -I lanplus -U admin -P secret -H localhost -p 6623 power status",
 		"Ports    8080->80",
-		"Publish  ",
+		"Publish  -p 2222:2222 -p 6080:6080 -p 8443:8443 -p 6623:6623/udp -p 8080:8080",
 	} {
 		if !strings.Contains(text, needle) {
 			t.Fatalf("missing %q in:\n%s", needle, text)
@@ -686,11 +692,14 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
 	redfishProcess := &fakeRedfishProcess{}
 	redfishManager := &fakeRedfishManager{process: redfishProcess}
+	ipmiProcess := &fakeIPMIProcess{}
+	ipmiManager := &fakeIPMIManager{process: ipmiProcess}
 	novnc := &fakeNoVNCProxy{}
 	lifecycle := NewConcreteLifecycle(testLayout(t))
 	lifecycle.Service = service
 	lifecycle.Manager = manager
 	lifecycle.Redfish = redfishManager
+	lifecycle.IPMI = ipmiManager
 	lifecycle.NoVNC = novnc
 	lifecycle.RedfishPool = libvirtmgr.StoragePoolRequest{Name: "default", TargetPath: filepath.Join(t.TempDir(), "pool")}
 
@@ -700,6 +709,11 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 		RedfishPassword: "secret",
 		RedfishPort:     8443,
 		RedfishSystemID: "vm1",
+		IPMIEnabled:     true,
+		IPMIUser:        "admin",
+		IPMIPassword:    "secret",
+		IPMIPort:        6623,
+		IPMISystemID:    "vm1",
 		NoVNCEnabled:    true,
 		NoVNCPort:       6080,
 		VNCPort:         5900,
@@ -707,11 +721,14 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartServices returned error: %v", err)
 	}
-	if service.startCalls != 1 || manager.storagePoolCalls != 1 || !redfishManager.started || !novnc.started {
-		t.Fatalf("service=%d storage=%d redfish=%v novnc=%v", service.startCalls, manager.storagePoolCalls, redfishManager.started, novnc.started)
+	if service.startCalls != 1 || manager.storagePoolCalls != 1 || !redfishManager.started || !ipmiManager.started || !novnc.started {
+		t.Fatalf("service=%d storage=%d redfish=%v ipmi=%v novnc=%v", service.startCalls, manager.storagePoolCalls, redfishManager.started, ipmiManager.started, novnc.started)
 	}
 	if redfishManager.request.SystemID != "vm1" {
 		t.Fatalf("redfish system id = %q", redfishManager.request.SystemID)
+	}
+	if ipmiManager.request.SystemID != "vm1" {
+		t.Fatalf("ipmi system id = %q", ipmiManager.request.SystemID)
 	}
 
 	if err := lifecycle.StopServices(context.Background(), config.VM{}); err != nil {
@@ -719,6 +736,9 @@ func TestConcreteLifecycleStartsServices(t *testing.T) {
 	}
 	if redfishProcess.stopCalls != 1 {
 		t.Fatalf("redfish stop calls = %d", redfishProcess.stopCalls)
+	}
+	if ipmiManager.stopCalls != 1 || ipmiProcess.stopCalls != 1 {
+		t.Fatalf("ipmi stop calls = %d process stop calls = %d", ipmiManager.stopCalls, ipmiProcess.stopCalls)
 	}
 }
 
@@ -2769,6 +2789,48 @@ func (p *fakeRedfishProcess) Stderr() string {
 }
 
 func (p *fakeRedfishProcess) Stop() error {
+	p.stopCalls++
+	return nil
+}
+
+type fakeIPMIManager struct {
+	started   bool
+	process   ipmi.Process
+	request   ipmi.Request
+	result    ipmi.Result
+	stopCalls int
+}
+
+func (m *fakeIPMIManager) Start(_ context.Context, req ipmi.Request) (ipmi.Result, error) {
+	m.started = true
+	m.request = req
+	if m.result.Started {
+		return m.result, nil
+	}
+	return ipmi.Result{Started: true, SystemID: req.SystemID, Process: m.process}, nil
+}
+
+func (m *fakeIPMIManager) Stop(ctx context.Context, result ipmi.Result) error {
+	m.stopCalls++
+	if result.Process != nil {
+		return result.Process.Stop()
+	}
+	return nil
+}
+
+type fakeIPMIProcess struct {
+	stopCalls int
+}
+
+func (p *fakeIPMIProcess) Running() bool {
+	return true
+}
+
+func (p *fakeIPMIProcess) Stderr() string {
+	return ""
+}
+
+func (p *fakeIPMIProcess) Stop() error {
 	p.stopCalls++
 	return nil
 }

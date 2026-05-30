@@ -1,6 +1,6 @@
 # Access
 
-`docker-vm-runner` can expose the VM through the serial console, SSH, VNC, noVNC, Redfish, and guest-exec.
+`docker-vm-runner` can expose the VM through the serial console, SSH, VNC, noVNC, Redfish, IPMI, and guest-exec.
 
 ## Serial console
 
@@ -193,3 +193,27 @@ curl -k -u admin:change-me https://localhost:8443/redfish/v1/
 ```
 
 The endpoint uses a self-signed certificate. Change `REDFISH_USERNAME` if you do not want to use the default `admin` user.
+
+## IPMI
+
+Enable IPMI with a non-default password:
+
+```bash
+docker run --rm -it \
+  --device /dev/kvm \
+  -p 623:623/udp \
+  -e IPMI_ENABLE=1 \
+  -e IPMI_PASSWORD='change-me' \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+The IPMI endpoint listens on UDP port `623` by default.
+
+Check power state with:
+
+```bash
+ipmitool -I lanplus -U admin -P change-me -H localhost -p 623 power status
+```
+
+Power and boot-device commands are handled by VirtualBMC through libvirt. Change `IPMI_USERNAME` if you do not want to use the default `admin` user.
