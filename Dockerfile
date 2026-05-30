@@ -20,12 +20,40 @@ RUN apt-get update \
         libvirt-dev \
         pkg-config \
         python3 \
+        python3-autopage \
+        python3-bcrypt \
+        python3-cliff \
+        python3-cmd2 \
+        python3-cryptography \
+        python3-dateutil \
         python3-dev \
+        python3-flask \
+        python3-libvirt \
+        python3-pbr \
+        python3-prettytable \
+        python3-pyghmi \
+        python3-pygments \
+        python3-requests \
+        python3-rich \
+        python3-rich-argparse \
+        python3-six \
+        python3-stevedore \
+        python3-tenacity \
         python3-venv \
+        python3-wcwidth \
+        python3-webob \
+        python3-yaml \
+        python3-zmq \
         tar \
         wget \
     && python3 -m venv --system-site-packages /opt/docker-vm-runner/.venv \
-    && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir sushy-tools virtualbmc \
+    && /opt/docker-vm-runner/.venv/bin/pip install --no-cache-dir --no-compile --no-deps sushy-tools virtualbmc \
+    && rm -rf /opt/docker-vm-runner/.venv/lib/python*/site-packages/pip* \
+              /opt/docker-vm-runner/.venv/lib/python*/site-packages/setuptools* \
+              /opt/docker-vm-runner/.venv/lib/python*/site-packages/_distutils_hack \
+              /opt/docker-vm-runner/.venv/lib/python*/site-packages/pkg_resources \
+    && find /opt/docker-vm-runner/.venv -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find /opt/docker-vm-runner/.venv -type f -name '*.pyc' -delete \
     && mkdir -p /usr/share/docker-vm-runner/novnc \
     && wget -qO- "https://github.com/novnc/noVNC/archive/refs/tags/v${NOVNC_VERSION}.tar.gz" \
         | tar -xz --strip-components=1 -C /usr/share/docker-vm-runner/novnc \
@@ -84,17 +112,29 @@ RUN apt-get update \
         libvirt-daemon-driver-qemu \
         libvirt-daemon-system \
         ovmf \
-        passt \
         python3 \
+        python3-autopage \
+        python3-bcrypt \
+        python3-cliff \
+        python3-cmd2 \
+        python3-cryptography \
+        python3-dateutil \
         python3-flask \
         python3-libvirt \
         python3-pbr \
+        python3-prettytable \
+        python3-pyghmi \
+        python3-pygments \
+        python3-requests \
+        python3-rich \
+        python3-rich-argparse \
+        python3-six \
+        python3-stevedore \
+        python3-tenacity \
+        python3-wcwidth \
         python3-webob \
-        qemu-system-x86 \
-        qemu-system-arm \
-        qemu-system-ppc \
-        qemu-system-s390x \
-        qemu-system-riscv \
+        python3-yaml \
+        python3-zmq \
         qemu-utils \
         swtpm \
         swtpm-tools \
@@ -110,7 +150,21 @@ RUN apt-get update \
              /usr/bin/qemu-system-s390x \
              /usr/bin/qemu-system-riscv32 \
              /usr/bin/qemu-system-riscv64 \
-    && rm -rf /usr/lib/cni /var/lib/apt/lists/*
+    && find /usr/lib/python3 /usr/lib/python3.13 -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find /usr/lib/python3 /usr/lib/python3.13 -type f -name '*.pyc' -delete \
+    && rm -rf /usr/lib/cni \
+              /usr/lib/file/magic.mgc \
+              /usr/lib/udev/hwdb.bin \
+              /usr/lib/udev/hwdb.d \
+              /usr/share/OVMF/OVMF_CODE_4M.secboot.strictnx.fd \
+              /usr/share/OVMF/OVMF_CODE_4M.snakeoil.fd \
+              /usr/share/OVMF/OVMF_VARS_4M.snakeoil.fd \
+              /usr/share/misc/enterprise-numbers.txt \
+              /usr/share/misc/magic.mgc \
+              /usr/share/ovmf \
+              /var/lib/apt/lists/*
+
+ENV PYTHONDONTWRITEBYTECODE=1
 
 COPY --from=go-builder /out/docker-vm-runner /usr/local/bin/docker-vm-runner
 COPY --from=go-builder /out/guest-exec /usr/local/bin/guest-exec
