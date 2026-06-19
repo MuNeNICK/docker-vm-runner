@@ -443,6 +443,11 @@ func (l *ConcreteLifecycle) WaitUntilStopped(ctx context.Context, _ config.VM) e
 	})
 }
 
+func (l *ConcreteLifecycle) WaitUntilExitRequested(ctx context.Context, _ config.VM) error {
+	<-ctx.Done()
+	return nil
+}
+
 func (l *ConcreteLifecycle) DomainStopped(context.Context, config.VM) (bool, error) {
 	return l.domainStopped()
 }

@@ -75,6 +75,7 @@ type VM struct {
 	VMName                 string
 	Persist                bool
 	ForceISO               bool
+	KeepAliveAfterVMStop   bool
 	SSHPubkey              string
 	RedfishUser            string
 	RedfishPassword        string
@@ -253,6 +254,10 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 	if ipmiEnabled && ipmiPassword == "password" {
 		return VM{}, fmt.Errorf("IPMI_PASSWORD must be changed when IPMI_ENABLE=1")
 	}
+	keepAliveAfterVMStop, err := env.Bool("KEEP_ALIVE_AFTER_VM_STOP", redfishEnabled || ipmiEnabled)
+	if err != nil {
+		return VM{}, err
+	}
 	bootMode, err := resolveBootModeSetting(env.Get("BOOT_MODE", "uefi"))
 	if err != nil {
 		return VM{}, err
@@ -413,6 +418,7 @@ func (r *Resolver) Resolve(env MapEnv) (VM, error) {
 		VMName:                 vmName,
 		Persist:                persist,
 		ForceISO:               forceISO,
+		KeepAliveAfterVMStop:   keepAliveAfterVMStop,
 		SSHPubkey:              env.Get("SSH_PUBKEY", ""),
 		RedfishUser:            env.Get("REDFISH_USERNAME", "admin"),
 		RedfishPassword:        redfishPassword,

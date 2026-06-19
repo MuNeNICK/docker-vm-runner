@@ -86,6 +86,15 @@ func (o Output) HeadlessWait() {
 	o.Info("Running headless: waiting until VM shuts down")
 }
 
+func (o Output) HeadlessKeepAlive() {
+	if o.Mode == OutputTerminal {
+		o.Info("Keeping runner alive after VM shutdown")
+		fmt.Fprintln(o.Stderr, "       VM power state no longer controls the container lifetime.")
+		return
+	}
+	o.Info("Keeping runner alive after VM shutdown; waiting for container stop")
+}
+
 func (o Output) DownloadProgress(progress download.Progress) {
 	if progress.RetryDelay > 0 && progress.Err != nil {
 		o.Warn(

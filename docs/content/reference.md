@@ -48,6 +48,7 @@ Streaming is implemented through QEMU guest agent file polling, not a PTY. Comma
 | `ARCH` | catalog value | Select the architecture when the catalog image does not define one. If the catalog image already has an architecture, `ARCH` must match it. Common aliases such as `amd64` and `arm64` are accepted. |
 | `GUEST_NAME` | derived | VM name used for persistent state and resource naming. |
 | `PERSIST` | automatic | Persist VM state. Defaults to enabled when `/data` is mounted. |
+| `KEEP_ALIVE_AFTER_VM_STOP` | `0`; `1` when Redfish or IPMI is enabled | Keep the runner container alive after the VM shuts down. Container shutdown still stops the VM and management endpoints. |
 | `MEMORY` | `4096` | VM memory. |
 | `CPUS` | `2` | Number of vCPUs. |
 | `DISK_SIZE` | `20G` | Working disk size. |

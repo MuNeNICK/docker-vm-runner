@@ -383,6 +383,9 @@ func TestResolveRedfish(t *testing.T) {
 	if cfg.RedfishUser != "operator" || cfg.RedfishPassword != "secret" || cfg.RedfishPort != 9443 {
 		t.Fatalf("redfish = %#v", cfg)
 	}
+	if !cfg.KeepAliveAfterVMStop {
+		t.Fatal("KeepAliveAfterVMStop = false")
+	}
 }
 
 func TestResolveRedfishRejectsDefaultPassword(t *testing.T) {
@@ -416,6 +419,9 @@ func TestResolveIPMI(t *testing.T) {
 	if cfg.IPMISystemID != cfg.VMName {
 		t.Fatalf("IPMISystemID = %q, VMName = %q", cfg.IPMISystemID, cfg.VMName)
 	}
+	if !cfg.KeepAliveAfterVMStop {
+		t.Fatal("KeepAliveAfterVMStop = false")
+	}
 }
 
 func TestResolveIPMIRejectsDefaultPassword(t *testing.T) {
@@ -426,6 +432,34 @@ func TestResolveIPMIRejectsDefaultPassword(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "IPMI_PASSWORD must be changed") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveKeepAliveAfterVMStop(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"KEEP_ALIVE_AFTER_VM_STOP": "1",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if !cfg.KeepAliveAfterVMStop {
+		t.Fatal("KeepAliveAfterVMStop = false")
+	}
+}
+
+func TestResolveKeepAliveAfterVMStopExplicitlyDisablesBMCDefault(t *testing.T) {
+	resolver, _ := testResolver(t)
+	cfg, err := resolver.Resolve(MapEnv{
+		"REDFISH_ENABLE":           "1",
+		"REDFISH_PASSWORD":         "secret",
+		"KEEP_ALIVE_AFTER_VM_STOP": "0",
+	})
+	if err != nil {
+		t.Fatalf("Resolve returned error: %v", err)
+	}
+	if cfg.KeepAliveAfterVMStop {
+		t.Fatal("KeepAliveAfterVMStop = true")
 	}
 }
 

@@ -292,6 +292,33 @@ func TestRunLifecycleTreatsGuestReadyFailureAsWarningInNoConsole(t *testing.T) {
 	}
 }
 
+func TestRunLifecycleKeepsAliveAfterVMStop(t *testing.T) {
+	lifecycle := &fakeLifecycle{domainStopped: true}
+	var stderr bytes.Buffer
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &stderr
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{
+		"DISTRO":                   "ubuntu-24.04-server",
+		"CLOUD_INIT":               "0",
+		"PERSIST":                  "1",
+		"KEEP_ALIVE_AFTER_VM_STOP": "1",
+	}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{NoConsole: true}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := "start-services,connect,prepare,start-vm,wait-exit-requested,domain-stopped,cleanup,close,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+	if !strings.Contains(stderr.String(), "Keeping runner alive after VM shutdown") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunLifecycleStartsGuestReadyLoggerForConsoleMode(t *testing.T) {
 	lifecycle := &fakeLifecycle{}
 	var stderr bytes.Buffer
@@ -311,6 +338,33 @@ func TestRunLifecycleStartsGuestReadyLoggerForConsoleMode(t *testing.T) {
 		}
 	}
 	if !strings.Contains(stderr.String(), "Waiting for guest readiness") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunLifecycleKeepsAliveAfterConsoleExit(t *testing.T) {
+	lifecycle := &fakeLifecycle{domainStopped: true}
+	var stderr bytes.Buffer
+	r := New()
+	r.Stdout = &bytes.Buffer{}
+	r.Stderr = &stderr
+	r.Resolver = &config.Resolver{DistroConfigPath: writeDistroConfig(t)}
+	r.Env = config.MapEnv{
+		"DISTRO":                   "ubuntu-24.04-server",
+		"CLOUD_INIT":               "0",
+		"PERSIST":                  "1",
+		"KEEP_ALIVE_AFTER_VM_STOP": "1",
+	}
+	r.Lifecycle = lifecycle
+
+	if err := r.Run(context.Background(), Options{}); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	want := "start-services,connect,prepare,start-vm,attach-console,domain-stopped,wait-exit-requested,domain-stopped,cleanup,close,stop-services"
+	if got := strings.Join(lifecycle.calls, ","); got != want {
+		t.Fatalf("calls = %s want %s", got, want)
+	}
+	if !strings.Contains(stderr.String(), "Keeping runner alive after VM shutdown") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
@@ -2981,6 +3035,10 @@ func (l *fakeLifecycle) WaitForGuestReady(context.Context, config.VM) error {
 }
 func (l *fakeLifecycle) WaitUntilStopped(context.Context, config.VM) error {
 	l.calls = append(l.calls, "wait-stopped")
+	return nil
+}
+func (l *fakeLifecycle) WaitUntilExitRequested(context.Context, config.VM) error {
+	l.calls = append(l.calls, "wait-exit-requested")
 	return nil
 }
 func (l *fakeLifecycle) DomainStopped(context.Context, config.VM) (bool, error) {

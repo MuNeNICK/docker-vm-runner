@@ -119,4 +119,4 @@ The current `docker-vm-runner` requires a non-default `IPMI_PASSWORD` when `IPMI
 
 The IPMI endpoint uses UDP port `623`; publish it with `/udp` when accessing it from the Docker host.
 
-The IPMI endpoint runs inside the same container as the VM. This example avoids `baremetal node power off` because powering off the VM also ends the container-side runner process that hosts the IPMI endpoint.
+The IPMI endpoint runs inside the same container as the VM. With IPMI enabled, the runner stays alive after VM shutdown so Ironic can power the VM back on. Stopping the container still stops both the VM and the IPMI endpoint.

@@ -130,4 +130,4 @@ The current `docker-vm-runner` requires a non-default `REDFISH_PASSWORD` when `R
 
 The Redfish endpoint uses a self-signed certificate, so Ironic is configured with `redfish_verify_ca=false`.
 
-The Redfish endpoint runs inside the same container as the VM. This example avoids `baremetal node power off` because powering off the VM also ends the container-side runner process that hosts the Redfish endpoint.
+The Redfish endpoint runs inside the same container as the VM. With Redfish enabled, the runner stays alive after VM shutdown so Ironic can power the VM back on. Stopping the container still stops both the VM and the Redfish endpoint.

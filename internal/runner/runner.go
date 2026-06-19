@@ -43,6 +43,7 @@ type Lifecycle interface {
 	StartVM(context.Context, config.VM) error
 	WaitForGuestReady(context.Context, config.VM) error
 	WaitUntilStopped(context.Context, config.VM) error
+	WaitUntilExitRequested(context.Context, config.VM) error
 	DomainStopped(context.Context, config.VM) (bool, error)
 	AttachConsole(context.Context, config.VM) (int, error)
 	MarkInstalled(context.Context, config.VM) error
@@ -403,7 +404,11 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		defer stopGuestReadyLog()
 	}
 	if opts.NoConsole {
-		output.HeadlessWait()
+		if cfg.KeepAliveAfterVMStop {
+			output.HeadlessKeepAlive()
+		} else {
+			output.HeadlessWait()
+		}
 		if cfg.CloudInitEnabled {
 			output.Step("Waiting for guest readiness")
 			if err := r.Lifecycle.WaitForGuestReady(ctx, cfg); err != nil {
@@ -412,10 +417,21 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 				output.Success("Guest ready; guest-exec is available")
 			}
 		}
-		if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
-			return err
+		if cfg.KeepAliveAfterVMStop {
+			if err := r.Lifecycle.WaitUntilExitRequested(ctx, cfg); err != nil {
+				return err
+			}
+			stopped, err := r.Lifecycle.DomainStopped(ctx, cfg)
+			if err != nil {
+				output.Warn("Could not determine VM state after exit request", err.Error())
+			}
+			vmStopped = stopped
+		} else {
+			if err := r.Lifecycle.WaitUntilStopped(ctx, cfg); err != nil {
+				return err
+			}
+			vmStopped = true
 		}
-		vmStopped = true
 	} else {
 		output.ConsoleAttach()
 		if code, err := r.Lifecycle.AttachConsole(ctx, cfg); err != nil {
@@ -426,6 +442,16 @@ func (r *Runner) runLifecycle(ctx context.Context, cfg config.VM, opts Options) 
 		stopped, err := r.Lifecycle.DomainStopped(ctx, cfg)
 		if err != nil {
 			output.Warn("Could not determine VM state after console exit", err.Error())
+		}
+		if cfg.KeepAliveAfterVMStop {
+			output.HeadlessKeepAlive()
+			if err := r.Lifecycle.WaitUntilExitRequested(ctx, cfg); err != nil {
+				return err
+			}
+			stopped, err = r.Lifecycle.DomainStopped(ctx, cfg)
+			if err != nil {
+				output.Warn("Could not determine VM state after exit request", err.Error())
+			}
 		}
 		vmStopped = stopped
 	}
@@ -688,6 +714,9 @@ func VMSummaryLines(cfg config.VM) []string {
 		}
 		lines = append(lines, "Devices  "+strings.Join(devices, ", "))
 	}
+	if cfg.KeepAliveAfterVMStop {
+		lines = append(lines, "Runner   keep alive after VM stop")
+	}
 	return lines
 }
 
@@ -718,6 +747,9 @@ func DryRunLines(cfg config.VM, info hostinfo.Info) []string {
 		lines = append(lines, "Persistence enabled")
 	} else {
 		lines = append(lines, "Persistence disabled (ephemeral)")
+	}
+	if cfg.KeepAliveAfterVMStop {
+		lines = append(lines, "Runner      keep alive after VM stop")
 	}
 	if cfg.CloudInitEnabled {
 		lines = append(lines, "Cloud-init  enabled (user="+cfg.LoginUser+")")

@@ -194,6 +194,8 @@ curl -k -u admin:change-me https://localhost:8443/redfish/v1/
 
 The endpoint uses a self-signed certificate. Change `REDFISH_USERNAME` if you do not want to use the default `admin` user.
 
+When Redfish is enabled, `KEEP_ALIVE_AFTER_VM_STOP` defaults to `1`. The VM can be powered off or reset through Redfish while the runner container and Redfish endpoint stay available. Stopping the container still stops the VM and the endpoint. Set `KEEP_ALIVE_AFTER_VM_STOP=0` to restore the default VM-lifetime behavior.
+
 ## IPMI
 
 Enable IPMI with a non-default password:
@@ -217,3 +219,5 @@ ipmitool -I lanplus -U admin -P change-me -H localhost -p 623 power status
 ```
 
 Power and boot-device commands are handled by VirtualBMC through libvirt. Change `IPMI_USERNAME` if you do not want to use the default `admin` user.
+
+When IPMI is enabled, `KEEP_ALIVE_AFTER_VM_STOP` defaults to `1`. The VM can be powered off or reset through IPMI while the runner container and IPMI endpoint stay available. Stopping the container still stops the VM and the endpoint. Set `KEEP_ALIVE_AFTER_VM_STOP=0` to restore the default VM-lifetime behavior.
