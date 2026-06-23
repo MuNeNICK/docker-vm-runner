@@ -20,6 +20,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/archive"
 	"github.com/munenick/docker-vm-runner/internal/config"
 	"github.com/munenick/docker-vm-runner/internal/console"
+	"github.com/munenick/docker-vm-runner/internal/containerbridge"
 	"github.com/munenick/docker-vm-runner/internal/domain"
 	"github.com/munenick/docker-vm-runner/internal/download"
 	"github.com/munenick/docker-vm-runner/internal/firmware"
@@ -28,6 +29,7 @@ import (
 	"github.com/munenick/docker-vm-runner/internal/images"
 	"github.com/munenick/docker-vm-runner/internal/ipmi"
 	"github.com/munenick/docker-vm-runner/internal/libvirtmgr"
+	"github.com/munenick/docker-vm-runner/internal/network"
 	"github.com/munenick/docker-vm-runner/internal/oci"
 	"github.com/munenick/docker-vm-runner/internal/password"
 	"github.com/munenick/docker-vm-runner/internal/paths"
@@ -43,31 +45,32 @@ import (
 )
 
 type ConcreteLifecycle struct {
-	Layout          paths.Layout
-	LibvirtURI      string
-	RedfishPool     libvirtmgr.StoragePoolRequest
-	CommandRunner   process.CommandRunner
-	Manager         libvirtManager
-	Domain          libvirtmgr.Domain
-	Service         serviceSupervisor
-	Redfish         redfishManager
-	IPMI            ipmiManager
-	NoVNC           novncProxy
-	TPM             tpmSupervisor
-	Console         consoleRunner
-	GuestClient     guestexec.Client
-	Sleep           func(context.Context, time.Duration) error
-	EnsureEmulator  func(context.Context, string) error
-	KVMAvailable    func() bool
-	BlockSectorSize func(string) (int, bool)
-	IPv6Available   func() bool
-	CPUVendor       func() string
-	CPUFlags        func() map[string]bool
-	TerminalSize    func() (int, int, bool)
-	Notify          func(chan<- os.Signal, ...os.Signal)
-	StopNotify      func(chan<- os.Signal)
-	Status          io.Writer
-	Output          *Output
+	Layout                  paths.Layout
+	LibvirtURI              string
+	RedfishPool             libvirtmgr.StoragePoolRequest
+	CommandRunner           process.CommandRunner
+	Manager                 libvirtManager
+	Domain                  libvirtmgr.Domain
+	Service                 serviceSupervisor
+	Redfish                 redfishManager
+	IPMI                    ipmiManager
+	NoVNC                   novncProxy
+	TPM                     tpmSupervisor
+	Console                 consoleRunner
+	GuestClient             guestexec.Client
+	Sleep                   func(context.Context, time.Duration) error
+	EnsureEmulator          func(context.Context, string) error
+	KVMAvailable            func() bool
+	BlockSectorSize         func(string) (int, bool)
+	IPv6Available           func() bool
+	CPUVendor               func() string
+	CPUFlags                func() map[string]bool
+	TerminalSize            func() (int, int, bool)
+	Notify                  func(chan<- os.Signal, ...os.Signal)
+	StopNotify              func(chan<- os.Signal)
+	PrepareContainerNetwork func(context.Context, network.Config) error
+	Status                  io.Writer
+	Output                  *Output
 
 	workImagePath  string
 	seedISOPath    string
@@ -333,10 +336,36 @@ func (l *ConcreteLifecycle) Prepare(ctx context.Context, cfg config.VM) error {
 			return err
 		}
 	}
+	if err := l.prepareContainerNetworks(ctx, cfg); err != nil {
+		return err
+	}
 	l.vmDir = vmDir
 	l.currentConfig = cfg
 	l.disablePasst = false
 	return l.defineDomain(ctx, cfg, vmDir)
+}
+
+func (l *ConcreteLifecycle) prepareContainerNetworks(ctx context.Context, cfg config.VM) error {
+	for _, nic := range cfg.NICs {
+		if nic.Mode != "container" {
+			continue
+		}
+		prepare := l.PrepareContainerNetwork
+		if prepare == nil {
+			prepare = l.prepareContainerNetwork
+		}
+		if err := prepare(ctx, nic); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (l *ConcreteLifecycle) prepareContainerNetwork(ctx context.Context, nic network.Config) error {
+	return containerbridge.Ensure(ctx, &l.CommandRunner, containerbridge.Request{
+		Interface: nic.ContainerInterface,
+		Bridge:    nic.BridgeName,
+	})
 }
 
 func (l *ConcreteLifecycle) defineDomain(ctx context.Context, cfg config.VM, vmDir string) error {

@@ -674,6 +674,9 @@ func VMSummaryLines(cfg config.VM) []string {
 			if mode == "user" {
 				mode = "user mode"
 			}
+			if mode == "container" {
+				mode = fmt.Sprintf("container(%s)", nic.ContainerInterface)
+			}
 			networkLines = append(networkLines, fmt.Sprintf("%s, %s", mode, nic.Model))
 		}
 		lines = append(lines, "Network  "+strings.Join(networkLines, "; "))
@@ -772,7 +775,11 @@ func DryRunLines(cfg config.VM, info hostinfo.Info) []string {
 		if mac == "" {
 			mac = "auto"
 		}
-		lines = append(lines, fmt.Sprintf("NIC #%d     mode=%s, model=%s, mac=%s", i+1, nic.Mode, nic.Model, mac))
+		detail := fmt.Sprintf("mode=%s, model=%s, mac=%s", nic.Mode, nic.Model, mac)
+		if nic.Mode == "container" {
+			detail += fmt.Sprintf(", interface=%s, bridge=%s", nic.ContainerInterface, nic.BridgeName)
+		}
+		lines = append(lines, fmt.Sprintf("NIC #%d     %s", i+1, detail))
 	}
 	lines = append(lines, "Result      no VM started")
 	return lines

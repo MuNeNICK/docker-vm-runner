@@ -138,7 +138,10 @@ docker run --rm -it \
 
 `IPXE_ENABLE=1` injects an iPXE ROM into the primary NIC and moves `network` to the front of the boot order.
 
-Bridge or Direct networking is the practical choice for real PXE environments because the guest needs to reach your upstream DHCP/TFTP/HTTP services. NAT can be used for simple tests, but it relies on user-mode networking and is usually not the right path for infrastructure PXE.
+Bridge, Container, or Direct networking is the practical choice for real PXE
+environments because the guest needs to reach your upstream DHCP/TFTP/HTTP
+services. NAT can be used for simple tests, but it relies on user-mode
+networking and is usually not the right path for infrastructure PXE.
 
 ## Custom iPXE ROM
 

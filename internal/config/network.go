@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"regexp"
@@ -13,6 +15,7 @@ import (
 )
 
 var macAddressPattern = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
+var linuxInterfaceNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,15}$`)
 
 type NetworkConfig struct {
 	NICs         []network.Config
@@ -104,7 +107,7 @@ func parseNIC(env MapEnv, opts NetworkParseOptions, index int) (network.Config, 
 
 	mode, err := normalizeNetworkMode(modeRaw)
 	if err != nil {
-		return network.Config{}, indexedError("Unsupported NETWORK%s_MODE %q. Expected one of nat, bridge, direct.", index, modeRaw)
+		return network.Config{}, indexedError("Unsupported NETWORK%s_MODE %q. Expected one of nat, bridge, container, direct.", index, modeRaw)
 	}
 
 	nic := network.Config{Mode: mode}
@@ -114,6 +117,24 @@ func parseNIC(env MapEnv, opts NetworkParseOptions, index int) (network.Config, 
 			return network.Config{}, indexedError("NETWORK%s_BRIDGE is required when NETWORK%s_MODE=bridge", index, index)
 		}
 		nic.BridgeName = strings.TrimSpace(bridge)
+	}
+	if mode == "container" {
+		containerInterface, ok := lookupIndexed(env, "NETWORK_CONTAINER_INTERFACE", index)
+		if !ok || strings.TrimSpace(containerInterface) == "" {
+			return network.Config{}, indexedError("NETWORK%s_CONTAINER_INTERFACE is required when NETWORK%s_MODE=container", index, index)
+		}
+		nic.ContainerInterface = strings.TrimSpace(containerInterface)
+		if !linuxInterfaceNamePattern.MatchString(nic.ContainerInterface) {
+			return network.Config{}, indexedError("Invalid NETWORK%s_CONTAINER_INTERFACE %q. Use a Linux interface name such as eth1", index, nic.ContainerInterface)
+		}
+		if bridge, ok := lookupIndexed(env, "NETWORK_CONTAINER_BRIDGE", index); ok && strings.TrimSpace(bridge) != "" {
+			nic.BridgeName = strings.TrimSpace(bridge)
+			if !linuxInterfaceNamePattern.MatchString(nic.BridgeName) {
+				return network.Config{}, indexedError("Invalid NETWORK%s_CONTAINER_BRIDGE %q. Use a Linux interface name up to 15 characters", index, nic.BridgeName)
+			}
+		} else {
+			nic.BridgeName = containerBridgeName(opts.VMName, index, nic.ContainerInterface)
+		}
 	}
 	if mode == "direct" {
 		device, ok := lookupIndexed(env, "NETWORK_DIRECT_DEV", index)
@@ -184,6 +205,8 @@ func normalizeNetworkMode(raw string) (string, error) {
 		return "user", nil
 	case "bridge":
 		return "bridge", nil
+	case "container":
+		return "container", nil
 	case "direct":
 		return "direct", nil
 	default:
@@ -205,6 +228,12 @@ func lookupIndexed(env MapEnv, base string, index int) (string, bool) {
 func lookupIndexedValue(env MapEnv, base string, index int) string {
 	value, _ := lookupIndexed(env, base, index)
 	return value
+}
+
+func containerBridgeName(vmName string, index int, containerInterface string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%s", vmName, index, containerInterface)))
+	encoded := hex.EncodeToString(sum[:])
+	return fmt.Sprintf("dvr%d%s", index, encoded[:8])
 }
 
 func parseGuestAddresses(raw string, family int, index int) ([]network.GuestAddress, error) {

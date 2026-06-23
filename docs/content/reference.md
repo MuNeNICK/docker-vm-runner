@@ -123,8 +123,10 @@ The first NIC uses unnumbered variables. Additional NICs use `NETWORK2_...`, `NE
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `NETWORK_MODE` | `nat` | Network mode: `nat`, `bridge`, or `direct`. |
+| `NETWORK_MODE` | `nat` | Network mode: `nat`, `bridge`, `container`, or `direct`. |
 | `NETWORK_BRIDGE` | empty | Bridge name when `NETWORK_MODE=bridge`. |
+| `NETWORK_CONTAINER_INTERFACE` | empty | Container-visible interface to attach to a VM bridge when `NETWORK_MODE=container`. |
+| `NETWORK_CONTAINER_BRIDGE` | generated | Linux bridge name created inside the container when `NETWORK_MODE=container`. |
 | `NETWORK_DIRECT_DEV` | empty | Host device when `NETWORK_MODE=direct`. |
 | `NETWORK_MAC` | derived | MAC address. |
 | `NETWORK_MODEL` | `virtio` | NIC model. |

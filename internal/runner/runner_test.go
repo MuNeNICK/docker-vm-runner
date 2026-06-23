@@ -875,6 +875,63 @@ func TestConcreteLifecyclePrepareDefinesDomain(t *testing.T) {
 	}
 }
 
+func TestConcreteLifecyclePrepareContainerNetwork(t *testing.T) {
+	layout := testLayout(t)
+	if err := os.MkdirAll(layout.BaseImagesDir, 0o755); err != nil {
+		t.Fatalf("mkdir base: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(layout.BaseImagesDir, cacheName("ubuntu")+".qcow2"), []byte("base"), 0o644); err != nil {
+		t.Fatalf("write base image: %v", err)
+	}
+	installFakeQEMUImgWithInfo(t, 1*1024*1024*1024)
+	manager := &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}
+	lifecycle := NewConcreteLifecycle(layout)
+	lifecycle.Manager = manager
+	lifecycle.TPM = nil
+	lifecycle.EnsureEmulator = func(context.Context, string) error { return nil }
+	var prepared []network.Config
+	lifecycle.PrepareContainerNetwork = func(_ context.Context, nic network.Config) error {
+		prepared = append(prepared, nic)
+		return nil
+	}
+
+	err := lifecycle.Prepare(context.Background(), config.VM{
+		Distro:         "ubuntu",
+		VMName:         "vm1",
+		Arch:           "x86_64",
+		BootMode:       "legacy",
+		ImageFormat:    "qcow2",
+		CPUModel:       "qemu64",
+		MemoryMB:       1024,
+		CPUs:           1,
+		DiskSize:       "10G",
+		BootOrder:      []string{"network", "hd"},
+		MachineType:    "q35",
+		DiskController: "virtio",
+		DiskCache:      "none",
+		DiskIO:         "native",
+		NICs: []network.Config{{
+			Mode:               "container",
+			ContainerInterface: "eth1",
+			BridgeName:         "dvr1abcd",
+			Model:              "virtio",
+			Boot:               true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Prepare returned error: %v", err)
+	}
+	if len(prepared) != 1 {
+		t.Fatalf("prepared container NIC count = %d", len(prepared))
+	}
+	if prepared[0].ContainerInterface != "eth1" || prepared[0].BridgeName != "dvr1abcd" {
+		t.Fatalf("prepared NIC = %#v", prepared[0])
+	}
+	if !strings.Contains(manager.definedXML, `<source bridge="dvr1abcd"/>`) {
+		t.Fatalf("defined XML missing container bridge:\n%s", manager.definedXML)
+	}
+}
+
 func TestConcreteLifecyclePrepareRequiresKVM(t *testing.T) {
 	lifecycle := NewConcreteLifecycle(testLayout(t))
 	lifecycle.Manager = &fakeLibvirtManager{domain: &fakeLibvirtDomain{name: "vm1"}}

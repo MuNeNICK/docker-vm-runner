@@ -2,7 +2,9 @@
 
 The default network is NAT. It works well for the same workflow as `docker run`: start a VM, publish the ports you need, and keep the host network unchanged.
 
-Bridge and direct modes are available when you want the VM to join a network more like a normal machine. Those modes depend on host networking, so their Docker options are different from the default NAT examples.
+Bridge, container, and direct modes are available when you want the VM to join a
+network more like a normal machine. Those modes need Docker options that allow
+the runner to create or attach low-level network devices.
 
 ## Default NAT
 
@@ -54,7 +56,8 @@ Use comma-separated values for multiple forwards:
 -e PORT_FWD=8080:80,8443:443
 ```
 
-`PORT_FWD` applies to NAT NICs only. If every NIC is bridge or direct, there is no user-mode NAT device to own the forwarded port.
+`PORT_FWD` applies to NAT NICs only. If every NIC is bridge, container, or
+direct, there is no user-mode NAT device to own the forwarded port.
 
 ## Multiple NICs
 
@@ -72,6 +75,61 @@ docker run --rm \
 ```
 
 This pattern keeps `SSH_PORT` and `PORT_FWD` available on the NAT NIC while the second NIC joins the bridge.
+
+## Container Mode
+
+Container mode connects the VM NIC to a Docker network that the
+`docker-vm-runner` container has already joined. Use it when a Compose service
+has more than one Docker network and one of those container-visible interfaces
+should become the VM's data-plane NIC.
+
+Container mode does not take a Docker network name. Pass the interface name as
+seen inside the runner container, such as `eth1`.
+
+Required variables:
+
+```bash
+-e NETWORK_MODE=container
+-e NETWORK_CONTAINER_INTERFACE=eth1
+```
+
+The runner creates a Linux bridge inside the container, enslaves `eth1` to that
+bridge, and connects the VM tap device to it. If the interface has IP addresses
+or routes, the runner moves them to the in-container bridge so the container can
+keep using that Docker network.
+
+Preview the configuration:
+
+```bash
+docker run --rm \
+  --network my-provisioning-network \
+  -e DISTRO=alpine-3.22-cloud-amd64 \
+  -e NETWORK_MODE=container \
+  -e NETWORK_CONTAINER_INTERFACE=eth0 \
+  ghcr.io/munenick/docker-vm-runner:latest --show-config
+```
+
+To boot with container mode, allow the runner to create a bridge and tap device
+inside the container:
+
+```bash
+docker run -d --name docker-vm-runner-container-net \
+  --network my-provisioning-network \
+  --cap-add NET_ADMIN \
+  --device /dev/kvm \
+  --device /dev/net/tun \
+  --device /dev/vhost-net \
+  -e NETWORK_MODE=container \
+  -e NETWORK_CONTAINER_INTERFACE=eth0 \
+  -e NO_CONSOLE=1 \
+  -v docker-vm-runner-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+For Compose files with multiple Docker networks, set
+`NETWORK_CONTAINER_INTERFACE` to the interface that belongs to the network you
+want the VM NIC to join. Use `docker exec <container> ip -br link` to inspect
+the interface names.
 
 ## Bridge Mode
 
@@ -190,6 +248,8 @@ Use these variables when the guest or network requires fixed interface propertie
 | `NETWORK_MTU` | Set the NIC MTU. |
 | `NETWORK_GUEST_IP` | Set guest IPv4 addresses for NAT mode. |
 | `NETWORK_GUEST_IP6` | Set guest IPv6 addresses for NAT mode. |
+| `NETWORK_CONTAINER_INTERFACE` | Select the container-visible interface for container mode. |
+| `NETWORK_CONTAINER_BRIDGE` | Override the generated in-container bridge name for container mode. |
 | `NETWORK_BOOT` | Mark the NIC as bootable for network boot flows. |
 
 See [Reference](reference.md#network-variables) for the complete variable list.

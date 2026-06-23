@@ -193,6 +193,29 @@ docker run -d --name bridge-vm \
 
 Connect to the guest through the address it receives on the bridged network.
 
+## Compose Network VM With Container Mode
+
+Use Container mode when the runner container is attached to a Docker network and
+the VM NIC should join that same network.
+
+```bash
+docker run -d --name container-net-vm \
+  --network provisioning-net \
+  --cap-add NET_ADMIN \
+  --device /dev/kvm \
+  --device /dev/net/tun \
+  --device /dev/vhost-net \
+  -e DISTRO=ubuntu-24.04-cloud-amd64 \
+  -e NETWORK_MODE=container \
+  -e NETWORK_CONTAINER_INTERFACE=eth0 \
+  -e NO_CONSOLE=1 \
+  -v container-net-vm-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
+Use the interface name from inside the container. In multi-network Compose
+setups, inspect it with `docker exec <container> ip -br link`.
+
 ## Physical Network VM With Direct
 
 Use Direct when the VM needs a real address through a physical NIC but you do not want to create a host bridge.
@@ -241,7 +264,8 @@ docker run --rm -it \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
-Use the bridge or direct network mode that reaches your DHCP/TFTP/HTTP boot services.
+Use the bridge, container, or direct network mode that reaches your
+DHCP/TFTP/HTTP boot services.
 
 ## Share A Host Directory
 

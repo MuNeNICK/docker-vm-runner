@@ -209,6 +209,31 @@ func TestRenderBridgeNetworkNonVirtioOmitsVhost(t *testing.T) {
 	requireElement(t, doc, "model", map[string]string{"type": "e1000"})
 }
 
+func TestRenderContainerNetwork(t *testing.T) {
+	doc, _, err := RenderInterface(Config{
+		Mode:               "container",
+		ContainerInterface: "eth1",
+		BridgeName:         "dvr1abcd",
+		MACAddress:         "52:54:00:11:22:33",
+	}, RenderOptions{})
+	if err != nil {
+		t.Fatalf("RenderInterface: %v", err)
+	}
+	requireElement(t, doc, "interface", map[string]string{"type": "bridge"})
+	requireElement(t, doc, "source", map[string]string{"bridge": "dvr1abcd"})
+	requireElement(t, doc, "driver", map[string]string{"name": "vhost"})
+}
+
+func TestRenderContainerNetworkRequiresInterface(t *testing.T) {
+	_, _, err := RenderInterface(Config{Mode: "container", BridgeName: "dvr1abcd"}, RenderOptions{})
+	if err == nil {
+		t.Fatal("expected container interface error")
+	}
+	if !strings.Contains(err.Error(), "NETWORK_CONTAINER_INTERFACE must be set") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRenderDirectNetwork(t *testing.T) {
 	doc, _, err := RenderInterface(Config{Mode: "direct", DirectDevice: "eth0", MACAddress: "52:54:00:11:22:33"}, RenderOptions{})
 	if err != nil {

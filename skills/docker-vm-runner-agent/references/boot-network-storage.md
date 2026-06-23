@@ -105,6 +105,24 @@ docker run -d --name bridge-vm \
   ghcr.io/munenick/docker-vm-runner:latest
 ```
 
+Container mode attaches the VM NIC to a Docker network interface that is visible
+inside the runner container:
+
+```bash
+docker run -d --name container-net-vm \
+  --network provisioning-net \
+  --cap-add NET_ADMIN \
+  --device /dev/kvm \
+  --device /dev/net/tun \
+  --device /dev/vhost-net \
+  -e DISTRO=ubuntu-24.04-cloud-amd64 \
+  -e NETWORK_MODE=container \
+  -e NETWORK_CONTAINER_INTERFACE=eth0 \
+  -e NO_CONSOLE=1 \
+  -v container-net-vm-data:/data \
+  ghcr.io/munenick/docker-vm-runner:latest
+```
+
 Direct mode attaches a VM NIC to a host interface through macvtap:
 
 ```bash

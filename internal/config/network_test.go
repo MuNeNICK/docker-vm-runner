@@ -78,6 +78,63 @@ func TestParseNetworkBridgeNIC(t *testing.T) {
 	}
 }
 
+func TestParseNetworkContainerRequiresInterface(t *testing.T) {
+	_, err := ParseNetwork(MapEnv{"NETWORK_MODE": "container"}, NetworkParseOptions{
+		VMName:        "vm",
+		DetectHostMTU: func() int { return 1500 },
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "NETWORK_CONTAINER_INTERFACE is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestParseNetworkContainerNIC(t *testing.T) {
+	cfg, err := ParseNetwork(MapEnv{
+		"NETWORK_MODE":                "container",
+		"NETWORK_CONTAINER_INTERFACE": "eth1",
+	}, NetworkParseOptions{
+		VMName:        "vm",
+		DetectHostMTU: func() int { return 1500 },
+	})
+	if err != nil {
+		t.Fatalf("ParseNetwork returned error: %v", err)
+	}
+	nic := cfg.NICs[0]
+	if nic.Mode != "container" {
+		t.Fatalf("Mode = %q", nic.Mode)
+	}
+	if nic.ContainerInterface != "eth1" {
+		t.Fatalf("ContainerInterface = %q", nic.ContainerInterface)
+	}
+	if nic.BridgeName == "" || len(nic.BridgeName) > 15 {
+		t.Fatalf("BridgeName = %q", nic.BridgeName)
+	}
+}
+
+func TestParseNetworkContainerNICExplicitBridge(t *testing.T) {
+	cfg, err := ParseNetwork(MapEnv{
+		"NETWORK2_MODE":                "container",
+		"NETWORK2_CONTAINER_INTERFACE": "eth2",
+		"NETWORK2_CONTAINER_BRIDGE":    "provbr",
+	}, NetworkParseOptions{
+		VMName:        "vm",
+		DetectHostMTU: func() int { return 1500 },
+	})
+	if err != nil {
+		t.Fatalf("ParseNetwork returned error: %v", err)
+	}
+	if len(cfg.NICs) != 2 {
+		t.Fatalf("NIC count = %d", len(cfg.NICs))
+	}
+	nic := cfg.NICs[1]
+	if nic.Mode != "container" || nic.ContainerInterface != "eth2" || nic.BridgeName != "provbr" {
+		t.Fatalf("secondary NIC = %#v", nic)
+	}
+}
+
 func TestParseNetworkDirectRequiresDevice(t *testing.T) {
 	_, err := ParseNetwork(MapEnv{"NETWORK_MODE": "direct"}, NetworkParseOptions{
 		VMName:        "vm",

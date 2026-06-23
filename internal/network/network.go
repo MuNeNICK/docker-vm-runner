@@ -21,15 +21,16 @@ type PortForward struct {
 }
 
 type Config struct {
-	Mode         string
-	BridgeName   string
-	DirectDevice string
-	MACAddress   string
-	Model        string
-	Boot         bool
-	MTU          *int
-	GuestIPv4    []GuestAddress
-	GuestIPv6    []GuestAddress
+	Mode               string
+	BridgeName         string
+	DirectDevice       string
+	ContainerInterface string
+	MACAddress         string
+	Model              string
+	Boot               bool
+	MTU                *int
+	GuestIPv4          []GuestAddress
+	GuestIPv6          []GuestAddress
 }
 
 type RenderOptions struct {
@@ -67,6 +68,14 @@ func RenderInterface(cfg Config, opts RenderOptions) (string, string, error) {
 	case "bridge":
 		if cfg.BridgeName == "" {
 			return "", "", fmt.Errorf("NETWORK_BRIDGE must be set when NETWORK_MODE=bridge")
+		}
+		renderBridge(&b, cfg, opts, mac, model)
+	case "container":
+		if cfg.ContainerInterface == "" {
+			return "", "", fmt.Errorf("NETWORK_CONTAINER_INTERFACE must be set when NETWORK_MODE=container")
+		}
+		if cfg.BridgeName == "" {
+			return "", "", fmt.Errorf("NETWORK_CONTAINER_BRIDGE must be set when NETWORK_MODE=container")
 		}
 		renderBridge(&b, cfg, opts, mac, model)
 	case "direct":
